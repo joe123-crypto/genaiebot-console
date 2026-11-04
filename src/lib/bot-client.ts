@@ -113,6 +113,52 @@ async function readRemote<T>(route: string, params: URLSearchParams): Promise<T>
   return (await response.json()) as T;
 }
 
+/**
+ * Why a shape check stands between the adapters and the screens.
+ *
+ * Both adapters end in a bare cast, so a bridge older than the payload these
+ * screens expect goes straight through. The damage is not a blank page: a
+ * missing `enabled` reads as `undefined`, which is falsy, which every screen
+ * understands as "switched off". A console one commit behind therefore reports
+ * all ten campaigns dead and an empty schedule, confidently and without error.
+ * An inverted answer is worse than no answer, so a payload that cannot support
+ * the screens is refused here and surfaces as the BotError card instead.
+ */
+function staleBridge(missing: string): never {
+  const remedy =
+    BOT_SOURCE === "remote"
+      ? `the console API at ${BOT_API_BASE_URL} is serving an older read bridge — redeploy the gateway`
+      : `the read bridge at ${BRIDGE} is older than this console expects — git -C ${GENAEBOT_CHECKOUT} pull --ff-only`;
+  throw new BotUnavailableError(`${missing}; ${remedy}`);
+}
+
+function requireCampaigns(campaigns: unknown, where: string) {
+  if (!Array.isArray(campaigns)) staleBridge(`${where} carried no campaigns array`);
+  for (const campaign of campaigns) {
+    if (typeof campaign?.enabled !== "boolean") {
+      staleBridge(`${where} omits enabled on campaign ${campaign?.slug ?? "?"}`);
+    }
+  }
+}
+
+/** Only the fields a screen would silently misread are checked. Everything
+ *  else fails visibly on its own. Exported so the contract can be tested
+ *  without standing up either adapter. */
+export function checkShape(route: string, payload: unknown): void {
+  const body = payload as Record<string, unknown>;
+  if (route === "overview") return requireCampaigns(body?.campaigns, "overview");
+  if (route === "campaigns") return requireCampaigns(body?.campaigns, "campaigns");
+  if (route === "groups") {
+    if (!Array.isArray(body?.disabledPromos)) {
+      staleBridge("groups omits disabledPromos");
+    }
+    return;
+  }
+  if (route.startsWith("preview/") && typeof body?.enabled !== "boolean") {
+    staleBridge(`${route} omits enabled`);
+  }
+}
+
 function query(date?: string) {
   const params = new URLSearchParams();
   if (date) params.set("date", date);
@@ -128,9 +174,14 @@ function localArgs(command: string, date?: string, slug?: string) {
 
 async function read<T>(command: string, date?: string, slug?: string): Promise<T> {
   const route = slug ? `${command}/${slug}` : command;
-  return BOT_SOURCE === "remote"
-    ? readRemote<T>(route, query(date))
-    : readLocal<T>(localArgs(command, date, slug));
+  const payload =
+    BOT_SOURCE === "remote"
+      ? await readRemote<T>(route, query(date))
+      : await readLocal<T>(localArgs(command, date, slug));
+  // One gate for both adapters, so neither can serve a shape the other would
+  // have been refused for.
+  checkShape(route, payload);
+  return payload;
 }
 
 export function getOverview(date?: string) {

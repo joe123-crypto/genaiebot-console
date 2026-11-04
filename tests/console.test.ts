@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { attentionItems, daySlots } from "@/src/domains/console";
-import type { Campaign, Overview } from "@/src/lib/types";
+import { attentionItems, daySlots, lineSummaries } from "@/src/domains/console";
+import type { Campaign, Group, Overview } from "@/src/lib/types";
 
 function campaign(partial: Partial<Campaign>): Campaign {
   return {
@@ -118,5 +118,73 @@ describe("daySlots", () => {
     );
     expect(slots.map((slot) => slot.slug)).toEqual(["early", "late"]);
     expect(slots[0].time).toBe("07:15");
+  });
+});
+
+function group(partial: Partial<Group>): Group {
+  return {
+    jid: "1@g.us",
+    name: "A group",
+    source: "whatsapp",
+    status: "active",
+    activity: "normal",
+    account: "default",
+    dailyCapOverride: null,
+    promos: [],
+    weekly: {},
+    note: null,
+    cap: 2,
+    replyScore: null,
+    allowedToday: [],
+    ...partial,
+  };
+}
+
+describe("lineSummaries", () => {
+  it("counts only the campaigns a line actually posts", () => {
+    const [line] = lineSummaries(
+      overview({}),
+      [
+        group({ jid: "1@g.us", promos: ["genaie", "cv"] }),
+        group({ jid: "2@g.us", promos: ["cv"] }),
+      ],
+      ["cv"],
+    );
+    expect(line.campaignCount).toBe(1);
+  });
+
+  it("still lists the switched-off campaign, flagged, because it is configured", () => {
+    const [line] = lineSummaries(
+      overview({}),
+      [group({ promos: ["genaie", "cv"] })],
+      ["cv"],
+    );
+    expect(line.promos.map((promo) => [promo.slug, promo.off])).toEqual(
+      expect.arrayContaining([
+        ["genaie", false],
+        ["cv", true],
+      ]),
+    );
+  });
+
+  it("reports nothing posted when every configured campaign is off", () => {
+    const [line] = lineSummaries(overview({}), [group({ promos: ["cv"] })], ["cv"]);
+    expect(line.campaignCount).toBe(0);
+    expect(line.promos).toHaveLength(1);
+  });
+
+  it("ignores groups belonging to another line, and groups not advertising", () => {
+    const [line] = lineSummaries(
+      overview({}),
+      [
+        group({ jid: "1@g.us", promos: ["genaie"] }),
+        group({ jid: "2@g.us", account: "ads", promos: ["genaie", "fruit-trees"] }),
+        group({ jid: "3@g.us", status: "on-hold", promos: ["skylight-solar"] }),
+      ],
+      [],
+    );
+    expect(line.groupCount).toBe(2);
+    expect(line.advertisingCount).toBe(1);
+    expect(line.promos.map((promo) => promo.slug)).toEqual(["genaie"]);
   });
 });
