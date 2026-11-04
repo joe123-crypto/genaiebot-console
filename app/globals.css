@@ -346,6 +346,10 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 
 .tag-on { background: var(--primary-soft); border-color: var(--primary-border); color: #1a5bb5; }
 
+/* A campaign the manifest switches off. Struck through rather than merely
+   muted, so it cannot be mistaken for one today's cap happened to hold back. */
+.tag-off { text-decoration: line-through; opacity: 0.6; }
+
 /* ------------------------------------------------------------- timeline ---- */
 
 .timeline { display: flex; flex-direction: column; gap: 2px; }

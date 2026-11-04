@@ -33,6 +33,9 @@ export type Tracking = {
 export type Campaign = {
   slug: string;
   name: string;
+  /** False when the manifest switches the campaign off: it is still declared
+   *  and still has copy, but installs no cron and so never posts. */
+  enabled: boolean;
   cron: string;
   hour: number | null;
   minute: number | null;
@@ -85,7 +88,17 @@ export type PreviewRow = {
 
 export type CampaignPreview = {
   slug: string;
+  enabled: boolean;
   captions: string[];
   tracking: Tracking;
   groups: PreviewRow[];
+};
+
+/** The groups payload carries the switched-off campaigns alongside the rows,
+ *  so a screen can tell "this campaign is off" from "today's cap held it back"
+ *  without also fetching the campaigns route. */
+export type GroupsPayload = {
+  date: string;
+  disabledPromos: string[];
+  groups: Group[];
 };

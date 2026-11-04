@@ -20,7 +20,7 @@ export default async function LinesPage() {
 
   let groups: Group[];
   try {
-    groups = await getGroups();
+    ({ groups } = await getGroups());
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
     return (

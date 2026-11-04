@@ -8,7 +8,12 @@ import {
   BOT_SOURCE,
   GENAEBOT_CHECKOUT,
 } from "@/src/config";
-import type { Campaign, CampaignPreview, Group, Overview } from "@/src/lib/types";
+import type {
+  Campaign,
+  CampaignPreview,
+  GroupsPayload,
+  Overview,
+} from "@/src/lib/types";
 
 const run = promisify(execFile);
 
@@ -132,9 +137,11 @@ export function getOverview(date?: string) {
   return read<Overview>("overview", date);
 }
 
+/** The whole payload, not just the rows. `disabledPromos` is what lets a screen
+ *  say WHY a configured campaign is not posting today, instead of implying the
+ *  daily cap held it back. */
 export async function getGroups(date?: string) {
-  const payload = await read<{ date: string; groups: Group[] }>("groups", date);
-  return payload.groups;
+  return read<GroupsPayload>("groups", date);
 }
 
 export async function getCampaigns(date?: string) {

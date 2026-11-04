@@ -8,6 +8,13 @@ import type { Campaign } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
 
+/** Saying only "10 campaigns" would present a switched-off one as if it runs. */
+function subtitle(campaigns: Campaign[]) {
+  const off = campaigns.filter((campaign) => !campaign.enabled).length;
+  const all = `${plural(campaigns.length, "campaign")}, in the order they run through the day.`;
+  return off === 0 ? all : `${all} ${off} switched off and never posting.`;
+}
+
 export default async function CampaignsPage() {
   let campaigns: Campaign[];
   try {
@@ -26,7 +33,7 @@ export default async function CampaignsPage() {
     <Shell>
       <PageHead
         title="Campaigns"
-        subtitle={`${plural(campaigns.length, "campaign")}, in the order they run through the day.`}
+        subtitle={subtitle(campaigns)}
       />
 
       {campaigns.length === 0 ? (
@@ -49,12 +56,30 @@ export default async function CampaignsPage() {
               <tbody>
                 {campaigns.map((campaign) => (
                   <tr key={campaign.slug}>
-                    <td className="cell-strong" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    <td
+                      className="cell-strong"
+                      style={{
+                        fontVariantNumeric: "tabular-nums",
+                        ...(campaign.enabled
+                          ? {}
+                          : { textDecoration: "line-through", opacity: 0.6 }),
+                      }}
+                      title={campaign.enabled ? undefined : "no cron is installed for this slot"}
+                    >
                       {slotLabel(campaign)}
                     </td>
                     <td>
                       <div className="cell-strong">{campaignTitle(campaign.slug)}</div>
                       <div className="cell-mono">{campaign.name}</div>
+                      {campaign.enabled ? null : (
+                        <div
+                          className="pill pill-warning"
+                          style={{ marginTop: 4 }}
+                          title={'enabled is false in deploy/promo-crons.json'}
+                        >
+                          switched off
+                        </div>
+                      )}
                       {campaign.error ? (
                         <div className="pill pill-danger" style={{ marginTop: 4 }}>
                           {campaign.error}

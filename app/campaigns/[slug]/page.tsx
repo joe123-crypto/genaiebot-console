@@ -49,7 +49,11 @@ export default async function CampaignPage({
     <Shell>
       <PageHead
         title={campaignTitle(slug)}
-        subtitle={`Runs at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`}
+        subtitle={
+          campaign.enabled
+            ? `Runs at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
+            : `Switched off — would run at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
+        }
         actions={
           <Link className="link" href="/campaigns">
             All campaigns

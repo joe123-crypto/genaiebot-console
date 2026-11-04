@@ -6,6 +6,7 @@ function campaign(partial: Partial<Campaign>): Campaign {
   return {
     slug: "demo",
     name: "demo-promo",
+    enabled: true,
     cron: "0 9 * * *",
     hour: 9,
     minute: 0,
@@ -73,6 +74,34 @@ describe("attentionItems", () => {
     expect(attentionItems(overview({ capsEnabled: false }))).toContainEqual({
       label: "Daily ad caps are off",
     });
+  });
+});
+
+describe("a switched-off campaign", () => {
+  it("is not a slot in the day, because it installs no cron", () => {
+    const slots = daySlots(
+      overview({
+        campaigns: [
+          campaign({ slug: "runs", hour: 8, minute: 0 }),
+          campaign({ slug: "off", hour: 9, minute: 0, enabled: false }),
+        ],
+      }),
+    );
+    expect(slots.map((slot) => slot.slug)).toEqual(["runs"]);
+  });
+
+  it("needs no attention for targeting nothing, being off on purpose", () => {
+    const items = attentionItems(
+      overview({ campaigns: [campaign({ targetCount: 0, enabled: false })] }),
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("still reports a load failure, which is a real fault either way", () => {
+    const items = attentionItems(
+      overview({ campaigns: [campaign({ error: "boom", enabled: false })] }),
+    );
+    expect(items).toContainEqual({ label: "Campaigns failing to load", detail: "1" });
   });
 });
 

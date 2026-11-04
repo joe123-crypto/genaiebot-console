@@ -11,7 +11,7 @@ function needsReview(group: Group) {
   return group.status !== "active";
 }
 
-function GroupRows({ groups }: { groups: Group[] }) {
+function GroupRows({ groups, off }: { groups: Group[]; off: Set<string> }) {
   return (
     <div className="table-wrap">
       <table className="data">
@@ -56,18 +56,21 @@ function GroupRows({ groups }: { groups: Group[] }) {
                 ) : (
                   <div className="tag-row">
                     {group.promos.map((promo) => {
-                      const sendsToday = group.allowedToday.includes(promo);
+                      const isOff = off.has(promo);
+                      const sendsToday = !isOff && group.allowedToday.includes(promo);
                       const weekly = group.weekly[promo];
                       return (
                         <span
                           key={promo}
-                          className={`tag${sendsToday ? " tag-on" : ""}`}
+                          className={`tag${isOff ? " tag-off" : sendsToday ? " tag-on" : ""}`}
                           title={
-                            weekly
-                              ? `only on ${weekly.join(", ")}`
-                              : sendsToday
-                                ? "posts today"
-                                : "held back by today's cap"
+                            isOff
+                              ? "campaign is switched off — it installs no cron and never posts"
+                              : weekly
+                                ? `only on ${weekly.join(", ")}`
+                                : sendsToday
+                                  ? "posts today"
+                                  : "held back by today's cap"
                           }
                         >
                           {campaignTitle(promo)}
@@ -89,8 +92,9 @@ function GroupRows({ groups }: { groups: Group[] }) {
 
 export default async function GroupsPage() {
   let groups: Group[];
+  let disabledPromos: string[];
   try {
-    groups = await getGroups();
+    ({ groups, disabledPromos } = await getGroups());
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
     return (
@@ -101,6 +105,7 @@ export default async function GroupsPage() {
     );
   }
 
+  const off = new Set(disabledPromos);
   const review = groups.filter(needsReview);
   const advertising = groups.filter((group) => group.status === "active" && group.promos.length > 0);
   const idle = groups.filter((group) => group.status === "active" && group.promos.length === 0);
@@ -121,7 +126,7 @@ export default async function GroupsPage() {
               send time; one it has left returns <code>item-not-found</code>.
             </span>
           </div>
-          <GroupRows groups={review} />
+          <GroupRows groups={review} off={off} />
         </div>
       ) : null}
 
@@ -134,7 +139,7 @@ export default async function GroupsPage() {
           </span>
         </div>
         {advertising.length > 0 ? (
-          <GroupRows groups={advertising} />
+          <GroupRows groups={advertising} off={off} />
         ) : (
           <Empty>No group is advertising right now.</Empty>
         )}
@@ -146,7 +151,7 @@ export default async function GroupsPage() {
             <h2 className="card-title">Active, in no campaign</h2>
             <span className="card-note">The bot can post here but nothing targets them.</span>
           </div>
-          <GroupRows groups={idle} />
+          <GroupRows groups={idle} off={off} />
         </div>
       ) : null}
     </Shell>

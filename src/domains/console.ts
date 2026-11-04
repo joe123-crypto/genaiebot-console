@@ -33,7 +33,9 @@ export function attentionItems(overview: Overview): Attention[] {
     items.push({ label: "Campaigns failing to load", detail: String(broken.length) });
   }
 
-  const empty = overview.campaigns.filter((campaign) => !campaign.error && campaign.targetCount === 0);
+  const empty = overview.campaigns.filter(
+    (campaign) => campaign.enabled && !campaign.error && campaign.targetCount === 0,
+  );
   if (empty.length > 0) {
     items.push({ label: "Campaigns with no groups", detail: String(empty.length) });
   }
@@ -49,10 +51,17 @@ export function attentionItems(overview: Overview): Attention[] {
   return items;
 }
 
-/** Campaign slots ordered through the day, used by Overview and Schedule. */
+/**
+ * Campaign slots ordered through the day, used by Overview and Schedule.
+ *
+ * A switched-off campaign is left out rather than drawn faintly: the timeline
+ * feeds the per-line overlap rule, and a campaign that installs no cron can
+ * neither occupy a slot nor collide with one. The Campaigns screen is where it
+ * is still listed, marked off.
+ */
 export function daySlots(overview: Overview) {
   return overview.campaigns
-    .filter((campaign) => campaign.hour !== null)
+    .filter((campaign) => campaign.enabled && campaign.hour !== null)
     .map((campaign) => ({
       slug: campaign.slug,
       name: campaign.name,
