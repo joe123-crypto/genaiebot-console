@@ -13,16 +13,27 @@ The console keeps no database and no copy of anything. Every screen is rendered
 from genaebot's own state, through one of two adapters in
 [`src/lib/bot-client.ts`](src/lib/bot-client.ts):
 
-- **local** (development) — runs [`scripts/genaebot_read.py`](scripts/genaebot_read.py)
-  against a genaebot checkout. That bridge imports the bot's own
-  `promo_membership`, `promo_caps` and `promo_broadcast` modules rather than
-  reimplementing them, so a caption preview is the exact text the cron would
-  send, with the same ref code, the same `wa.me` link and the same daily cap
-  decision. It is read-only and never contacts the gateway.
-- **remote** (production) — calls the console API running beside the gateway on
-  Railway. Set `BOT_API_BASE_URL` and the remote adapter takes over; it wins
-  whenever it is configured, so a deployed console can never silently fall back
-  to a checkout that is not there.
+- **local** (development) — runs `workspace/bin/console-read` out of a genaebot
+  checkout.
+- **remote** (production) — calls the console API beside the gateway on Railway,
+  which runs that same script in the container. Set `BOT_API_BASE_URL` and the
+  remote adapter takes over; it wins whenever it is configured, so a deployed
+  console can never silently fall back to a checkout that is not there.
+
+Both adapters therefore execute **the same script**, which lives in genaebot
+rather than here. That is deliberate: the bridge imports the bot's own
+`promo_membership`, `promo_caps` and `promo_broadcast` modules rather than
+reimplementing them, so a caption preview is the exact text the cron would send,
+with the same ref code, the same `wa.me` link and the same daily cap decision.
+It is read-only, never contacts the gateway, and never records a cap snapshot.
+
+Switching between them is environment only, so the same build runs locally and
+on Vercel:
+
+| `BOT_API_BASE_URL` | Adapter | Reads |
+|---|---|---|
+| empty | local | `$GENAEBOT_CHECKOUT/workspace/bin/console-read` |
+| set | remote | `GET $BOT_API_BASE_URL/internal/console/*` with `BOT_API_TOKEN` |
 
 ## Running it
 
@@ -38,7 +49,7 @@ By default it reads `/home/joseph/projects/genaebot`. Point it elsewhere with
 |---|---|
 | `GENAEBOT_CHECKOUT` | Path to a genaebot checkout (local adapter) |
 | `BOT_API_BASE_URL` | Console API base URL; set this and the remote adapter is used |
-| `BOT_API_TOKEN` | Bearer fallback when Vercel OIDC is not in play |
+| `BOT_API_TOKEN` | Bearer token; must match `CONSOLE_API_TOKEN` on the bot |
 
 ```bash
 npm run typecheck

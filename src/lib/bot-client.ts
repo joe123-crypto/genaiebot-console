@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
@@ -27,23 +28,55 @@ export class BotUnavailableError extends Error {
   }
 }
 
-const BRIDGE = path.join(process.cwd(), "scripts", "genaebot_read.py");
+/**
+ * The read bridge lives in genaebot rather than here, so this adapter and the
+ * console API run the very same script and cannot drift apart.
+ */
+const BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-read");
+
+/** The bridge reports a refusal as `{"error": ...}` and a non-zero exit. */
+function reportedError(stdout: string | undefined) {
+  if (!stdout) return null;
+  try {
+    const payload: unknown = JSON.parse(stdout);
+    if (payload && typeof payload === "object" && "error" in payload) {
+      return String((payload as { error: unknown }).error);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 /**
  * `-I` runs Python in isolated mode so the bot's own directories can never put
- * a module on the import path ahead of the standard library.
+ * a module on the import path ahead of the standard library. The bridge puts
+ * genaebot's `workspace/lib` on the path itself.
  */
 async function readLocal<T>(args: string[]): Promise<T> {
+  // Checked up front: python3 exists, so spawning it against a missing script
+  // succeeds and python reports the problem as exit 2, which reads far worse
+  // than saying which path we looked at.
+  if (!existsSync(BRIDGE)) {
+    throw new BotUnavailableError(
+      `no read bridge at ${BRIDGE} — point GENAEBOT_CHECKOUT at a genaebot checkout that has workspace/bin/console-read`,
+    );
+  }
+
   let stdout: string;
   try {
-    ({ stdout } = await run(
-      "python3",
-      ["-I", BRIDGE, "--checkout", GENAEBOT_CHECKOUT, ...args],
-      { maxBuffer: 32 * 1024 * 1024, timeout: 120_000 },
-    ));
+    ({ stdout } = await run("python3", ["-I", BRIDGE, ...args], {
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 120_000,
+    }));
   } catch (error) {
-    const err = error as Error & { stderr?: string };
-    throw new BotUnavailableError(err.stderr?.trim() || err.message);
+    const err = error as Error & { stderr?: string; stdout?: string; code?: string };
+    if (err.code === "ENOENT") {
+      throw new BotUnavailableError("python3 is not on PATH");
+    }
+    throw new BotUnavailableError(
+      reportedError(err.stdout) || err.stderr?.trim() || err.message,
+    );
   }
 
   let payload: unknown;
