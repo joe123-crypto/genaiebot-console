@@ -50,6 +50,13 @@ const BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-read");
  */
 const WRITE_BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-write");
 
+export function captionSaveUnavailableReason(): string | undefined {
+  if (WRITES_ENABLED && WRITE_SOURCE === "local" && !existsSync(WRITE_BRIDGE)) {
+    return "Saving is not connected to the bot yet. You can edit a draft here.";
+  }
+  return undefined;
+}
+
 /** The bridge reports a refusal as `{"error": ...}` and a non-zero exit. */
 function reportedError(stdout: string | undefined) {
   if (!stdout) return null;
@@ -69,7 +76,7 @@ function reportedError(stdout: string | undefined) {
  * a module on the import path ahead of the standard library. The bridge puts
  * genaebot's `workspace/lib` on the path itself.
  */
-async function runBridge<T>(bridge: string, args: string[]): Promise<T> {
+async function runBridge<T>(bridge: string, args: string[], input?: unknown): Promise<T> {
   // Checked up front: python3 exists, so spawning it against a missing script
   // succeeds and python reports the problem as exit 2, which reads far worse
   // than saying which path we looked at.
@@ -81,10 +88,15 @@ async function runBridge<T>(bridge: string, args: string[]): Promise<T> {
 
   let stdout: string;
   try {
-    ({ stdout } = await run("python3", ["-I", bridge, ...args], {
+    const child = run("python3", ["-I", bridge, ...args], {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 120_000,
-    }));
+    });
+    if (input !== undefined) {
+      // console-write accepts one JSON request on stdin; copy never enters a shell.
+      child.child.stdin?.end(JSON.stringify(input));
+    }
+    ({ stdout } = await child);
   } catch (error) {
     const err = error as Error & { stderr?: string; stdout?: string; code?: string };
     if (err.code === "ENOENT") {
@@ -304,4 +316,19 @@ export async function deleteGroup(
   const args = ["delete-group", jid, "--by", by];
   if (reason) args.push("--reason", reason);
   return runBridge<DeleteGroupResult>(WRITE_BRIDGE, args);
+}
+
+/** Uses the bot's validated, audited config writer, rather than a console copy. */
+export async function updateCampaignCaptions(
+  slug: string,
+  captions: string[],
+  { by }: { by: string },
+): Promise<void> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  const request = { fields: { captions }, actor: by };
+  if (WRITE_SOURCE === "remote") {
+    await writeRemote(`config/campaigns/${encodeURIComponent(slug)}`, request);
+    return;
+  }
+  await runBridge(WRITE_BRIDGE, [], { collection: "campaigns", id: slug, ...request });
 }

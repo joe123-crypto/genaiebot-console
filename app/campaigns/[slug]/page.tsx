@@ -4,9 +4,12 @@ import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, PageHead, Stat } from "@/app/_components/ui";
 import {
   BotUnavailableError,
+  captionSaveUnavailableReason,
   getCampaignPreview,
   getCampaigns,
 } from "@/src/lib/bot-client";
+import { CaptionVariants } from "@/app/campaigns/_components/caption-variants";
+import { WRITES_ENABLED } from "@/src/config";
 import { campaignTitle, groupLabel, plural, shortJid, slotLabel } from "@/src/lib/format";
 import type { Campaign, CampaignPreview } from "@/src/lib/types";
 
@@ -76,42 +79,16 @@ export default async function CampaignPage({
         />
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-head">
-          <h2 className="card-title">Caption variants</h2>
-          <span className="card-note">
-            Exactly as the cron would send them, with that group&apos;s ref code and link
-            already substituted.
-          </span>
-        </div>
-        <div className="card-pad grid grid-two">
-          {preview.captions.map((_, index) => {
-            const sample = samples[index];
-            return (
-              <div key={index}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 7,
-                    alignItems: "center",
-                  }}
-                >
-                  <span className="pill pill-info">Variant {index + 1}</span>
-                  {sample ? (
-                    <span className="card-note">
-                      as sent to {groupLabel(sample)} · {sample.ref}
-                    </span>
-                  ) : (
-                    <span className="card-note">no group gets this variant today</span>
-                  )}
-                </div>
-                <pre className="caption-box">{sample?.caption ?? preview.captions[index]}</pre>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <CaptionVariants
+        key={slug}
+        slug={slug}
+        captions={preview.captions}
+        writable={WRITES_ENABLED}
+        saveUnavailableReason={captionSaveUnavailableReason()}
+        samples={samples.map((sample) => sample ? {
+          label: groupLabel(sample), ref: sample.ref, caption: sample.caption,
+        } : null)}
+      />
 
       <div className="card">
         <div className="card-head">
