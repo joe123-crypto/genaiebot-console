@@ -1,7 +1,7 @@
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, PageHead } from "@/app/_components/ui";
-import { daySlots, loadOverview } from "@/src/domains/console";
-import { campaignTitle, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { daySlots, loadOverview, nextUp, runEndsAt, runningNow } from "@/src/domains/console";
+import { campaignTitle, clockLabel, minutesOfDay, plural, worstCaseRunSeconds } from "@/src/lib/format";
 import { BOT_TIMEZONE } from "@/src/config";
 
 export const dynamic = "force-dynamic";
@@ -39,16 +39,32 @@ export default async function SchedulePage() {
     for (let index = 0; index < accountSlots.length - 1; index += 1) {
       const current = accountSlots[index];
       const next = accountSlots[index + 1];
-      const finishes = current.minutes + worstCaseRunSeconds(current.targetCount) / 60;
+      const finishes = runEndsAt(current);
       if (finishes > next.minutes) {
         clashes.push(
           `On the ${account} line, ${campaignTitle(current.slug)} can still be sending at ` +
-            `${String(Math.floor(finishes / 60)).padStart(2, "0")}:${String(Math.round(finishes % 60)).padStart(2, "0")}, ` +
-            `after ${campaignTitle(next.slug)} starts at ${next.time}.`,
+            `${clockLabel(finishes)}, after ${campaignTitle(next.slug)} starts at ${next.time}.`,
         );
       }
     }
   }
+
+  /**
+   * The clock is the one thing on this screen that is not genaebot's own state,
+   * so it is read here, per render. The console already refreshes every 60s,
+   * which is what moves the marker; the sidebar says when that has paused.
+   */
+  const nowMinutes = minutesOfDay(new Date());
+  const running = runningNow(slots, nowMinutes);
+  const runningSlugs = new Set(running.map((slot) => slot.slug));
+  const upcoming = nextUp(slots, nowMinutes);
+  const nowOffset = `${(nowMinutes / DAY_MINUTES) * 100}%`;
+
+  const runningNames = running.map((slot) => campaignTitle(slot.slug));
+  const sendingNow =
+    runningNames.length > 1
+      ? `${runningNames.slice(0, -1).join(", ")} and ${runningNames[runningNames.length - 1]}`
+      : runningNames[0];
 
   return (
     <Shell>
@@ -76,10 +92,45 @@ export default async function SchedulePage() {
           </span>
         </div>
         <div className="card-pad">
+          {/* Worst case, so a lit bar means "could still be sending", never
+              "is sending" — the wording has to stay weaker than the bar. */}
+          <div className="timeline-status" role="status">
+            <span className={`run-dot${running.length > 0 ? " is-live" : ""}`} aria-hidden />
+            <span className="cell-mono">
+              {clockLabel(nowMinutes)} in {BOT_TIMEZONE}
+            </span>
+            <span>
+              {running.length > 0
+                ? `${sendingNow} could still be sending.`
+                : upcoming
+                  ? `Nothing sending. ${campaignTitle(upcoming.slug)} is next at ${upcoming.time}.`
+                  : "Nothing sending. The day's runs are over."}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "150px 1fr",
+              gap: 12,
+              marginBottom: 2,
+            }}
+          >
+            <span />
+            <div style={{ position: "relative", height: 14 }} className="cell-mono">
+              <span className="timeline-now-label" style={{ left: nowOffset }}>
+                now
+              </span>
+            </div>
+          </div>
+
           <div style={{ display: "grid", gap: 6 }}>
             {slots.map((slot) => {
               const runMinutes = worstCaseRunSeconds(slot.targetCount) / 60;
               const onAds = (slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0);
+              const isRunning = runningSlugs.has(slot.slug);
+              const isDone = runEndsAt(slot) <= nowMinutes;
+              const endsAt = clockLabel(runEndsAt(slot));
               return (
                 <div key={slot.slug} style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 12, alignItems: "center" }}>
                   <span>
@@ -88,6 +139,18 @@ export default async function SchedulePage() {
                     <span className="cell-mono">
                       {slot.time} · {plural(slot.targetCount, "group")}
                     </span>
+                    {isRunning ? (
+                      <>
+                        <br />
+                        <span
+                          className="pill pill-success"
+                          style={{ marginTop: 3 }}
+                          title={`started at ${slot.time}, worst case runs to ${endsAt} — it may already have finished`}
+                        >
+                          <span className="run-dot is-live" aria-hidden /> Running now
+                        </span>
+                      </>
+                    ) : null}
                   </span>
                   <div
                     style={{
@@ -99,7 +162,8 @@ export default async function SchedulePage() {
                     }}
                   >
                     <span
-                      className={`timeline-fill${onAds ? " is-ads" : ""}`}
+                      className={`timeline-fill${onAds ? " is-ads" : ""}${isRunning ? " is-running" : ""}${isDone ? " is-done" : ""}`}
+                      title={`${slot.time} to ${endsAt} at worst`}
                       style={{
                         left: `${(slot.minutes / DAY_MINUTES) * 100}%`,
                         right: "auto",
@@ -111,6 +175,7 @@ export default async function SchedulePage() {
                     >
                       {Math.round(runMinutes)}m
                     </span>
+                    <span className="timeline-now" style={{ left: nowOffset }} aria-hidden />
                   </div>
                 </div>
               );

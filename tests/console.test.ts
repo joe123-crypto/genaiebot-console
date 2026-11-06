@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { attentionItems, daySlots, lineSummaries } from "@/src/domains/console";
+import {
+  attentionItems,
+  daySlots,
+  lineSummaries,
+  nextUp,
+  runEndsAt,
+  runningNow,
+} from "@/src/domains/console";
 import type { Campaign, Group, Overview } from "@/src/lib/types";
 
 function campaign(partial: Partial<Campaign>): Campaign {
@@ -186,5 +193,54 @@ describe("lineSummaries", () => {
     expect(line.groupCount).toBe(2);
     expect(line.advertisingCount).toBe(1);
     expect(line.promos.map((promo) => promo.slug)).toEqual(["genaie"]);
+  });
+});
+
+describe("what is running now", () => {
+  // 5 groups is a 20 min worst case, so the 08:00 slot runs to 08:20.
+  const slots = daySlots(
+    overview({
+      campaigns: [
+        campaign({ slug: "morning", hour: 8, minute: 0 }),
+        campaign({ slug: "afternoon", hour: 14, minute: 0 }),
+      ],
+    }),
+  );
+
+  it("ends a run at its worst case, where the overlap rule ends it too", () => {
+    expect(runEndsAt(slots[0])).toBe(8 * 60 + 20);
+  });
+
+  it("marks a run from its own start minute", () => {
+    expect(runningNow(slots, 8 * 60).map((slot) => slot.slug)).toEqual(["morning"]);
+  });
+
+  it("releases it the minute its worst case is over", () => {
+    expect(runningNow(slots, 8 * 60 + 19).map((slot) => slot.slug)).toEqual(["morning"]);
+    expect(runningNow(slots, 8 * 60 + 20)).toEqual([]);
+  });
+
+  it("names every run covering now, which is the overlap the banner warns about", () => {
+    const overlapping = daySlots(
+      overview({
+        campaigns: [
+          campaign({ slug: "first", hour: 8, minute: 0, targetCount: 46 }),
+          campaign({ slug: "second", hour: 8, minute: 30, targetCount: 5 }),
+        ],
+      }),
+    );
+    expect(runningNow(overlapping, 8 * 60 + 40).map((slot) => slot.slug)).toEqual([
+      "first",
+      "second",
+    ]);
+  });
+
+  it("has nothing running before the day's first slot", () => {
+    expect(runningNow(slots, 6 * 60)).toEqual([]);
+    expect(nextUp(slots, 6 * 60)?.slug).toBe("morning");
+  });
+
+  it("has nothing next once the last slot has started", () => {
+    expect(nextUp(slots, 14 * 60)).toBeUndefined();
   });
 });
