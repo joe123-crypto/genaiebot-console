@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { CheckCheck } from "lucide-react";
 import { PRODUCT_NAME } from "@/src/config";
 import { ConsoleNav, type NavCounts } from "@/app/_components/console-nav";
+import { AutoRefresh } from "@/app/_components/auto-refresh";
 
 type Attention = { label: string; detail?: string };
 
@@ -56,6 +57,7 @@ export function ConsoleShell({
             <span className="console-account-name">{operator.name}</span>
             <br />
             <span className="console-account-meta">{operator.meta}</span>
+            <AutoRefresh />
           </span>
         </div>
       </aside>

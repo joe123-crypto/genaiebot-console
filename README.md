@@ -72,6 +72,13 @@ npm run build
 Everything is read-only. Writes (approving a group, editing a campaign, moving a
 slot) need the console API and the runtime overlay described in the plan.
 
+While the console is visible and online, it refreshes the current page and sidebar
+60 seconds after each completed refresh. Checks pause in hidden tabs or while
+offline, and resume with an immediate refresh when visible and online again.
+Each tab checks independently, using the same server-side adapters as page loads;
+gateway credentials stay on the server. Existing bot errors are retried on the
+next check. Activity remains a placeholder.
+
 ## Conventions
 
 Next.js 15 App Router, React 19, TypeScript, vitest. Plain CSS with design

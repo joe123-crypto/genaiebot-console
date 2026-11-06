@@ -167,6 +167,7 @@ a { color: inherit; text-decoration: none; }
 
 .console-account-name { font-weight: 600; font-size: 13px; }
 .console-account-meta { color: var(--text-faint); font-size: 12px; }
+.console-refresh { display: block; color: var(--text-faint); font-size: 11px; margin-top: 4px; }
 
 .console-content {
   min-width: 0;
