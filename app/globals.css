@@ -402,6 +402,80 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 
 .timeline-fill.is-ads { background: linear-gradient(90deg, #8f7bf0, #6b53d8); }
 
+/* The run whose worst case still covers now. Lit with a ring rather than
+   recoloured: the fill's colour has to go on meaning which line it posts on. */
+.timeline-fill.is-running {
+  /* A white gap and then a dark ring, so the lit bar reads the same against
+     the blue line's fill and the purple one's. */
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px rgba(15, 27, 45, 0.32);
+  z-index: 1;
+}
+
+/* A run whose worst case has passed. Safe to fade here because a switched-off
+   campaign is never a slot at all, so faded can only mean "already over". */
+.timeline-fill.is-done { opacity: 0.5; }
+
+/* Now, drawn through every bar so the rows read as one column. Dark rather
+   than red: red is the banner's "something is wrong", and the time being what
+   it is never is. */
+.timeline-now {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text);
+  z-index: 2;
+}
+
+.timeline-now-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.timeline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.run-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+
+.run-dot.is-live {
+  background: var(--success);
+  animation: run-pulse 2s ease-in-out infinite;
+}
+
+@keyframes run-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 123, 0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(22, 163, 123, 0); }
+}
+
+/* An operator watching a timeline does not need a heartbeat to read it. */
+@media (prefers-reduced-motion: reduce) {
+  .run-dot.is-live { animation: none; }
+}
+
 /* --------------------------------------------------------------- misc ------ */
 
 .caption-box {

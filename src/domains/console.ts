@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { BotUnavailableError, getOverview } from "@/src/lib/bot-client";
-import { slotLabel } from "@/src/lib/format";
+import { slotLabel, worstCaseRunSeconds } from "@/src/lib/format";
 import type { Group, Overview } from "@/src/lib/types";
 
 /** Deduped so the layout and the page it wraps share one read per request. */
@@ -165,4 +165,29 @@ export function daySlots(overview: Overview) {
       accounts: campaign.accounts,
     }))
     .sort((a, b) => a.minutes - b.minutes);
+}
+
+export type DaySlot = ReturnType<typeof daySlots>[number];
+
+/**
+ * When a slot's worst case is over, in minutes since midnight. The overlap rule
+ * and the running marker have to agree on where a run ends, so both ask here.
+ */
+export function runEndsAt(slot: DaySlot) {
+  return slot.minutes + worstCaseRunSeconds(slot.targetCount) / 60;
+}
+
+/**
+ * Slots whose worst case still covers `nowMinutes`. The window is half-open, so
+ * a run is marked from its own start minute and released the minute its worst
+ * case expires. More than one slot can come back — that is exactly the overlap
+ * the Schedule banner warns about, and hiding it here would contradict it.
+ */
+export function runningNow(slots: DaySlot[], nowMinutes: number) {
+  return slots.filter((slot) => slot.minutes <= nowMinutes && nowMinutes < runEndsAt(slot));
+}
+
+/** The first slot still to start, or undefined once the day's last one has. */
+export function nextUp(slots: DaySlot[], nowMinutes: number) {
+  return slots.find((slot) => slot.minutes > nowMinutes);
 }

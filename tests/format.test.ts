@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   campaignTitle,
+  clockLabel,
   confirmLabel,
+  minutesOfDay,
   plural,
   shortJid,
   slotLabel,
@@ -76,5 +78,32 @@ describe("confirmLabel", () => {
 
   it("treats a blank name as no name, so the box cannot be satisfied empty", () => {
     expect(confirmLabel({ name: "   ", jid: "120363@g.us" })).toBe("120363");
+  });
+});
+
+describe("minutesOfDay", () => {
+  // Harare is UTC+2 all year, so 05:15Z is the 07:15 slot's own start minute.
+  it("reads the clock in the bot's timezone, not the machine's", () => {
+    expect(minutesOfDay(new Date("2026-11-06T05:15:00Z"))).toBe(7 * 60 + 15);
+  });
+
+  it("counts from Harare midnight, not from UTC midnight", () => {
+    expect(minutesOfDay(new Date("2026-11-06T22:00:00Z"))).toBe(0);
+    expect(minutesOfDay(new Date("2026-11-06T21:59:00Z"))).toBe(23 * 60 + 59);
+  });
+
+  it("honours a timezone that is not the default", () => {
+    expect(minutesOfDay(new Date("2026-11-06T05:15:00Z"), "UTC")).toBe(5 * 60 + 15);
+  });
+});
+
+describe("clockLabel", () => {
+  it("prints minutes since midnight the way a slot prints", () => {
+    expect(clockLabel(905)).toBe("15:05");
+    expect(clockLabel(0)).toBe("00:00");
+  });
+
+  it("rounds a fractional finish to the minute", () => {
+    expect(clockLabel(65.6)).toBe("01:06");
   });
 });

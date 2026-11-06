@@ -1,3 +1,4 @@
+import { BOT_TIMEZONE } from "@/src/config";
 import type { Campaign, Group } from "@/src/lib/types";
 
 export function slotLabel(campaign: Pick<Campaign, "hour" | "minute">) {
@@ -48,4 +49,30 @@ export function plural(count: number, one: string, many = `${one}s`) {
 export function worstCaseRunSeconds(groupCount: number) {
   if (groupCount <= 0) return 0;
   return 900 + (groupCount - 1) * 60 + groupCount * 12;
+}
+
+/**
+ * Minutes since midnight in the bot's own timezone, which is the scale every
+ * slot on the timeline is already drawn on. Harare is UTC+2 all year, but the
+ * campaign day belongs to the manifest's timezone rather than to the machine
+ * rendering it, so the zone is asked for by name rather than assumed.
+ */
+export function minutesOfDay(now: Date, timeZone = BOT_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+
+  const value = (type: "hour" | "minute") =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  return value("hour") * 60 + value("minute");
+}
+
+/** Minutes since midnight as HH:MM, so a derived time prints like a slot's. */
+export function clockLabel(minutes: number) {
+  const whole = Math.round(minutes);
+  return `${String(Math.floor(whole / 60)).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
 }
