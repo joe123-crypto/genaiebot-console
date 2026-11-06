@@ -61,6 +61,31 @@ export type LineAccount = {
   isContact: boolean;
 };
 
+/**
+ * Phase 2 of genaebot's move off membership.json: whether a run also reads
+ * Firestore and compares the two, and what the newest comparison found. The
+ * bridge has served this since the shadow landed; the console ignored it,
+ * which meant the drift signal the bot deliberately surfaces reached nobody.
+ */
+export type ShadowCheck = {
+  checkedAt: string;
+  /** `exact` from a snapshot proves less than `exact` from a live read, which
+   *  is why `source` is reported beside the status rather than folded into it. */
+  status: "exact" | "drift" | "unavailable" | "error";
+  source: "firestore" | "snapshot" | null;
+  degraded: string | null;
+  problems: string[];
+  notes: string[];
+};
+
+export type ConfigShadow = {
+  /** `file` is today's behaviour; `shadow` also reads Firestore and compares. */
+  mode: string;
+  /** Set when GENAIE_CONFIG_SOURCE asked for something not honoured yet. */
+  warning: string | null;
+  lastCheck: ShadowCheck | null;
+};
+
 export type Overview = {
   date: string;
   groupsByStatus: Partial<Record<GroupStatus, number>>;
@@ -69,6 +94,9 @@ export type Overview = {
   plannedSendsToday: number;
   accounts: LineAccount[];
   capsEnabled: boolean;
+  /** Absent from a bridge older than the shadow work, so optional: this one is
+   *  safe to miss, unlike `enabled`, because nothing reads it as a decision. */
+  configShadow?: ConfigShadow;
   campaigns: Campaign[];
 };
 

@@ -1,15 +1,13 @@
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead, StatusPill } from "@/app/_components/ui";
 import { BotUnavailableError, getGroups } from "@/src/lib/bot-client";
-import { campaignTitle, groupLabel, plural, shortJid } from "@/src/lib/format";
+import { needsDecision } from "@/src/domains/console";
+import { campaignTitle, confirmLabel, groupLabel, plural, shortJid } from "@/src/lib/format";
+import { WRITES_ENABLED } from "@/src/config";
+import { DeleteGroup } from "@/app/groups/_components/delete-group";
 import type { Group } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
-
-/** Anything not advertising right now is what an operator has to decide about. */
-function needsReview(group: Group) {
-  return group.status !== "active";
-}
 
 function GroupRows({ groups, off }: { groups: Group[]; off: Set<string> }) {
   return (
@@ -24,6 +22,11 @@ function GroupRows({ groups, off }: { groups: Group[]; off: Set<string> }) {
             <th>Cap today</th>
             <th>Campaigns</th>
             <th>Note</th>
+            {WRITES_ENABLED ? (
+              <th>
+                <span className="visually-hidden">Actions</span>
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -82,6 +85,11 @@ function GroupRows({ groups, off }: { groups: Group[]; off: Set<string> }) {
                 )}
               </td>
               <td className="cell-note" title={group.note ?? undefined}>{group.note ?? ""}</td>
+              {WRITES_ENABLED ? (
+                <td className="cell-actions">
+                  <DeleteGroup jid={group.jid} label={confirmLabel(group)} />
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -106,7 +114,7 @@ export default async function GroupsPage() {
   }
 
   const off = new Set(disabledPromos);
-  const review = groups.filter(needsReview);
+  const review = groups.filter(needsDecision);
   const advertising = groups.filter((group) => group.status === "active" && group.promos.length > 0);
   const idle = groups.filter((group) => group.status === "active" && group.promos.length === 0);
 

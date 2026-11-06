@@ -7,6 +7,13 @@
 
 export const PRODUCT_NAME = "Genaie Console";
 
+/**
+ * Who the console says is acting. There is no session to read a name from yet,
+ * so it is a constant — but it lives here rather than in the sidebar, so the
+ * name on screen and the name recorded against a delete cannot drift apart.
+ */
+export const OPERATOR_NAME = "Joseph Munemo";
+
 /** Where the bot's own tooling lives when we read it locally. */
 export const GENAEBOT_CHECKOUT =
   process.env.GENAEBOT_CHECKOUT?.trim() || "/home/joseph/projects/genaebot";
@@ -24,6 +31,35 @@ export type BotSource = "local" | "remote";
  * silently fall back to reading a checkout that is not there.
  */
 export const BOT_SOURCE: BotSource = BOT_API_BASE_URL ? "remote" : "local";
+
+/**
+ * The write API. It is a separate service from the read one, on its own port
+ * and behind its own token: the read API is read-only by construction and
+ * refuses every method but GET and HEAD, and that property is worth keeping.
+ */
+export const BOT_WRITE_API_BASE_URL = process.env.BOT_WRITE_API_BASE_URL?.trim() || "";
+export const BOT_WRITE_TOKEN = process.env.BOT_WRITE_TOKEN?.trim() || "";
+
+/** Chosen the same way as BOT_SOURCE, so a write and a read cannot disagree
+ *  about which genaebot they are talking to. */
+export const WRITE_SOURCE: BotSource = BOT_WRITE_API_BASE_URL ? "remote" : "local";
+
+/**
+ * Writes are opt-in and off by default.
+ *
+ * The console still has no login: anyone who can load the page can use
+ * anything it offers. That is survivable while every screen is read-only, and
+ * it is not survivable for a delete, so this flag — not a session — is what
+ * keeps a deployed console harmless. Leave CONSOLE_WRITES unset in production
+ * and the console stays exactly the viewer it has always been. Turning it on
+ * there is a decision that waits for authentication.
+ *
+ * A target still has to be configured, so setting the flag alone cannot arm a
+ * button that has nothing to call.
+ */
+export const WRITES_ENABLED =
+  process.env.CONSOLE_WRITES?.trim() === "1" &&
+  (WRITE_SOURCE === "remote" ? Boolean(BOT_WRITE_TOKEN) : Boolean(GENAEBOT_CHECKOUT));
 
 /** Campaign sends are planned in Harare time; so is every slot the UI shows. */
 export const BOT_TIMEZONE = "Africa/Harare";
