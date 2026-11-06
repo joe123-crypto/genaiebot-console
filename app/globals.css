@@ -314,6 +314,22 @@ table.data td {
 table.data tr:last-child td { border-bottom: none; }
 table.data tbody tr:hover { background: var(--surface-muted); }
 
+.campaign-preview-row { position: relative; cursor: pointer; }
+
+/* Stretch the native preview link across its row, preserving browser navigation. */
+.campaign-preview-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.campaign-preview-link:focus-visible { outline: none; }
+.campaign-preview-link:focus-visible::after {
+  outline: 2px solid var(--primary-strong);
+  outline-offset: -2px;
+}
+
 .cell-strong { font-weight: 600; }
 .cell-muted { color: var(--text-muted); }
 .cell-mono {

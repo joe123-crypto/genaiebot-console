@@ -50,12 +50,11 @@ export default async function CampaignsPage() {
                   <th>Line</th>
                   <th>Ref</th>
                   <th>Copy</th>
-                  <th />
                 </tr>
               </thead>
               <tbody>
                 {campaigns.map((campaign) => (
-                  <tr key={campaign.slug}>
+                  <tr key={campaign.slug} className="campaign-preview-row">
                     <td
                       className="cell-strong"
                       style={{
@@ -69,7 +68,15 @@ export default async function CampaignsPage() {
                       {slotLabel(campaign)}
                     </td>
                     <td>
-                      <div className="cell-strong">{campaignTitle(campaign.slug)}</div>
+                      <div className="cell-strong">
+                        <Link
+                          className="campaign-preview-link"
+                          href={`/campaigns/${campaign.slug}`}
+                          aria-label={`Preview ${campaignTitle(campaign.slug)}`}
+                        >
+                          {campaignTitle(campaign.slug)}
+                        </Link>
+                      </div>
                       <div className="cell-mono">{campaign.name}</div>
                       {campaign.enabled ? null : (
                         <div
@@ -126,11 +133,6 @@ export default async function CampaignsPage() {
                         <ImageIcon size={14} aria-hidden />
                         {plural(campaign.images.length, "image")}
                       </span>
-                    </td>
-                    <td>
-                      <Link className="link" href={`/campaigns/${campaign.slug}`}>
-                        Preview
-                      </Link>
                     </td>
                   </tr>
                 ))}
