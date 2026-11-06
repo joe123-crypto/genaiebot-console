@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   campaignTitle,
+  confirmLabel,
   plural,
   shortJid,
   slotLabel,
@@ -55,5 +56,25 @@ describe("plural", () => {
   it("keeps the singular at one", () => {
     expect(plural(1, "group")).toBe("1 group");
     expect(plural(2, "group")).toBe("2 groups");
+  });
+});
+
+describe("confirmLabel", () => {
+  it("asks for the name when there is one", () => {
+    expect(confirmLabel({ name: "BULAWAYO ADVERTS", jid: "120363@g.us" })).toBe(
+      "BULAWAYO ADVERTS",
+    );
+  });
+
+  it("falls back to the jid, not to a shared placeholder", () => {
+    // Most rows the operator wants to delete are unnamed, and `groupLabel`
+    // calls all of them "Unnamed group" -- typing that would confirm nothing.
+    expect(confirmLabel({ name: null, jid: "120363427619606842@g.us" })).toBe(
+      "120363427619606842",
+    );
+  });
+
+  it("treats a blank name as no name, so the box cannot be satisfied empty", () => {
+    expect(confirmLabel({ name: "   ", jid: "120363@g.us" })).toBe("120363");
   });
 });

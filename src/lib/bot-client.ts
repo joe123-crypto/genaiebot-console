@@ -6,7 +6,11 @@ import {
   BOT_API_BASE_URL,
   BOT_API_TOKEN,
   BOT_SOURCE,
+  BOT_WRITE_API_BASE_URL,
+  BOT_WRITE_TOKEN,
   GENAEBOT_CHECKOUT,
+  WRITE_SOURCE,
+  WRITES_ENABLED,
 } from "@/src/config";
 import type {
   Campaign,
@@ -39,6 +43,13 @@ export class BotUnavailableError extends Error {
  */
 const BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-read");
 
+/**
+ * Writes go through a different script, and on the remote side a different
+ * service: the read API refuses every method but GET and HEAD, and keeping it
+ * that way is worth more than the convenience of one endpoint.
+ */
+const WRITE_BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-write");
+
 /** The bridge reports a refusal as `{"error": ...}` and a non-zero exit. */
 function reportedError(stdout: string | undefined) {
   if (!stdout) return null;
@@ -58,19 +69,19 @@ function reportedError(stdout: string | undefined) {
  * a module on the import path ahead of the standard library. The bridge puts
  * genaebot's `workspace/lib` on the path itself.
  */
-async function readLocal<T>(args: string[]): Promise<T> {
+async function runBridge<T>(bridge: string, args: string[]): Promise<T> {
   // Checked up front: python3 exists, so spawning it against a missing script
   // succeeds and python reports the problem as exit 2, which reads far worse
   // than saying which path we looked at.
-  if (!existsSync(BRIDGE)) {
+  if (!existsSync(bridge)) {
     throw new BotUnavailableError(
-      `no read bridge at ${BRIDGE} — point GENAEBOT_CHECKOUT at a genaebot checkout that has workspace/bin/console-read`,
+      `no bridge at ${bridge} — point GENAEBOT_CHECKOUT at a genaebot checkout that has ${path.basename(bridge)}`,
     );
   }
 
   let stdout: string;
   try {
-    ({ stdout } = await run("python3", ["-I", BRIDGE, ...args], {
+    ({ stdout } = await run("python3", ["-I", bridge, ...args], {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 120_000,
     }));
@@ -94,6 +105,10 @@ async function readLocal<T>(args: string[]): Promise<T> {
     throw new BotUnavailableError(String((payload as { error: unknown }).error));
   }
   return payload as T;
+}
+
+function readLocal<T>(args: string[]): Promise<T> {
+  return runBridge<T>(BRIDGE, args);
 }
 
 async function readRemote<T>(route: string, params: URLSearchParams): Promise<T> {
@@ -202,4 +217,91 @@ export async function getCampaigns(date?: string) {
 
 export function getCampaignPreview(slug: string, date?: string) {
   return read<CampaignPreview>("preview", date, slug);
+}
+
+/* ------------------------------------------------------------------ writes --
+ *
+ * The console's first mutation. Three things are deliberate:
+ *
+ *   * it is gated on WRITES_ENABLED rather than on a session, because there is
+ *     no session yet — see the note in `src/config`;
+ *   * the remote call is bounded, unlike the reads above. A read that hangs
+ *     costs a page; a delete that hangs leaves the operator unable to tell
+ *     whether it happened;
+ *   * a refusal keeps the bridge's own words. A failed read can say "groups
+ *     returned 503" and the operator loses nothing, but "the group is not in
+ *     the bot's records" and "the write service is busy" are different
+ *     answers to "did my delete land?".
+ */
+
+const WRITE_TIMEOUT_MS = 30_000;
+
+export class WritesDisabledError extends Error {
+  readonly detail = "writes are switched off; set CONSOLE_WRITES=1 and a write target";
+  constructor() {
+    super("The console is in read-only mode.");
+    this.name = "WritesDisabledError";
+  }
+}
+
+async function writeRemote<T>(route: string, body: unknown): Promise<T> {
+  const url = `${BOT_WRITE_API_BASE_URL.replace(/\/$/, "")}/internal/console/${route}`;
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "content-type": "application/json",
+  };
+  if (BOT_WRITE_TOKEN) headers.authorization = `Bearer ${BOT_WRITE_TOKEN}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const err = error as Error;
+    // A timeout is not a refusal: the write may well have landed, and saying
+    // so is more use than reporting it as a failure.
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new BotUnavailableError(
+        `${route} did not answer within ${WRITE_TIMEOUT_MS / 1000}s — the change may still have been made`,
+      );
+    }
+    throw new BotUnavailableError(err.message);
+  }
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new BotUnavailableError(
+      reportedError(text) || `${route} returned ${response.status}`,
+    );
+  }
+  return (text ? JSON.parse(text) : {}) as T;
+}
+
+export type DeleteGroupResult = { jid: string };
+
+/**
+ * Remove a group from the bot's records. The jid is passed as one argument and
+ * never interpolated into a shell, and the remote form puts it in the path the
+ * write service validates.
+ */
+export async function deleteGroup(
+  jid: string,
+  { by, reason }: { by: string; reason?: string },
+): Promise<DeleteGroupResult> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+
+  if (WRITE_SOURCE === "remote") {
+    return writeRemote<DeleteGroupResult>(
+      `groups/${encodeURIComponent(jid)}/delete`,
+      { by, reason },
+    );
+  }
+  const args = ["delete-group", jid, "--by", by];
+  if (reason) args.push("--reason", reason);
+  return runBridge<DeleteGroupResult>(WRITE_BRIDGE, args);
 }

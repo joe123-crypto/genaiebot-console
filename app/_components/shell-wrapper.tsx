@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ConsoleShell } from "@/app/_components/console-shell";
-import { attentionItems, loadOverview } from "@/src/domains/console";
+import { attentionItems, loadOverview, needsDecisionCount } from "@/src/domains/console";
+import { OPERATOR_NAME } from "@/src/config";
 
 /**
  * Every page renders inside the same frame. The counts and attention card come
@@ -13,9 +14,7 @@ export async function Shell({ children }: { children: ReactNode }) {
   const counts = result.ok
     ? {
         campaigns: result.overview.campaignTotal,
-        groupsNeedingReview:
-          (result.overview.groupsByStatus["on-hold"] ?? 0) +
-          (result.overview.groupsByStatus["admin-only"] ?? 0),
+        groupsNeedingReview: needsDecisionCount(result.overview),
       }
     : {};
 
@@ -27,7 +26,7 @@ export async function Shell({ children }: { children: ReactNode }) {
     <ConsoleShell
       counts={counts}
       attention={attention}
-      operator={{ name: "Joseph Munemo", meta: "Operator" }}
+      operator={{ name: OPERATOR_NAME, meta: "Operator" }}
     >
       {children}
     </ConsoleShell>

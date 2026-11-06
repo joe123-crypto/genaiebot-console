@@ -457,6 +457,155 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .seg a { padding: 5px 13px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
 .seg a[aria-current="true"] { background: var(--primary); color: #fff; }
 
+/* ------------------------------------------------------- actions, modal --- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cell-actions { text-align: right; white-space: nowrap; }
+
+.row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.row-action:hover { background: var(--surface-muted); color: var(--text-muted); }
+
+.row-action-danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.row-action:focus-visible,
+.btn:focus-visible,
+.modal-input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.btn {
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) { background: var(--surface-muted); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-inverse);
+}
+
+.btn-danger:hover:not(:disabled) { background: #bf4536; border-color: #bf4536; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 27, 45, 0.38);
+}
+
+.modal {
+  /* The dialog is rendered from inside the row's actions cell, which sets
+     nowrap to keep its buttons on one line. Without this the body text
+     inherits it and runs off the side of the box. */
+  white-space: normal;
+  text-align: left;
+  width: 100%;
+  max-width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 20px;
+}
+
+.modal-title { font-size: 16px; font-weight: 650; margin: 0; }
+
+.modal-body {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 8px 0 16px;
+}
+
+.modal-body strong { color: var(--text); font-weight: 600; }
+
+.modal-label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.modal-label code {
+  font-size: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  /* A group name can be a jid, which is long and unbroken */
+  overflow-wrap: anywhere;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.modal-error {
+  color: #8e2f22;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  margin: 12px 0 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 @media (max-width: 900px) {
   .console-app { grid-template-columns: 1fr; }
   .console-sidebar {

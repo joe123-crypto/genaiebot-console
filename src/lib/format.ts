@@ -14,6 +14,16 @@ export function shortJid(jid: string) {
   return jid.replace(/@g\.us$/, "");
 }
 
+/** What an operator has to type to confirm a destructive action. `groupLabel`
+ *  falls back to "Unnamed group", which dozens of rows share and so confirms
+ *  nothing; the jid is at least unique to the row being acted on.
+ *
+ *  A blank name is treated as no name. Several rows carry one, and an empty
+ *  label would be satisfied by typing nothing at all. */
+export function confirmLabel(group: Pick<Group, "name" | "jid">) {
+  return group.name?.trim() || shortJid(group.jid);
+}
+
 /** Slugs that are acronyms rather than words, so "cv" does not read "Cv". */
 const ACRONYMS = new Set(["cv"]);
 

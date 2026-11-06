@@ -18,6 +18,24 @@ export const loadOverview = cache(async (): Promise<
 export type Attention = { label: string; detail?: string };
 
 /**
+ * Anything not advertising right now is what an operator has to decide about.
+ *
+ * The Groups page partitions its rows with this and the sidebar badge counts
+ * it; they used to ask the question differently and disagreed by the groups
+ * the bot has left, so the badge said 9 while the card listed 12.
+ */
+export function needsDecision(group: Pick<Group, "status">) {
+  return group.status !== "active";
+}
+
+/** The same question asked of the status tally, which is all the sidebar has.
+ *  Counting down from the total rather than adding the three known non-active
+ *  statuses keeps a status this console has not heard of from going missing. */
+export function needsDecisionCount(overview: Overview) {
+  return Math.max(0, overview.groupTotal - (overview.groupsByStatus.active ?? 0));
+}
+
+/**
  * What the bot needs a person for right now. Empty is the normal state, and the
  * card disappears entirely when it is — this is not an onboarding checklist.
  */
@@ -46,6 +64,25 @@ export function attentionItems(overview: Overview): Attention[] {
 
   if (!overview.capsEnabled) {
     items.push({ label: "Daily ad caps are off" });
+  }
+
+  // While operator config is moving to Firestore, every run compares the two
+  // stores and the bridge reports the newest comparison. Drift there is the
+  // one thing that decides whether the move is safe to finish, so it belongs
+  // where an operator already looks rather than in a run log.
+  const shadow = overview.configShadow;
+  if (shadow?.warning) {
+    items.push({ label: "Config source not honoured", detail: shadow.warning });
+  }
+  const check = shadow?.lastCheck;
+  if (check && check.status === "drift") {
+    items.push({
+      label: "Firestore disagrees with membership.json",
+      detail: String(check.problems.length),
+    });
+  }
+  if (check && (check.status === "unavailable" || check.status === "error")) {
+    items.push({ label: "Firestore comparison is failing", detail: check.status });
   }
 
   return items;
