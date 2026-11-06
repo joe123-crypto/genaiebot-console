@@ -1,0 +1,241 @@
+diff --git a/workspace/bin/console-read b/workspace/bin/console-read
+index 3860618..d0c94ea 100755
+--- a/workspace/bin/console-read
++++ b/workspace/bin/console-read
+@@ -300,6 +300,7 @@ def campaign_records(day):
+         try:
+             module = import_campaign(script)
+             captions = [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))]
++            captions = operator_config.campaign_captions(resolved(), slug, captions)
+             tracking = dict(getattr(module, "TRACKING", {}) or {})
+             raw_images = getattr(module, "IMAGE", None)
+             if raw_images is None:
+@@ -341,7 +342,8 @@ def campaign_records(day):
+                 "targetCount": len(all_jids),
+                 "weeklyCount": len(weekly_jids),
+                 "accounts": per_account,
+-                "source": "git",
++                "source": "console" if resolved()["mode"] == "firestore" and
++                          "captions" in (m.get("promos", {}).get(slug) or {}) else "git",
+                 "error": error,
+             }
+         )
+@@ -369,6 +371,7 @@ def preview(slug, day):
+     enabled = effective_enabled(entry)
+     module = import_campaign(script_path(entry["script"]))
+     captions = [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))]
++    captions = operator_config.campaign_captions(resolved(), slug, captions)
+     tracking = dict(getattr(module, "TRACKING", {}) or {})
+ 
+     daily_jids, weekly_jids = promo_membership.groups_for_promo(m, slug)
+diff --git a/workspace/lib/operator_config.py b/workspace/lib/operator_config.py
+index 2cb9c59..eb96700 100644
+--- a/workspace/lib/operator_config.py
++++ b/workspace/lib/operator_config.py
+@@ -417,6 +417,24 @@ def assemble(raw):
+     return membership, enabled, undecodable
+ 
+ 
++def validate_captions(captions):
++    """A campaign override is a non-empty list of non-blank caption templates."""
++    if (not isinstance(captions, list) or not captions or
++            any(not isinstance(text, str) or not text.strip() for text in captions)):
++        raise ConfigInvalid("captions must be a non-empty list of non-blank strings")
++    if len(json.dumps(captions, ensure_ascii=False).encode("utf-8")) > 60 * 1024:
++        raise ConfigInvalid("captions exceed 60 KiB")
++    return list(captions)
++
++
++def campaign_captions(source, slug, fallback):
++    """Copy from the same resolved config as targeting; file mode is a rollback."""
++    if source.get("mode") != "firestore":
++        return list(fallback)
++    meta = ((source.get("membership") or {}).get("promos") or {}).get(slug) or {}
++    return validate_captions(meta["captions"]) if "captions" in meta else list(fallback)
++
++
+ def quarantine(membership, undecodable=None):
+     """``(clean, report)``. Each group is validated on its own, against the shared
+     settings; one that fails is left out of ``clean`` and listed in
+@@ -426,6 +444,13 @@ def quarantine(membership, undecodable=None):
+     they matter to the operator, not to whether a post is safe."""
+     import promo_membership  # deferred: promo_membership will import this module
+ 
++    for slug, meta in (membership.get("promos") or {}).items():
++        if isinstance(meta, dict) and "captions" in meta:
++            try:
++                validate_captions(meta["captions"])
++            except ConfigInvalid as ex:
++                raise ConfigInvalid("campaigns/%s: %s" % (slug, ex)) from ex
++
+     shared = dict(membership)
+     shared["groups"] = {}
+     problems = promo_membership.validate(shared)
+diff --git a/workspace/lib/operator_writer.py b/workspace/lib/operator_writer.py
+index f87a635..f6d1b99 100644
+--- a/workspace/lib/operator_writer.py
++++ b/workspace/lib/operator_writer.py
+@@ -68,7 +68,7 @@ EDITABLE = {
+     "groups": ("name", "source", "status", "activity", "account", "daily_cap",
+                "promos", "weekly", "note"),
+     "lines": ("number",),
+-    "campaigns": ("enabled", "comment", "weekly_comment", "dir"),
++    "campaigns": ("enabled", "comment", "weekly_comment", "dir", "captions"),
+     "settings": ("activity", "caps_enabled", "contact_account", "bands"),
+ }
+ # A patch value has to survive a Firestore round trip and be something
+@@ -325,6 +325,10 @@ def write(collection, doc_id, patch, actor, env=None, *, opener=None, signer=Non
+     read at all -- a write must never be applied to a guess at the current state.
+     """
+     env = os.environ if env is None else env
++    if collection == "campaigns" and isinstance(patch, dict) and "captions" in patch:
++        if (env.get("GENAIE_CONFIG_SOURCE") or "").strip().lower() != "firestore":
++            raise WriteRefused("caption editing requires GENAIE_CONFIG_SOURCE=firestore "
++                               "so previews and future posts use the saved copy", status=409)
+     now = now or time.time
+     project, raw = operator_config.fetch(env, opener=opener, signer=signer,
+                                          now=now, sleep=sleep)
+diff --git a/workspace/lib/promo_broadcast.py b/workspace/lib/promo_broadcast.py
+index 6c74925..b178967 100644
+--- a/workspace/lib/promo_broadcast.py
++++ b/workspace/lib/promo_broadcast.py
+@@ -1118,6 +1118,14 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+             print("NO_REPLY")
+             return 0
+ 
++    # Preview and sending use the same templates from the same resolved read.
++    # A missing override preserves the copy shipped with the campaign script.
++    variants = operator_config.campaign_captions(
++        source, promo_config.promo_key(promo_name), variants)
++    # Removing a variant can leave a shipped per-index image beyond the new end.
++    variant_images = {index: path for index, path in variant_images.items()
++                      if index < len(variants)}
++
+     targets = source["doc"]
+     entries = load_targets(targets)
+     weekly = load_weekly_targets(targets)
+diff --git a/workspace/lib/test_campaign_captions.py b/workspace/lib/test_campaign_captions.py
+new file mode 100644
+index 0000000..4f2190e
+--- /dev/null
++++ b/workspace/lib/test_campaign_captions.py
+@@ -0,0 +1,119 @@
++"""Caption edits survive write/read and reach preview and sending without I/O."""
++import datetime
++import importlib.machinery
++import importlib.util
++import os
++from pathlib import Path
++import sys
++import unittest
++from unittest.mock import patch
++
++LIB = Path(__file__).resolve().parent
++sys.path.insert(0, str(LIB))
++import operator_config as oc
++import operator_writer as ow
++import promo_broadcast as pb
++from test_operator_writer import Harness
++
++
++def read_bridge():
++    loader = importlib.machinery.SourceFileLoader("caption_test_bridge", str(LIB.parent / "bin/console-read"))
++    spec = importlib.util.spec_from_loader(loader.name, loader)
++    bridge = importlib.util.module_from_spec(spec)
++    loader.exec_module(bridge)
++    return bridge
++
++
++class CaptionChanges(Harness):
++    def setUp(self):
++        super().setUp()
++        self.env["GENAIE_CONFIG_SOURCE"] = "firestore"
++
++    def loaded(self):
++        return oc.load(self.env, opener=self.firestore,
++                       signer=lambda *args: "jwt", now=lambda: self.clock[0],
++                       sleep=lambda s: None, log=lambda message: None)
++
++    def test_edit_add_delete_are_persisted_and_audited(self):
++        for captions in (["First {bot_number}", "Second {ref_link}"],
++                         ["Changed 💧\n\n{ref_link}", "Second {ref_link}", "Third"],
++                         ["Third"]):
++            with self.subTest(captions=captions):
++                before = self.stored("campaigns", "cv")
++                result = self.write("campaigns", "cv", {"captions": captions})
++                self.assertTrue(result["audit"])
++                self.assertEqual(self.stored("campaigns", "cv")["captions"], captions)
++                self.assertEqual(self.stored("campaigns", "cv")["rank"], before["rank"])
++                loaded = self.loaded()
++                source = {"mode": "firestore", "membership": loaded["membership"]}
++                self.assertEqual(oc.campaign_captions(source, "cv", ["Shipped"]), captions)
++
++    def test_invalid_copy_is_refused_before_any_commit(self):
++        for captions in ([], "text", [""], [" \n"], ["valid", None], ["💧" * 20000]):
++            with self.subTest(captions=captions):
++                with self.assertRaises(ow.WriteRefused):
++                    self.write("campaigns", "cv", {"captions": captions})
++                self.assertEqual(self.firestore.commits, [])
++
++    def test_file_and_shadow_modes_cannot_claim_to_save_live_captions(self):
++        for mode in ("file", "shadow", ""):
++            self.env["GENAIE_CONFIG_SOURCE"] = mode
++            with self.assertRaisesRegex(ow.WriteRefused, "requires GENAIE_CONFIG_SOURCE"):
++                self.write("campaigns", "cv", {"captions": ["Edited"]})
++        self.assertEqual(self.firestore.commits, [])
++
++    def test_preview_and_campaign_list_use_the_saved_templates(self):
++        captions = ["New 💧 {bot_number}\n\n{ref_link}"]
++        self.write("campaigns", "cv", {"captions": captions})
++        loaded = self.loaded()
++        bridge = read_bridge()
++        bridge._RESOLVED["config"] = {"mode": "firestore", "membership": loaded["membership"],
++                                       "switches": loaded["enabled"]}
++        day = datetime.date(2026, 11, 6)
++        record = next(row for row in bridge.campaign_records(day) if row["slug"] == "cv")
++        self.assertEqual(record["captions"], captions)
++        self.assertEqual(record["source"], "console")
++        preview = bridge.preview("cv", day)
++        self.assertEqual(preview["captions"], captions)
++        self.assertTrue(preview["groups"])
++        for group in preview["groups"]:
++            self.assertEqual(group["variant"], 0)
++            self.assertTrue(group["caption"].startswith("New 💧"))
++            self.assertNotIn("{bot_number}", group["caption"])
++            self.assertNotIn("{ref_link}", group["caption"])
++
++    def test_no_override_keeps_shipped_copy_and_file_mode_rolls_back(self):
++        source = {"mode": "firestore", "membership": self.loaded()["membership"]}
++        self.assertEqual(oc.campaign_captions(source, "cv", ["Shipped"]), ["Shipped"])
++        source["membership"]["promos"]["cv"]["captions"] = ["Edited"]
++        source["mode"] = "file"
++        self.assertEqual(oc.campaign_captions(source, "cv", ["Shipped"]), ["Shipped"])
++
++    def test_a_future_broadcast_sends_the_saved_copy_after_variant_deletion(self):
++        self.write("campaigns", "cv", {"captions": ["Edited 💧 {ref}"]})
++        loaded = self.loaded()
++        source = {"mode": "firestore", "membership": loaded["membership"],
++                  "enabled": True, "switches": loaded["enabled"], "doc": {"groups": ["123@g.us"]}}
++        image = os.path.join(self.dir, "ad.png")
++        Path(image).write_bytes(b"test image")
++        sent = []
++        def send(jid, text, image_path, account=None):
++            sent.append(text)
++            return True, '{"messageId":"test"}'
++        with patch.object(pb, "send_ad", side_effect=send):
++            result = pb.broadcast(
++                text=["Shipped first", "Shipped second"], image=image,
++                targets_file=os.path.join(self.dir, "targets.json"),
++                state_file=os.path.join(self.dir, "state.json"), promo_name="cv-promo",
++                variant_images={1: image}, tracking={"prefix": "CV", "number": "+10000000001"},
++                resolve_config=lambda *args, **kwargs: source, argv=[],
++                caps=None, account_status=lambda accounts: {account: True for account in accounts},
++                send_delay=0, start_jitter=0, cron_timeout=None)
++        self.assertEqual(result, 0)
++        self.assertEqual(len(sent), 1)
++        self.assertTrue(sent[0].startswith("Edited 💧 CV-"), sent)
++        self.assertNotIn("{ref}", sent[0])
++
++
++if __name__ == "__main__":
++    unittest.main()

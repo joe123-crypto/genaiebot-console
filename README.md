@@ -64,13 +64,27 @@ npm run build
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
 | Groups | Live. Review queue, advertising table, caps, rotation, operator notes. |
 | Campaigns | Live. All ten with slot, reach, line split, ref prefix, copy. |
-| Campaign preview | Live. Every caption variant as sent, per-group ref and link. |
+| Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
 | WhatsApp lines | Partial. Configured membership only — live socket status needs the console API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
 
-Everything is read-only. Writes (approving a group, editing a campaign, moving a
-slot) need the console API and the runtime overlay described in the plan.
+Writes are off by default. Set `CONSOLE_WRITES=1` in an environment where console
+access is controlled, and configure the bot's write service to enable editing.
+Caption changes use the bot's canonical Firestore campaign document, rather than
+keeping separate copy in the console.
+
+On a campaign page, **+ Add variant** creates a blank caption, the trash button
+removes a variant, and **Save changes** commits the whole set. At least one
+nonblank caption must remain. **Reset** discards the draft. Template placeholders
+such as `{bot_number}`, `{ref}` and `{ref_link}` remain editable; group-specific
+substitutions appear in the saved preview. Automatic refresh preserves drafts,
+and a save refuses captions that changed since editing began.
+
+Caption persistence also requires the companion bot update in
+[`integrations/genaebot-caption-variants.patch`](integrations/genaebot-caption-variants.patch).
+See [`integrations/README.md`](integrations/README.md) for its base revision,
+installation and verification. Deploy that update before enabling caption writes.
 
 While the console is visible and online, it refreshes the current page and sidebar
 60 seconds after each completed refresh. Checks pause in hidden tabs or while

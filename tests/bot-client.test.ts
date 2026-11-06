@@ -66,18 +66,21 @@ async function mockSpawn(
   { stdout = "{}", failWith }: { stdout?: string; failWith?: string } = {},
 ) {
   const { promisify } = await import("node:util");
-  const spawned: Array<{ cmd: string; argv: string[] }> = [];
+  const spawned: Array<{ cmd: string; argv: string[]; stdin?: string }> = [];
 
   const execFile = () => {
     throw new Error("the callback form is never used");
   };
-  (execFile as unknown as Record<symbol, unknown>)[promisify.custom] = async (
+  (execFile as unknown as Record<symbol, unknown>)[promisify.custom] = (
     cmd: string,
     argv: string[],
   ) => {
-    spawned.push({ cmd, argv });
-    if (failWith) throw Object.assign(new Error("exit 1"), { stdout: failWith, code: 1 });
-    return { stdout, stderr: "" };
+    const call = { cmd, argv, stdin: undefined as string | undefined };
+    spawned.push(call);
+    const result = failWith
+      ? Promise.reject(Object.assign(new Error("exit 1"), { stdout: failWith, code: 1 }))
+      : Promise.resolve({ stdout, stderr: "" });
+    return Object.assign(result, { child: { stdin: { end: (input: string) => { call.stdin = input; } } } });
   };
 
   vi.doMock("node:child_process", () => ({ execFile }));
@@ -275,5 +278,37 @@ describe("deleteGroup", () => {
     expect(await detailOfAsync(() => deleteGroup("1203@g.us", { by: "Joseph" }))).toBe(
       "membership.json has no 1203@g.us",
     );
+  });
+});
+
+describe("updateCampaignCaptions", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals(); vi.doUnmock("node:child_process"); vi.doUnmock("node:fs");
+  });
+  it("refuses writes before contacting the bot when disabled", async () => {
+    const { updateCampaignCaptions, WritesDisabledError } = await loadWith("local");
+    await expect(updateCampaignCaptions("cv", ["Copy"], { by: "Joseph" })).rejects.toBeInstanceOf(WritesDisabledError);
+  });
+  it("sends the canonical config request with the write service token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => '{"ok":true}' });
+    vi.stubGlobal("fetch", fetchMock);
+    const { updateCampaignCaptions } = await loadWith("remote", {
+      WRITE_SOURCE: "remote", WRITES_ENABLED: true,
+      BOT_WRITE_API_BASE_URL: "https://write.example/", BOT_WRITE_TOKEN: "write-key",
+    });
+    await updateCampaignCaptions("borehole", ["💧 {bot_number}\n\n{ref_link}"], { by: "Joseph" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://write.example/internal/console/config/campaigns/borehole");
+    expect(init.method).toBe("POST");
+    expect(init.headers.authorization).toBe("Bearer write-key");
+    expect(JSON.parse(init.body)).toEqual({ fields: { captions: ["💧 {bot_number}\n\n{ref_link}"] }, actor: "Joseph" });
+  });
+  it("passes local copy as JSON stdin to the write bridge without shell interpolation", async () => {
+    const spawned = await mockSpawn({ stdout: '{"ok":true}' });
+    const { updateCampaignCaptions } = await loadWith("local", { WRITES_ENABLED: true });
+    const captions = ['💧 "$HOME" `whoami`\n\n{ref_link}'];
+    await updateCampaignCaptions("cv", captions, { by: "Joseph" });
+    expect(spawned[0].argv).toEqual(["-I", "/checkout/workspace/bin/console-write"]);
+    expect(JSON.parse(spawned[0].stdin!)).toEqual({ collection: "campaigns", id: "cv", fields: { captions }, actor: "Joseph" });
   });
 });
