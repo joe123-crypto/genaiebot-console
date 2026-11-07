@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import {
+  Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useFilterUrl,
+} from "@/app/_components/filter-bar";
 import { STATUS_LABEL, StatusPill } from "@/app/_components/ui";
 import { DeleteGroup } from "@/app/groups/_components/delete-group";
 import {
@@ -14,11 +17,10 @@ import {
   lineOptions,
   sortGroupsForTable,
   tierOptions,
-  type FacetOption,
   type GroupFilter,
   type GroupView,
 } from "@/src/domains/group-filter";
-import { campaignTitle, confirmLabel, groupLabel, plural, shortJid } from "@/src/lib/format";
+import { campaignTitle, confirmLabel, groupLabel, shortJid } from "@/src/lib/format";
 import type { Group, GroupStatus } from "@/src/lib/types";
 
 type Props = {
@@ -35,47 +37,6 @@ type Props = {
 const VIEWS: GroupView[] = ["all", "needs-decision", "advertising", "no-campaign"];
 const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-member"];
 
-/** Long enough that a fast typist writes one history entry rather than twenty:
- *  Safari and Firefox throttle `replaceState` at around a hundred calls per
- *  thirty seconds. The table itself never waits for this — it filters from
- *  state as the key goes down. */
-const URL_SYNC_MS = 250;
-
-function Facet({
-  id,
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  options: FacetOption[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="filter-field">
-      <label className="filter-label" htmlFor={id}>
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        disabled={options.length === 0}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">All</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilter }: Props) {
   const id = useId();
   // Seeded once, deliberately. AutoRefresh re-renders the server page every 60
@@ -84,23 +45,7 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
   const [filter, setFilter] = useState<GroupFilter>(initialFilter);
   const search = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      // Start from the live query string so a parameter this table knows
-      // nothing about survives being filtered.
-      const next = new URLSearchParams(window.location.search);
-      for (const key of GROUP_FILTER_KEYS) next.delete(key);
-      for (const [key, value] of groupFilterQuery(filter)) next.set(key, value);
-      const query = next.toString();
-      const url = `${window.location.pathname}${query ? `?${query}` : ""}`;
-      // Next patches replaceState, so this updates the URL without refetching
-      // the page. The guard keeps a no-op render from writing history at all.
-      if (url !== `${window.location.pathname}${window.location.search}`) {
-        window.history.replaceState(null, "", url);
-      }
-    }, URL_SYNC_MS);
-    return () => clearTimeout(timer);
-  }, [filter]);
+  useFilterUrl(filter, groupFilterQuery, GROUP_FILTER_KEYS);
 
   const off = new Set(disabledPromos);
   const visible = sortGroupsForTable(filterGroups(groups, filter));
@@ -120,25 +65,17 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
 
   return (
     <div className="card">
-      <div className="filter-bar" role="search" aria-label="Filter groups">
-        <div className="filter-field filter-field-search">
-          <label className="filter-label" htmlFor={`${id}-q`}>
-            Search by group name or ID
-          </label>
-          <input
-            ref={search}
-            id={`${id}-q`}
-            type="search"
-            value={filter.q}
-            placeholder="Search groups…"
-            onChange={(event) => set("q", event.target.value)}
-          />
-        </div>
+      <FilterBar label="Filter groups">
+        <FilterSearch
+          id={`${id}-q`}
+          label="Search by group name or ID"
+          value={filter.q}
+          placeholder="Search groups…"
+          inputRef={search}
+          onChange={(value) => set("q", value)}
+        />
 
-        <div className="filter-field">
-          <label className="filter-label" htmlFor={`${id}-status`}>
-            Status
-          </label>
+        <FilterField id={`${id}-status`} label="Status">
           <select
             id={`${id}-status`}
             value={filter.status}
@@ -161,7 +98,7 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
               ))}
             </optgroup>
           </select>
-        </div>
+        </FilterField>
 
         <Facet
           id={`${id}-line`}
@@ -185,26 +122,26 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
           onChange={(value) => set("tier", value)}
         />
 
-        <div className="filter-actions">
+        <FilterActions>
           <button type="button" className="btn" onClick={clear} disabled={unfiltered}>
             Clear filters
           </button>
-        </div>
-      </div>
+        </FilterActions>
+      </FilterBar>
 
-      <div className="filter-summary">
-        <p className="card-note" role="status" aria-atomic="true">
-          {unfiltered
-            ? `Showing all ${plural(groups.length, "group")}`
-            : `Showing ${visible.length} of ${plural(groups.length, "group")}`}
-        </p>
+      <FilterSummary
+        shown={visible.length}
+        total={groups.length}
+        noun="group"
+        unfiltered={unfiltered}
+      >
         <p className="card-note">
           Groups needing a decision are listed first. A group the bot cannot post in returns{" "}
           <code>forbidden</code> at send time; one it has left returns <code>item-not-found</code>.
           Highlighted campaigns are the ones today&apos;s rotation gives the group&apos;s allowance
           to.
         </p>
-      </div>
+      </FilterSummary>
 
       <div
         className="table-wrap"

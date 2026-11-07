@@ -63,12 +63,20 @@ describe("attentionItems", () => {
     const items = attentionItems(
       overview({ campaigns: [campaign({ error: "SyntaxError: bad" })] }),
     );
-    expect(items[0]).toEqual({ label: "Campaigns failing to load", detail: "1" });
+    expect(items[0]).toEqual({
+      label: "Campaigns failing to load",
+      detail: "1",
+      href: "/campaigns?status=failing",
+    });
   });
 
   it("reports a campaign that targets nothing", () => {
     const items = attentionItems(overview({ campaigns: [campaign({ targetCount: 0 })] }));
-    expect(items).toContainEqual({ label: "Campaigns with no groups", detail: "1" });
+    expect(items).toContainEqual({
+      label: "Campaigns with no groups",
+      detail: "1",
+      href: "/campaigns?status=no-groups",
+    });
   });
 
   it("counts the group statuses an operator has to decide about", () => {
@@ -77,9 +85,22 @@ describe("attentionItems", () => {
         groupsByStatus: { active: 4, "on-hold": 2, "admin-only": 3, "not-a-member": 1 },
       }),
     );
-    expect(items).toContainEqual({ label: "Groups on hold", detail: "2" });
-    expect(items).toContainEqual({ label: "Groups the bot cannot post in", detail: "3" });
-    expect(items).toContainEqual({ label: "Groups the bot has left", detail: "1" });
+    // Each links to the view that holds the rows it counted.
+    expect(items).toContainEqual({
+      label: "Groups on hold",
+      detail: "2",
+      href: "/groups?status=on-hold",
+    });
+    expect(items).toContainEqual({
+      label: "Groups the bot cannot post in",
+      detail: "3",
+      href: "/groups?status=admin-only",
+    });
+    expect(items).toContainEqual({
+      label: "Groups the bot has left",
+      detail: "1",
+      href: "/groups?status=not-a-member",
+    });
   });
 
   it("flags caps being switched off, because that changes every send", () => {
@@ -113,7 +134,11 @@ describe("a switched-off campaign", () => {
     const items = attentionItems(
       overview({ campaigns: [campaign({ error: "boom", enabled: false })] }),
     );
-    expect(items).toContainEqual({ label: "Campaigns failing to load", detail: "1" });
+    expect(items).toContainEqual({
+      label: "Campaigns failing to load",
+      detail: "1",
+      href: "/campaigns?status=failing",
+    });
   });
 });
 

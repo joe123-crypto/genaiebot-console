@@ -14,8 +14,14 @@
  * keeps typing instant.
  */
 
+import {
+  facetValues, isDefault, queryFromFilter, readParam, withSelection,
+  type FacetOption,
+} from "@/src/domains/filter";
 import { campaignTitle, shortJid } from "@/src/lib/format";
 import type { ActivityTier, Group, GroupStatus } from "@/src/lib/types";
+
+export type { FacetOption };
 
 /** The three bands the Groups page used to render as separate cards. They are
  *  disjoint and exhaustive, which is what lets one flat table replace them. */
@@ -87,11 +93,6 @@ export function isIdle(group: Pick<Group, "status" | "promos">) {
   return group.status === "active" && group.promos.length === 0;
 }
 
-function firstValue(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) return value[0] ?? "";
-  return value ?? "";
-}
-
 /**
  * Tolerant by design. A hand-edited or truncated URL should land on a usable
  * table rather than an empty one, so an unreadable `status` falls back to "all".
@@ -104,9 +105,7 @@ function firstValue(value: string | string[] | undefined): string {
 export function parseGroupFilter(
   params: Record<string, string | string[] | undefined> | URLSearchParams,
 ): GroupFilter {
-  const read = (key: string) =>
-    params instanceof URLSearchParams ? params.get(key) ?? "" : firstValue(params[key]);
-
+  const read = (key: string) => readParam(params, key);
   const status = read("status");
 
   return {
@@ -120,16 +119,11 @@ export function parseGroupFilter(
 
 /** Non-default keys only, so an unfiltered table has a clean URL to share. */
 export function groupFilterQuery(filter: GroupFilter): URLSearchParams {
-  const params = new URLSearchParams();
-  for (const key of GROUP_FILTER_KEYS) {
-    const value = filter[key];
-    if (value !== DEFAULT_GROUP_FILTER[key]) params.set(key, value);
-  }
-  return params;
+  return queryFromFilter(filter, DEFAULT_GROUP_FILTER, GROUP_FILTER_KEYS);
 }
 
 export function isDefaultGroupFilter(filter: GroupFilter) {
-  return GROUP_FILTER_KEYS.every((key) => filter[key] === DEFAULT_GROUP_FILTER[key]);
+  return isDefault(filter, DEFAULT_GROUP_FILTER, GROUP_FILTER_KEYS);
 }
 
 /**
@@ -197,25 +191,8 @@ export function sortGroupsForTable(groups: Group[]) {
   return [...groups].sort((a, b) => band(a) - band(b));
 }
 
-export type FacetOption = { value: string; label: string; stale?: boolean };
-
-/** Codepoint order, not `localeCompare`: the server and the browser must agree
- *  on the option order exactly or the first render mismatches. */
-function byValue(a: string, b: string) {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-/** A selection whose groups are gone — the line was renamed, the campaign
- *  retired, the row deleted — stays in the list and says so. Dropping it would
- *  leave the select showing its first option while the table filtered by
- *  something else entirely. */
-function withSelection(options: FacetOption[], selected: string, label: (value: string) => string) {
-  if (!selected || options.some((option) => option.value === selected)) return options;
-  return [...options, { value: selected, label: label(selected), stale: true }];
-}
-
 export function lineOptions(groups: Group[], selected: string): FacetOption[] {
-  const lines = [...new Set(groups.map((group) => group.account).filter(Boolean))].sort(byValue);
+  const lines = facetValues(groups.map((group) => group.account));
   return withSelection(
     lines.map((line) => ({ value: line, label: line })),
     selected,
@@ -224,8 +201,7 @@ export function lineOptions(groups: Group[], selected: string): FacetOption[] {
 }
 
 export function tierOptions(groups: Group[], selected: string): FacetOption[] {
-  const seen = new Set<string>([...ACTIVITY_TIERS, ...groups.map((group) => group.activity)]);
-  const tiers = [...seen].filter(Boolean).sort(byValue);
+  const tiers = facetValues([...ACTIVITY_TIERS, ...groups.map((group) => group.activity)]);
   return withSelection(
     tiers.map((tier) => ({ value: tier, label: tier })),
     selected,
@@ -248,7 +224,7 @@ export function campaignOptions(
 ): FacetOption[] {
   const off = new Set(disabledPromos);
   const label = (slug: string) => `${campaignTitle(slug)}${off.has(slug) ? " (off)" : ""}`;
-  const slugs = [...new Set(groups.flatMap((group) => group.promos))].sort(byValue);
+  const slugs = facetValues(groups.flatMap((group) => group.promos));
   return withSelection(
     slugs.map((slug) => ({ value: slug, label: label(slug) })),
     selected,

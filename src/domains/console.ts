@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { hasNoGroups, isFailing } from "@/src/domains/campaign-filter";
 import { BotUnavailableError, getOverview } from "@/src/lib/bot-client";
 import type { Group, Overview } from "@/src/lib/types";
 
@@ -8,6 +9,7 @@ import type { Group, Overview } from "@/src/lib/types";
  *  which cannot import anything that reaches the bot adapters. */
 export * from "@/src/domains/schedule";
 export * from "@/src/domains/group-filter";
+export * from "@/src/domains/campaign-filter";
 
 /** Deduped so the layout and the page it wraps share one read per request. */
 export const loadOverview = cache(async (): Promise<
@@ -21,7 +23,9 @@ export const loadOverview = cache(async (): Promise<
   }
 });
 
-export type Attention = { label: string; detail?: string };
+/** `href` is the view that shows the rows behind the number. An item without
+ *  one has no view that isolates it, and stays plain text. */
+export type Attention = { label: string; detail?: string; href?: string };
 
 /** `needsDecision` now lives in `@/src/domains/group-filter` and is re-exported
  *  above: the Groups table asks the same question in the browser, and it must
@@ -45,21 +49,43 @@ export function attentionItems(overview: Overview): Attention[] {
   const notMember = overview.groupsByStatus["not-a-member"] ?? 0;
   const onHold = overview.groupsByStatus["on-hold"] ?? 0;
 
-  const broken = overview.campaigns.filter((campaign) => campaign.error);
+  // Counted with the very predicates the linked views filter by, so the number
+  // here and the rows there cannot disagree.
+  const broken = overview.campaigns.filter(isFailing);
   if (broken.length > 0) {
-    items.push({ label: "Campaigns failing to load", detail: String(broken.length) });
+    items.push({
+      label: "Campaigns failing to load",
+      detail: String(broken.length),
+      href: "/campaigns?status=failing",
+    });
   }
 
-  const empty = overview.campaigns.filter(
-    (campaign) => campaign.enabled && !campaign.error && campaign.targetCount === 0,
-  );
+  const empty = overview.campaigns.filter(hasNoGroups);
   if (empty.length > 0) {
-    items.push({ label: "Campaigns with no groups", detail: String(empty.length) });
+    items.push({
+      label: "Campaigns with no groups",
+      detail: String(empty.length),
+      href: "/campaigns?status=no-groups",
+    });
   }
 
-  if (onHold > 0) items.push({ label: "Groups on hold", detail: String(onHold) });
-  if (adminOnly > 0) items.push({ label: "Groups the bot cannot post in", detail: String(adminOnly) });
-  if (notMember > 0) items.push({ label: "Groups the bot has left", detail: String(notMember) });
+  if (onHold > 0) {
+    items.push({ label: "Groups on hold", detail: String(onHold), href: "/groups?status=on-hold" });
+  }
+  if (adminOnly > 0) {
+    items.push({
+      label: "Groups the bot cannot post in",
+      detail: String(adminOnly),
+      href: "/groups?status=admin-only",
+    });
+  }
+  if (notMember > 0) {
+    items.push({
+      label: "Groups the bot has left",
+      detail: String(notMember),
+      href: "/groups?status=not-a-member",
+    });
+  }
 
   if (!overview.capsEnabled) {
     items.push({ label: "Daily ad caps are off" });
