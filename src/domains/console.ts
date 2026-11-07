@@ -1,7 +1,11 @@
 import { cache } from "react";
 import { BotUnavailableError, getOverview } from "@/src/lib/bot-client";
-import { slotLabel, worstCaseRunSeconds } from "@/src/lib/format";
 import type { Group, Overview } from "@/src/lib/types";
+
+/** The day's slots and the rules read off them live apart from this module:
+ *  they are pure, and the Schedule screen's draggable timeline is a client
+ *  component, which cannot import anything that reaches the bot adapters. */
+export * from "@/src/domains/schedule";
 
 /** Deduped so the layout and the page it wraps share one read per request. */
 export const loadOverview = cache(async (): Promise<
@@ -88,14 +92,6 @@ export function attentionItems(overview: Overview): Attention[] {
   return items;
 }
 
-/**
- * Campaign slots ordered through the day, used by Overview and Schedule.
- *
- * A switched-off campaign is left out rather than drawn faintly: the timeline
- * feeds the per-line overlap rule, and a campaign that installs no cron can
- * neither occupy a slot nor collide with one. The Campaigns screen is where it
- * is still listed, marked off.
- */
 export type LinePromo = { slug: string; count: number; off: boolean };
 
 export type LineSummary = {
@@ -151,43 +147,4 @@ export function lineSummaries(
       promos,
     };
   });
-}
-
-export function daySlots(overview: Overview) {
-  return overview.campaigns
-    .filter((campaign) => campaign.enabled && campaign.hour !== null)
-    .map((campaign) => ({
-      slug: campaign.slug,
-      name: campaign.name,
-      time: slotLabel(campaign),
-      minutes: (campaign.hour ?? 0) * 60 + (campaign.minute ?? 0),
-      targetCount: campaign.targetCount,
-      accounts: campaign.accounts,
-    }))
-    .sort((a, b) => a.minutes - b.minutes);
-}
-
-export type DaySlot = ReturnType<typeof daySlots>[number];
-
-/**
- * When a slot's worst case is over, in minutes since midnight. The overlap rule
- * and the running marker have to agree on where a run ends, so both ask here.
- */
-export function runEndsAt(slot: DaySlot) {
-  return slot.minutes + worstCaseRunSeconds(slot.targetCount) / 60;
-}
-
-/**
- * Slots whose worst case still covers `nowMinutes`. The window is half-open, so
- * a run is marked from its own start minute and released the minute its worst
- * case expires. More than one slot can come back — that is exactly the overlap
- * the Schedule banner warns about, and hiding it here would contradict it.
- */
-export function runningNow(slots: DaySlot[], nowMinutes: number) {
-  return slots.filter((slot) => slot.minutes <= nowMinutes && nowMinutes < runEndsAt(slot));
-}
-
-/** The first slot still to start, or undefined once the day's last one has. */
-export function nextUp(slots: DaySlot[], nowMinutes: number) {
-  return slots.find((slot) => slot.minutes > nowMinutes);
 }
