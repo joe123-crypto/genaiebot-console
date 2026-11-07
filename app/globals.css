@@ -730,3 +730,42 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   .attention-card { order: 99; width: 100%; }
   .console-content { padding: 20px 16px 40px; }
 }
+
+/* Live WhatsApp account management. */
+.account-toolbar, .account-actions, .account-dialog-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.account-toolbar { margin-bottom: 22px; color: var(--text-muted); font-size: 13px; }
+.account-observed { display: block; font-size: 12px; color: var(--text-muted); }
+.account-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 9px 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.account-button:hover:not(:disabled) { background: var(--surface-muted); }
+.account-button:disabled { opacity: .5; cursor: not-allowed; }
+.account-button:focus-visible, .account-icon-button:focus-visible, .account-form input:focus-visible { outline: 3px solid var(--primary-border); outline-offset: 3px; }
+.account-button-primary { background: var(--primary); border-color: var(--primary); color: white; }
+.account-button-primary:hover:not(:disabled) { background: var(--primary-strong); }
+.account-button-danger { color: var(--danger); border-color: var(--danger-border); }
+.account-button-danger:hover:not(:disabled) { background: var(--danger-soft); }
+.account-card-body { display: grid; gap: 16px; }
+.account-number { font-size: 20px; font-weight: 600; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.account-policy { margin-top: -10px !important; }
+.account-contact { margin-left: 8px; }
+.account-stats { display: flex; gap: 32px; }
+.account-stats strong { display: block; font-size: 23px; font-weight: 600; }
+.account-actions { justify-content: flex-start; }
+.account-card-body .card-note { margin: 0; }
+.account-notice { padding: 12px 16px; border: 1px solid var(--success-border); border-radius: var(--radius-sm); background: var(--success-soft); color: #12694f; }
+.account-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; margin: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow-pop); color: var(--text); background: var(--surface); }
+.account-dialog::backdrop { background: rgba(15, 27, 45, .4); }
+.account-dialog-head { flex-wrap: nowrap; margin-bottom: 18px; }
+.account-dialog-head h2 { margin: 0; font-size: 19px; }
+.account-icon-button { display: inline-flex; background: none; border: 0; color: var(--text-muted); padding: 6px; cursor: pointer; }
+.account-form { display: grid; gap: 12px; }
+.account-form label { font-weight: 600; }
+.account-form input { width: 100%; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; }
+.account-pairing { text-align: center; }
+.account-pairing img { display: block; width: min(280px, 100%); height: auto; margin: 18px auto; image-rendering: pixelated; }
+@media (max-width: 600px) { .account-stats { gap: 22px; } .account-actions { gap: 8px; } }

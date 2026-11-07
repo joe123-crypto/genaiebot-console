@@ -66,7 +66,7 @@ npm run build
 | Campaigns | Live. All ten with slot, reach, line split, ref prefix, copy. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
-| WhatsApp lines | Partial. Configured membership only — live socket status needs the console API. |
+| WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
 
 Writes are off by default. Set `CONSOLE_WRITES=1` in an environment where console
@@ -92,6 +92,40 @@ offline, and resume with an immediate refresh when visible and online again.
 Each tab checks independently, using the same server-side adapters as page loads;
 gateway credentials stay on the server. Existing bot errors are retried on the
 next check. Activity remains a placeholder.
+
+## WhatsApp account controls
+
+Set `BOT_API_BASE_URL` and `BOT_API_TOKEN` to the live console API, even when
+running the UI locally. Deploy the companion `genaebot` backend changes first;
+the checkout-only `console-read` adapter cannot operate WhatsApp accounts. The
+backend uses its pinned OpenClaw 2026.9.9 SDK and existing gateway credentials.
+Browser requests go through same-origin Next.js routes; tokens remain server-side.
+Account mutations also respect `CONSOLE_WRITES=1`; live status remains available
+when writes are disabled. Permanent removal and console sign-in are deferred.
+
+- **Link** adds a new account or pairs an existing unlinked one by QR. New
+  accounts have replies disabled and no group assignments. To replace an
+  existing saved login, Unlink first, then Link.
+- **Unlink** stops sends/replies and clears the saved WhatsApp login after
+  confirmation. Configuration, assignments, contact references and history stay.
+- **Pause** stops sends/replies and retains login. It survives gateway restart.
+- **Start** reactivates a paused account without a QR. An invalid login needs Link.
+
+Existing reply policies are preserved. `REPLIES_DISABLED=1` blocks starting the
+default account; after removing it, use Start explicitly. Messages already
+submitted to WhatsApp may still arrive after stopping an account.
+
+Status is checked every five seconds and pairing every two seconds, only while
+visible and online. Pairing sessions last up to three minutes. Closing the dialog
+stops checks; Continue linking reopens the attempt. Failed reads replace connection
+badges with unavailable status and disable actions until a successful refresh.
+Configured membership counts load separately and remain distinct from delivery
+or socket state. Overnight standby stays authoritative (wake 05:45 Africa/Algiers).
+
+For the isolated worktree, install dependencies and run `npm run dev` from that
+worktree. Do not start a second bot gateway against the same WhatsApp credentials.
+Tests cover simulated scans and the pinned gateway SDK; a real QR scan requires
+the account owner's phone.
 
 ## Conventions
 
