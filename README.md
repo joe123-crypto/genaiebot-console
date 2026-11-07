@@ -64,7 +64,7 @@ npm run build
 |---|---|
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
 | Groups | Live. One searchable, filterable table: caps, rotation, operator notes. |
-| Campaigns | Live. All ten with slot, reach, line split, ref prefix, copy. |
+| Campaigns | Live. Searchable and filterable; slot, reach, line split, ref prefix, copy. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are listed, not yet shown or editable. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
@@ -87,7 +87,13 @@ Caption persistence also requires the companion bot update in
 See [`integrations/README.md`](integrations/README.md) for its base revision,
 installation and verification. Deploy that update before enabling caption writes.
 
-## Group search and filters
+## Searching and filtering a list
+
+Both list screens wear the same bar: a search box, facet menus, a **Clear
+filters** button and a count of what is on screen. The mechanics below are
+described once under Groups and hold for Campaigns too; only the facets differ.
+
+### Groups
 
 Eighty-odd groups do not fit on a screen, and most of them have no name — the
 jid is the only thing that tells two rows apart. So the Groups screen is one
@@ -128,6 +134,32 @@ instead of walking backwards through a search. A hand-edited or truncated one
 falls back to showing everything rather than an empty table, and a line or
 campaign whose groups have since gone stays in its menu, marked, instead of the
 control silently switching to a different filter.
+
+### Campaigns
+
+The Campaigns table carries the same bar, with the facets that mean something
+for a campaign. **Search** matches the title, the id beneath it and the ref
+prefix, so `BH`, `borehole` and `borehole-drilling-promo` all reach the same
+row. **Status** is the useful one: running, switched off, failing to load, or
+running but pointed at no groups. **Line** matches a campaign that posts
+through that line among several, unlike a group, which has exactly one.
+**Cadence** separates the campaigns with weekly-only groups, and **Slot**
+buckets them by the part of the day their cron fires in — including the
+campaigns whose time cannot be read, which the Schedule screen drops and this
+one must not.
+
+Nothing here reorders the table: the bridge sends campaigns in the order they
+run through the day, filtering preserves it, and `daySlots` is no help because
+it leaves out exactly the switched-off and unscheduled rows this screen exists
+to show.
+
+With ten campaigns the search box earns less than it does on Groups. The
+status views are the point, which is why the **Needs attention** card now links
+to them: "Campaigns with no groups" opens the table already filtered to the
+rows it counted. Each linked item and the view it opens share one predicate, so
+the number in the card and the rows on screen cannot disagree. The three group
+items in that card link the same way. Items with no view that isolates them —
+the Firestore comparison, the config source — stay plain text.
 
 ## Campaign group drafts
 

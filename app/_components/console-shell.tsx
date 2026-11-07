@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { CheckCheck } from "lucide-react";
 import { PRODUCT_NAME } from "@/src/config";
+// Type-only, so this drags none of that module's bot adapters in.
+import type { Attention } from "@/src/domains/console";
 import { ConsoleNav, type NavCounts } from "@/app/_components/console-nav";
 import { AutoRefresh } from "@/app/_components/auto-refresh";
-
-type Attention = { label: string; detail?: string };
 
 /**
  * The console frame: a fixed sidebar carrying the brand, an attention card that
@@ -40,12 +41,25 @@ export function ConsoleShell({
               <span className="attention-dot" aria-hidden />
               Needs attention
             </span>
-            {attention.map((item) => (
-              <span className="attention-item" key={item.label}>
-                <span>{item.label}</span>
-                {item.detail ? <strong>{item.detail}</strong> : null}
-              </span>
-            ))}
+            {attention.map((item) => {
+              const body = (
+                <>
+                  <span>{item.label}</span>
+                  {item.detail ? <strong>{item.detail}</strong> : null}
+                </>
+              );
+              // An item with a view that isolates it becomes the way to reach
+              // it; one with nowhere to go stays the text it always was.
+              return item.href ? (
+                <Link className="attention-item attention-link" key={item.label} href={item.href}>
+                  {body}
+                </Link>
+              ) : (
+                <span className="attention-item" key={item.label}>
+                  {body}
+                </span>
+              );
+            })}
           </div>
         ) : null}
 

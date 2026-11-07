@@ -215,6 +215,15 @@ a { color: inherit; text-decoration: none; }
 
 .attention-item + .attention-item { border-top: 1px solid var(--primary-border); padding-top: 7px; }
 
+/* An item that links to the view holding its rows. Underlined on hover rather
+   than always, so the card stays a list and does not read as a nav block. */
+.attention-link:hover { text-decoration: underline; }
+.attention-link:focus-visible {
+  outline: 2px solid var(--primary-strong);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* ---------------------------------------------------------------- page ----- */
 
 .page-head {
@@ -288,8 +297,9 @@ a { color: inherit; text-decoration: none; }
 
 /* -------------------------------------------------------------- filters ---- */
 
-/* The Groups table's search and facets. Native control appearance is kept on
-   purpose; the box is borrowed from .modal-input rather than forking it. */
+/* The search and facets above a list table, shared by Groups and Campaigns.
+   Native control appearance is kept on purpose; the box is borrowed from
+   .modal-input rather than forking it. */
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
