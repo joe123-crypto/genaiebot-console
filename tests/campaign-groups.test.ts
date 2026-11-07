@@ -44,6 +44,9 @@ function stored(slug = props.slug) {
   const raw = localStorage.getItem(groupDraftKey(slug));
   return raw ? JSON.parse(raw) : null;
 }
+function storageEvent(key: string | null, newValue: string | null, storageArea = localStorage) {
+  fireEvent(window, new StorageEvent("storage", { key, newValue, storageArea }));
+}
 function row(name: string) { return screen.getByText(name).closest("tr")!; }
 beforeEach(() => {
   localStorage.clear();
@@ -53,6 +56,60 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("campaign group drafts", () => {
+  it.each([null, { version: 1, added: [], removed: [], paused: ["1@g.us"] }])(
+    "does not overwrite another tab’s newer draft before its storage event arrives (initial: %j)", (initial) => {
+      if (initial) localStorage.setItem(groupDraftKey(props.slug), JSON.stringify(initial));
+      const view = mount();
+      const external = { version: 1, added: ["3@g.us"], removed: ["2@g.us"], paused: ["3@g.us"] };
+      localStorage.setItem(groupDraftKey(props.slug), JSON.stringify(external));
+      view.rerender(createElement(CampaignGroups, { ...props, liveGroups: [...live], knownGroups: [...known] }));
+      expect(stored()).toEqual(external);
+      expect(screen.queryByText("Market Two")).toBeNull();
+      expect(within(row("New Market")).getByText("Paused · draft")).toBeTruthy();
+    });
+
+  it("synchronizes additions and pauses from another tab without echoing writes or replaying older events", () => {
+    mount();
+    const key = groupDraftKey(props.slug);
+    const external = { version: 1, added: ["3@g.us"], removed: ["2@g.us"], paused: ["3@g.us"] };
+    const raw = JSON.stringify(external);
+    localStorage.setItem(key, raw);
+    const set = vi.spyOn(Storage.prototype, "setItem");
+    const remove = vi.spyOn(Storage.prototype, "removeItem");
+    storageEvent(key, raw);
+    expect(stored()).toEqual(external);
+    expect(within(row("New Market")).getByText("Paused · draft")).toBeTruthy();
+    expect(screen.queryByText("Market Two")).toBeNull();
+    expect(screen.getByText("Draft updated from another tab.")).toBeTruthy();
+    // A delayed event must read current storage, not restore its stale newValue.
+    storageEvent(key, JSON.stringify({ ...external, added: [], removed: [], paused: [] }));
+    expect(stored()).toEqual(external); expect(screen.getByText("New Market")).toBeTruthy();
+    expect(set).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("synchronizes another tab’s reset and localStorage.clear without restoring an old draft on refresh", () => {
+    const view = mount(); const key = groupDraftKey(props.slug);
+    click("Pause Market One in this campaign");
+    localStorage.removeItem(key); storageEvent(key, null);
+    expect(screen.queryByText("Paused · draft")).toBeNull(); expect(stored()).toBeNull();
+    click("Pause Market Two in this campaign");
+    localStorage.clear(); storageEvent(null, null);
+    expect(screen.queryByText("Paused · draft")).toBeNull(); expect(stored()).toBeNull();
+    view.rerender(createElement(CampaignGroups, { ...props, liveGroups: [...live], knownGroups: [...known] }));
+    expect(stored()).toBeNull();
+  });
+
+  it("ignores changes for other campaigns and other storage areas", () => {
+    mount(); click("Pause Market One in this campaign"); const before = stored();
+    const otherKey = groupDraftKey("cv");
+    localStorage.setItem(otherKey, JSON.stringify({ ...before, paused: ["2@g.us"] }));
+    storageEvent(otherKey, localStorage.getItem(otherKey));
+    storageEvent(groupDraftKey(props.slug), null, sessionStorage);
+    expect(stored()).toEqual(before);
+    expect(within(row("Market One")).getByText("Paused · draft")).toBeTruthy();
+    expect(within(row("Market Two")).getByText("At cap")).toBeTruthy();
+  });
+
   it("warns before removal, focuses Cancel, and leaves the draft unchanged on Cancel or Escape", () => {
     mount(); click("Pause Market One in this campaign");
     const before = stored();

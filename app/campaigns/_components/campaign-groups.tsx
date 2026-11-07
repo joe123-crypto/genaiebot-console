@@ -15,6 +15,18 @@ type Props = {
   variantCount: number;
 };
 
+type BrowserDraft = { draft: CampaignGroupDraft; raw: string | null; invalid: boolean };
+const INVALID_DRAFT_NOTICE = "The saved group draft could not be read. Showing the latest live groups instead.";
+const EXTERNAL_DRAFT_NOTICE = "Draft updated from another tab.";
+
+function decodeBrowserDraft(raw: string | null): BrowserDraft {
+  try {
+    return { raw, draft: raw === null ? emptyGroupDraft() : parseGroupDraft(raw), invalid: false };
+  } catch {
+    return { raw, draft: emptyGroupDraft(), invalid: true };
+  }
+}
+
 function RemoveGroupDialog({ group, close, confirm, fallbackFocus }: {
   group: Pick<KnownCampaignGroup, "jid" | "name">;
   close: () => void;
@@ -127,7 +139,10 @@ export function CampaignGroups(props: Props) {
 function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Props) {
   const id = useId();
   const key = groupDraftKey(slug);
-  const [draft, setDraft] = useState<CampaignGroupDraft | null>(null);
+  // Keep the observed storage value with its draft: even a pending effect from
+  // an older render must compare against the value that render actually read.
+  const [snapshot, setSnapshot] = useState<BrowserDraft | null>(null);
+  const draft = snapshot?.draft ?? null;
   const [open, setOpen] = useState(false);
   const [removeJid, setRemoveJid] = useState<string | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
@@ -135,35 +150,70 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    let initial = emptyGroupDraft();
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (raw !== null) {
-        try { initial = parseGroupDraft(raw); }
-        catch { setNotice("The saved group draft could not be read. Showing the latest live groups instead."); }
+    function load(external: boolean) {
+      try {
+        // Read current storage rather than event.newValue: queued events can
+        // describe an earlier save, or a draft already reset by another tab.
+        const latest = decodeBrowserDraft(window.localStorage.getItem(key));
+        setSnapshot(latest);
+        setStorageFailed(false);
+        if (latest.invalid) setNotice(INVALID_DRAFT_NOTICE);
+        else if (external) setNotice(EXTERNAL_DRAFT_NOTICE);
+      } catch {
+        setStorageFailed(true);
+        setSnapshot((previous) => previous ?? decodeBrowserDraft(null));
       }
-    } catch {
-      setStorageFailed(true);
     }
-    setDraft(initial);
+
+    function onStorage(event: StorageEvent) {
+      if (event.key !== key && event.key !== null) return;
+      try {
+        if (event.storageArea === window.localStorage) load(true);
+      } catch { setStorageFailed(true); }
+    }
+
+    window.addEventListener("storage", onStorage);
+    load(false);
+    return () => window.removeEventListener("storage", onStorage);
   }, [key]);
 
   useEffect(() => {
     // Never write the initial empty state before the browser draft has loaded.
-    if (draft === null) return;
-    const result = reconcileGroupDraft(draft, liveGroups, knownGroups);
-    if (result.draft !== draft) setDraft(result.draft);
+    if (snapshot === null) return;
+    let readable = true;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw !== snapshot.raw) {
+        const latest = decodeBrowserDraft(raw);
+        setSnapshot(latest);
+        setNotice(latest.invalid ? INVALID_DRAFT_NOTICE : EXTERNAL_DRAFT_NOTICE);
+        return;
+      }
+    } catch {
+      readable = false;
+      setStorageFailed(true);
+    }
+    const result = reconcileGroupDraft(snapshot.draft, liveGroups, knownGroups);
+    if (result.draft !== snapshot.draft) setSnapshot({ ...snapshot, draft: result.draft });
     if (result.droppedAdditions > 0) {
       setNotice(`${plural(result.droppedAdditions, "draft addition")} removed because the groups are no longer known or active.`);
     }
+    if (!readable) return;
     try {
-      if (hasGroupDraft(result.draft)) window.localStorage.setItem(key, JSON.stringify(result.draft));
-      else window.localStorage.removeItem(key);
+      const raw = hasGroupDraft(result.draft) ? JSON.stringify(result.draft) : null;
+      // Do not echo storage events or write again just because live props refresh.
+      if (raw !== snapshot.raw) {
+        if (raw === null) window.localStorage.removeItem(key);
+        else window.localStorage.setItem(key, raw);
+      }
+      if (raw !== snapshot.raw || snapshot.invalid) {
+        setSnapshot({ draft: result.draft, raw, invalid: false });
+      }
       setStorageFailed(false);
     } catch {
       setStorageFailed(true);
     }
-  }, [draft, key, liveGroups, knownGroups]);
+  }, [snapshot, key, liveGroups, knownGroups]);
 
   const current = draft ? reconcileGroupDraft(draft, liveGroups, knownGroups).draft : emptyGroupDraft();
   const removed = new Set(current.removed);
@@ -186,7 +236,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
   }, [removalAvailable]);
 
   function change(next: CampaignGroupDraft) {
-    setDraft(next);
+    setSnapshot({ draft: next, raw: snapshot?.raw ?? null, invalid: false });
     setNotice(null);
   }
 
