@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Image as ImageIcon, Repeat2 } from "lucide-react";
+import { Repeat2 } from "lucide-react";
+import { CampaignThumb } from "@/app/campaigns/_components/campaign-images";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { BotUnavailableError, getCampaigns } from "@/src/lib/bot-client";
@@ -124,15 +125,19 @@ export default async function CampaignsPage() {
                       ) : null}
                     </td>
                     <td className="cell-muted">
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        <Repeat2 size={14} aria-hidden />
-                        {plural(campaign.captions.length, "variant")}
-                      </span>
-                      <br />
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        <ImageIcon size={14} aria-hidden />
-                        {plural(campaign.images.length, "image")}
-                      </span>
+                      <div className="campaign-copy-cell">
+                        {/* Decorative: the counts beside it say the same thing
+                            as text, for anything that cannot see the picture. */}
+                        <CampaignThumb slug={campaign.slug} images={campaign.images} />
+                        <span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                            <Repeat2 size={14} aria-hidden />
+                            {plural(campaign.captions.length, "variant")}
+                          </span>
+                          <br />
+                          {plural(campaign.images.length, "image")}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 ))}

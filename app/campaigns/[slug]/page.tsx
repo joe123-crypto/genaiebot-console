@@ -7,8 +7,11 @@ import {
   captionSaveUnavailableReason,
   getCampaignPreview,
   getCampaigns,
+  imageWritesUnavailableReason,
 } from "@/src/lib/bot-client";
+import { CampaignImages } from "@/app/campaigns/_components/campaign-images";
 import { CaptionVariants } from "@/app/campaigns/_components/caption-variants";
+import { campaignAssetDir } from "@/src/lib/campaign-images";
 import { WRITES_ENABLED } from "@/src/config";
 import { campaignTitle, groupLabel, plural, shortJid, slotLabel } from "@/src/lib/format";
 import type { Campaign, CampaignPreview } from "@/src/lib/types";
@@ -78,6 +81,16 @@ export default async function CampaignPage({
           note={preview.tracking.label}
         />
       </div>
+
+      {/* Picture first: it is the order the post itself has. */}
+      <CampaignImages
+        key={`${slug}-images`}
+        slug={slug}
+        images={campaign.images}
+        assetDir={campaignAssetDir(campaign.script)}
+        writable={WRITES_ENABLED}
+        writeUnavailableReason={imageWritesUnavailableReason()}
+      />
 
       <CaptionVariants
         key={slug}

@@ -64,7 +64,7 @@ npm run build
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
 | Groups | Live. Review queue, advertising table, caps, rotation, operator notes. |
 | Campaigns | Live. All ten with slot, reach, line split, ref prefix, copy. |
-| Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. |
+| Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are listed, not yet shown or editable. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
@@ -85,6 +85,32 @@ Caption persistence also requires the companion bot update in
 [`integrations/genaebot-caption-variants.patch`](integrations/genaebot-caption-variants.patch).
 See [`integrations/README.md`](integrations/README.md) for its base revision,
 installation and verification. Deploy that update before enabling caption writes.
+
+## Campaign pictures
+
+Every advert is a caption **and** a picture, so a campaign page lists its whole
+picture set in the order the bot declares it, and each row on the campaigns list
+carries a thumbnail. Where a campaign declares several, the bot posts one of them
+per day chosen by the date, so a group never sees the same one twice running; the
+console names that order and deliberately does not say which picture goes out
+today, because picking it is `promo_broadcast`'s job and not something to
+reimplement here.
+
+Two parts are deliberately missing, and the screen says so rather than implying
+otherwise:
+
+- **No picture is displayed yet.** The read bridge reports basenames only
+  (`borehole-1.jpg`), and neither adapter serves image files, so every tile names
+  its file and points at the directory it lives in. The same tile covers a
+  picture that has gone missing from the checkout.
+- **Add and remove are shown but switched off.** A campaign's pictures come from
+  the `IMAGE` / `IMAGE_PATH` constants in its own `post_ad.py`, not from the
+  record the console can write, and the write bridge has no field for them. The
+  controls carry that reason in prose and as hover text.
+
+Both wait on a companion bot update — a route that serves a campaign's picture
+files, and a picture field the bot reads from its campaign document — in the same
+way caption writes waited on their patch.
 
 While the console is visible and online, it refreshes the current page and sidebar
 60 seconds after each completed refresh. Checks pause in hidden tabs or while
