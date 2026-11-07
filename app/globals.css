@@ -487,6 +487,58 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   50% { box-shadow: 0 0 0 4px rgba(22, 163, 123, 0); }
 }
 
+/* ------------------------------------------------- dragging a run's time ---
+   The Schedule screen's bars are controls: drag one along its row to change
+   when the campaign runs. Nothing else on the console is draggable, so the
+   affordance has to be carried entirely by the cursor and the focus ring. */
+
+.timeline-fill.is-draggable {
+  cursor: grab;
+  /* Without this a touch drag scrolls the page instead of moving the bar. */
+  touch-action: none;
+  user-select: none;
+}
+
+.timeline-fill.is-dragging { cursor: grabbing; }
+
+.timeline-fill.is-draggable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* A time that has been dragged but not saved. Outlined rather than
+   recoloured: the fill's colour still has to mean which line it posts on. */
+.timeline-fill.is-moved {
+  outline: 2px dashed var(--text);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+/* Where the bar was before the drag, so a change can be undone by eye. */
+.timeline-ghost {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-faint);
+}
+
+.timeline-was { text-decoration: line-through; color: var(--text-faint); }
+
+.timeline-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.timeline-feedback { padding: 12px 20px 0; }
+.timeline-feedback p { margin: 0 0 5px; }
+
+/* Hour ticks on the bars' own scale: a label centred on its true percentage of
+   the day, rather than spread edge to edge, so a dragged time can be read off
+   the axis. The first and last are nudged inside so they do not overhang. */
+.timeline-axis { position: relative; height: 14px; }
+.timeline-axis span { position: absolute; top: 0; transform: translateX(-50%); }
+.timeline-axis span:first-child { transform: none; }
+.timeline-axis span:last-child { transform: translateX(-100%); }
+
 /* An operator watching a timeline does not need a heartbeat to read it. */
 @media (prefers-reduced-motion: reduce) {
   .run-dot.is-live { animation: none; }

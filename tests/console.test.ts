@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   attentionItems,
+  clashes,
   daySlots,
+  lineOf,
   lineSummaries,
   nextUp,
   runEndsAt,
   runningNow,
+  withTimes,
 } from "@/src/domains/console";
+import type { DaySlot } from "@/src/domains/schedule";
+import { clockLabel } from "@/src/lib/format";
 import type { Campaign, Group, Overview } from "@/src/lib/types";
 
 function campaign(partial: Partial<Campaign>): Campaign {
@@ -242,5 +247,74 @@ describe("what is running now", () => {
 
   it("has nothing next once the last slot has started", () => {
     expect(nextUp(slots, 14 * 60)).toBeUndefined();
+  });
+});
+
+/** Five groups is a 20-minute worst case: 900s + 4*60s + 5*12s. */
+function slot(slug: string, minutes: number, partial: Partial<DaySlot> = {}): DaySlot {
+  return {
+    slug,
+    name: `${slug}-promo`,
+    time: clockLabel(minutes),
+    minutes,
+    targetCount: 5,
+    accounts: { default: 5 },
+    ...partial,
+  };
+}
+
+describe("which line a slot runs on", () => {
+  it("picks the line carrying most of the groups", () => {
+    expect(lineOf(slot("a", 540, { accounts: { default: 2, ads: 9 } }))).toBe("ads");
+  });
+
+  it("falls back to the default line when nothing is tallied", () => {
+    expect(lineOf(slot("a", 540, { accounts: {} }))).toBe("default");
+  });
+});
+
+describe("overlapping runs on one line", () => {
+  it("reports a run that is still going when the next one starts", () => {
+    const found = clashes([slot("alpha", 540), slot("beta", 550)]);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ account: "default", finishes: 560 });
+    expect(found[0].current.slug).toBe("alpha");
+    expect(found[0].next.slug).toBe("beta");
+  });
+
+  it("stays quiet once the earlier run has finished", () => {
+    expect(clashes([slot("alpha", 540), slot("beta", 570)])).toEqual([]);
+  });
+
+  it("lets two lines run at the same time", () => {
+    const found = clashes([
+      slot("alpha", 540),
+      slot("beta", 550, { accounts: { ads: 5 } }),
+    ]);
+    expect(found).toEqual([]);
+  });
+
+  it("still finds the clash when a dragged time crosses its neighbour", () => {
+    // Deliberately out of order: a bar dragged past the next one arrives here
+    // before it, and comparing that unsorted would miss the collision.
+    const found = clashes([slot("beta", 550), slot("alpha", 540)]);
+    expect(found.map((clash) => [clash.current.slug, clash.next.slug])).toEqual([
+      ["alpha", "beta"],
+    ]);
+  });
+});
+
+describe("drafted times", () => {
+  it("relabels and reorders the slots it moves", () => {
+    const moved = withTimes([slot("alpha", 540), slot("beta", 600)], { alpha: 630 });
+    expect(moved.map((entry) => [entry.slug, entry.time])).toEqual([
+      ["beta", "10:00"],
+      ["alpha", "10:30"],
+    ]);
+  });
+
+  it("leaves a slot alone when its time has not changed", () => {
+    const slots = [slot("alpha", 540)];
+    expect(withTimes(slots, { alpha: 540 })[0]).toBe(slots[0]);
   });
 });
