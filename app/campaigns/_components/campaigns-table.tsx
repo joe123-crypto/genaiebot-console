@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useRef, useState } from "react";
+import { useId, useRef } from "react";
 import { Repeat2 } from "lucide-react";
 import {
-  Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useFilterUrl,
+  Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
 import { CampaignThumb } from "@/app/campaigns/_components/campaign-images";
 import {
@@ -37,13 +37,12 @@ const COLUMNS = 6;
 
 export function CampaignsTable({ campaigns, initialFilter }: Props) {
   const id = useId();
-  // Seeded once, deliberately. AutoRefresh re-renders the server page every 60
-  // seconds and sends a fresh `initialFilter`; syncing it back into state would
-  // reset the box an operator is halfway through typing into.
-  const [filter, setFilter] = useState<CampaignFilter>(initialFilter);
+  // The hook decides which incoming filters are news: a link navigated to
+  // while already here is applied, the sixty-second refresh is not.
+  const [filter, setFilter] = useUrlFilter(
+    initialFilter, campaignFilterQuery, CAMPAIGN_FILTER_KEYS,
+  );
   const search = useRef<HTMLInputElement>(null);
-
-  useFilterUrl(filter, campaignFilterQuery, CAMPAIGN_FILTER_KEYS);
 
   const visible = filterCampaigns(campaigns, filter);
   const unfiltered = isDefaultCampaignFilter(filter);
@@ -53,7 +52,7 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
   }
 
   function clear() {
-    setFilter(DEFAULT_CAMPAIGN_FILTER);
+    setFilter(() => DEFAULT_CAMPAIGN_FILTER);
     // The button disables itself on this click, and a disabled element drops
     // focus to the body, which strands anyone navigating by keyboard.
     search.current?.focus();

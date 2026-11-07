@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { plural } from "@/src/lib/format";
 import type { FacetOption } from "@/src/domains/filter";
 
@@ -8,9 +8,10 @@ import type { FacetOption } from "@/src/domains/filter";
  * The filter bar both list screens wear, and the one piece of behaviour behind
  * it that is easy to get subtly wrong.
  *
- * What a bar narrows is the screen's business; how a filter reaches the URL is
- * not, and two copies of `useFilterUrl` would be two copies of a debounce, a
- * foreign-parameter rule and a no-op guard, free to drift apart.
+ * What a bar narrows is the screen's business; holding the filter and keeping
+ * it in step with the URL is not, and two copies of this would be two copies
+ * of a debounce, a foreign-parameter rule, a no-op guard and the rule below
+ * about which incoming filters to believe — free to drift apart.
  */
 
 /** Long enough that a fast typist writes one history entry rather than twenty:
@@ -20,18 +21,50 @@ import type { FacetOption } from "@/src/domains/filter";
 const URL_SYNC_MS = 250;
 
 /**
- * Mirror a filter into the query string.
+ * Hold a table's filter, and keep it and the query string in step.
  *
- * One way only. The URL is written from state and never read back into it, so
- * nothing Next does with history can feed a stale query into a table someone
- * is still typing in — and no `Suspense` boundary is needed, because
- * `useSearchParams` is never called.
+ * The filter lives here rather than in the URL: typing narrows the table from
+ * state, and the URL is caught up with a moment later, so a keystroke never
+ * waits on the router. The server still parses the query string and hands it
+ * back as `initialFilter` on every render, which leaves one question — when is
+ * an incoming filter news, and when is it this table's own URL echoed back?
+ *
+ * Two things arrive looking identical:
+ *
+ *  - a **navigation**, such as a Needs attention link to `?status=admin-only`
+ *    clicked while already on the page. Next re-renders this very component
+ *    rather than remounting it, so seeding state once would leave the table
+ *    showing the old filter while the URL claimed the new one;
+ *  - the **sixty-second refresh**, which re-renders with whatever is in the
+ *    URL — which may be a query this table wrote itself, and may be a debounce
+ *    behind what is actually typed.
+ *
+ * So a filter is adopted only when it is both new since the last render *and*
+ * not the query this table last wrote. Anything this table put in the URL is
+ * its own echo and is ignored, which is what stops a refresh landing between a
+ * keystroke and the debounce from snapping a half-typed search back.
  */
-export function useFilterUrl<T extends Record<string, string>>(
-  filter: T,
+export function useUrlFilter<T extends Record<string, string>>(
+  initialFilter: T,
   toQuery: (filter: T) => URLSearchParams,
   keys: readonly string[],
-) {
+): [T, (update: (current: T) => T) => void] {
+  const queryOf = (filter: T) => toQuery(filter).toString();
+
+  const [filter, setFilter] = useState(initialFilter);
+  const [seen, setSeen] = useState(() => queryOf(initialFilter));
+  // The query string this table last put in the URL itself. Written only from
+  // the effect below, so reading it while rendering is safe.
+  const written = useRef(queryOf(initialFilter));
+
+  const incoming = queryOf(initialFilter);
+  if (incoming !== seen) {
+    // Adjusting state while rendering: React re-runs this component at once,
+    // before the browser paints, so the table never shows the stale filter.
+    setSeen(incoming);
+    if (incoming !== written.current) setFilter(initialFilter);
+  }
+
   useEffect(() => {
     const timer = setTimeout(() => {
       // Start from the live query string, so a parameter this table knows
@@ -41,6 +74,9 @@ export function useFilterUrl<T extends Record<string, string>>(
       for (const [key, value] of toQuery(filter)) next.set(key, value);
       const query = next.toString();
       const url = `${window.location.pathname}${query ? `?${query}` : ""}`;
+      // Recorded whether or not it is written, so the echo of a URL that was
+      // already correct is recognised too.
+      written.current = toQuery(filter).toString();
       // Next patches replaceState, so this updates the URL without refetching
       // the page. The guard keeps a no-op render from writing history at all.
       if (url !== `${window.location.pathname}${window.location.search}`) {
@@ -51,6 +87,8 @@ export function useFilterUrl<T extends Record<string, string>>(
     // `toQuery` and `keys` are module-level constants at every call site, so
     // their identities are stable and only a changed filter reruns this.
   }, [filter, toQuery, keys]);
+
+  return [filter, setFilter];
 }
 
 export function FilterBar({ label, children }: { label: string; children: ReactNode }) {

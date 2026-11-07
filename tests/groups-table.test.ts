@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GroupsTable } from "@/app/groups/_components/groups-table";
-import { DEFAULT_GROUP_FILTER, type GroupFilter } from "@/src/domains/group-filter";
+import { DEFAULT_GROUP_FILTER } from "@/src/domains/group-filter";
 import type { Group } from "@/src/lib/types";
 
 function group(overrides: Partial<Group> & Pick<Group, "jid">): Group {
@@ -236,19 +236,19 @@ describe("the URL", () => {
 
 describe("the 60s refresh", () => {
   it("leaves the filter, the typed query and the focus alone", () => {
-    // AutoRefresh re-renders the server page and sends fresh props. Anything
-    // that synced them into state would reset the box mid-keystroke.
+    // AutoRefresh re-renders the server page from the SAME url, so the filter
+    // it parses comes back equal. Anything that reseeded state from it would
+    // reset the box mid-keystroke.
     const view = mount();
     type("harare");
     pick("Line", "default");
     searchBox().focus();
 
-    const later: GroupFilter = { ...DEFAULT_GROUP_FILTER, status: "advertising" };
     view.rerender(
       createElement(GroupsTable, {
         ...props,
         groups: [...groups, group({ jid: "120363999@g.us", name: "Brand New" })],
-        initialFilter: later,
+        initialFilter: { ...DEFAULT_GROUP_FILTER },
       }),
     );
 
@@ -256,6 +256,62 @@ describe("the 60s refresh", () => {
     expect((screen.getByLabelText("Line") as HTMLSelectElement).value).toBe("default");
     expect(document.activeElement).toBe(searchBox());
     expect(names()).toEqual(["Harare Market"]);
+  });
+
+  it("does not snap back a search typed since the url was last written", () => {
+    // The nasty interleaving: the debounce has put ?q=harare in the url, more
+    // has been typed since, and the refresh lands carrying that older query.
+    vi.useFakeTimers();
+    const view = mount();
+    type("harare");
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    type("harare market");
+
+    view.rerender(
+      createElement(GroupsTable, {
+        ...props,
+        initialFilter: { ...DEFAULT_GROUP_FILTER, q: "harare" },
+      }),
+    );
+
+    expect((searchBox() as HTMLInputElement).value).toBe("harare market");
+  });
+});
+
+describe("a link followed while already on the page", () => {
+  it("applies the filter it asked for", () => {
+    // A Needs attention link re-renders this table rather than remounting it,
+    // so an initial-only filter would leave the url and the rows disagreeing.
+    const view = mount();
+    expect(names()).toHaveLength(3);
+
+    view.rerender(
+      createElement(GroupsTable, {
+        ...props,
+        initialFilter: { ...DEFAULT_GROUP_FILTER, status: "on-hold" },
+      }),
+    );
+
+    expect(names()).toEqual(["Held Back"]);
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("on-hold");
+  });
+
+  it("replaces a filter the operator had already set", () => {
+    const view = mount();
+    type("harare");
+    expect(names()).toEqual(["Harare Market"]);
+
+    view.rerender(
+      createElement(GroupsTable, {
+        ...props,
+        initialFilter: { ...DEFAULT_GROUP_FILTER, status: "on-hold" },
+      }),
+    );
+
+    expect((searchBox() as HTMLInputElement).value).toBe("");
+    expect(names()).toEqual(["Held Back"]);
   });
 
   it("brings new rows in under the filter already set", () => {

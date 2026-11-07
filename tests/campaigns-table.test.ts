@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CampaignsTable } from "@/app/campaigns/_components/campaigns-table";
-import { DEFAULT_CAMPAIGN_FILTER, type CampaignFilter } from "@/src/domains/campaign-filter";
+import { DEFAULT_CAMPAIGN_FILTER } from "@/src/domains/campaign-filter";
 import type { Campaign } from "@/src/lib/types";
 
 function campaign(overrides: Partial<Campaign> & Pick<Campaign, "slug">): Campaign {
@@ -233,16 +233,16 @@ describe("the URL", () => {
 
 describe("the 60s refresh", () => {
   it("leaves the filter, the typed query and the focus alone", () => {
+    // The refresh re-renders from the same url, so the filter comes back equal.
     const view = mount();
     type("borehole");
     pick("Line", "ads");
     searchBox().focus();
 
-    const later: CampaignFilter = { ...DEFAULT_CAMPAIGN_FILTER, status: "off" };
     view.rerender(
       createElement(CampaignsTable, {
         campaigns: [...campaigns, campaign({ slug: "brand-new" })],
-        initialFilter: later,
+        initialFilter: { ...DEFAULT_CAMPAIGN_FILTER },
       }),
     );
 
@@ -250,6 +250,42 @@ describe("the 60s refresh", () => {
     expect((screen.getByLabelText("Line") as HTMLSelectElement).value).toBe("ads");
     expect(document.activeElement).toBe(searchBox());
     expect(titles()).toEqual(["Borehole Drilling"]);
+  });
+
+  it("does not snap back a search typed since the url was last written", () => {
+    vi.useFakeTimers();
+    const view = mount();
+    type("borehole");
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    type("borehole drilling");
+
+    view.rerender(
+      createElement(CampaignsTable, {
+        ...props,
+        initialFilter: { ...DEFAULT_CAMPAIGN_FILTER, q: "borehole" },
+      }),
+    );
+
+    expect((searchBox() as HTMLInputElement).value).toBe("borehole drilling");
+  });
+});
+
+describe("a link followed while already on the page", () => {
+  it("applies the filter it asked for", () => {
+    const view = mount();
+    expect(titles()).toHaveLength(3);
+
+    view.rerender(
+      createElement(CampaignsTable, {
+        ...props,
+        initialFilter: { ...DEFAULT_CAMPAIGN_FILTER, status: "off" },
+      }),
+    );
+
+    expect(titles()).toEqual(["CV"]);
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("off");
   });
 
   it("brings new rows in under the filter already set", () => {
