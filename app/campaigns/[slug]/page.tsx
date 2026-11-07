@@ -7,14 +7,16 @@ import {
   captionSaveUnavailableReason,
   getCampaignPreview,
   getCampaigns,
+  getGroups,
   imageWritesUnavailableReason,
 } from "@/src/lib/bot-client";
 import { CampaignImages } from "@/app/campaigns/_components/campaign-images";
+import { CampaignGroups } from "@/app/campaigns/_components/campaign-groups";
 import { CaptionVariants } from "@/app/campaigns/_components/caption-variants";
 import { campaignAssetDir } from "@/src/lib/campaign-images";
 import { WRITES_ENABLED } from "@/src/config";
-import { campaignTitle, groupLabel, plural, shortJid, slotLabel } from "@/src/lib/format";
-import type { Campaign, CampaignPreview } from "@/src/lib/types";
+import { campaignTitle, groupLabel, slotLabel } from "@/src/lib/format";
+import type { Campaign, CampaignPreview, GroupsPayload } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +29,12 @@ export default async function CampaignPage({
 
   let preview: CampaignPreview;
   let campaign: Campaign | undefined;
+  let membership: GroupsPayload;
   try {
-    [preview, campaign] = await Promise.all([
+    [preview, campaign, membership] = await Promise.all([
       getCampaignPreview(slug),
       getCampaigns().then((all) => all.find((entry) => entry.slug === slug)),
+      getGroups(),
     ]);
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
@@ -82,6 +86,8 @@ export default async function CampaignPage({
         />
       </div>
 
+      <p className="card-note campaign-live-stats-note">Statistics above show live configuration and exclude browser draft changes.</p>
+
       {/* Picture first: it is the order the post itself has. */}
       <CampaignImages
         key={`${slug}-images`}
@@ -103,55 +109,12 @@ export default async function CampaignPage({
         } : null)}
       />
 
-      <div className="card">
-        <div className="card-head">
-          <h2 className="card-title">Where it goes</h2>
-          <span className="card-note">{plural(preview.groups.length, "group")}</span>
-        </div>
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th>Today</th>
-                <th>Ref</th>
-                <th>Variant</th>
-                <th>Line</th>
-                <th>Replies to</th>
-                <th>Cadence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preview.groups.map((row) => (
-                <tr key={row.jid}>
-                  <td>
-                    <div className="cell-strong">{groupLabel(row)}</div>
-                    <div className="cell-mono">{shortJid(row.jid)}</div>
-                  </td>
-                  <td>
-                    {row.sendsToday ? (
-                      <span className="pill pill-success">Posts</span>
-                    ) : (
-                      <span className="pill pill-warning" title={`today goes to ${row.allowedToday.join(", ")}`}>
-                        At cap
-                      </span>
-                    )}
-                  </td>
-                  <td className="cell-mono">{row.ref ?? "—"}</td>
-                  <td className="cell-muted">
-                    {row.variant === null ? "—" : `${row.variant + 1}/${preview.captions.length}`}
-                  </td>
-                  <td className="cell-muted">{row.account}</td>
-                  <td className="cell-mono">{row.contactNumber ?? "—"}</td>
-                  <td className="cell-muted">
-                    {row.weekly.length > 0 ? row.weekly.join(", ") : "daily"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <CampaignGroups
+        slug={slug}
+        liveGroups={preview.groups.map(({ caption, cap, ...row }) => row)}
+        knownGroups={membership.groups.map(({ jid, name, account, status }) => ({ jid, name, account, status }))}
+        variantCount={preview.captions.length}
+      />
     </Shell>
   );
 }
