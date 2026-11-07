@@ -57,6 +57,18 @@ export function captionSaveUnavailableReason(): string | undefined {
   return undefined;
 }
 
+/**
+ * Captions live in the bot's own campaign document, which is why they can be
+ * saved. A campaign's pictures do not: the bot still reads them from the
+ * `IMAGE` / `IMAGE_PATH` constants in its `post_ad.py`, and the write bridge's
+ * editable fields do not include them. The gallery therefore shows its controls
+ * and says plainly why they are off, rather than offering a draft that could
+ * never be committed.
+ */
+export function imageWritesUnavailableReason(): string {
+  return "Picture changes need the companion bot update — the bot still reads each campaign\u2019s picture from its post_ad.py, not from the record the console can write.";
+}
+
 /** The bridge reports a refusal as `{"error": ...}` and a non-zero exit. */
 function reportedError(stdout: string | undefined) {
   if (!stdout) return null;

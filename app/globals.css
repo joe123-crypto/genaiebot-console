@@ -578,6 +578,78 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
 .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
+.campaign-images { margin-bottom: 16px; }
+.campaign-image-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.campaign-image-add { display: inline-flex; align-items: center; gap: 6px; }
+/* auto-fill, not auto-fit: a campaign with one picture keeps a tile the size
+   of every other tile instead of stretching it across the card. */
+.campaign-image-grid { grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); }
+.campaign-image { min-width: 0; margin: 0; }
+.campaign-image-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+
+/* A fixed square, so tiles do not reflow as pictures of unknown size arrive. */
+.campaign-image-frame {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.campaign-image-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.campaign-image-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.campaign-image-name { margin-top: 7px; font-size: 12px; overflow-wrap: anywhere; }
+
+.campaign-copy-cell { display: flex; align-items: center; gap: 9px; }
+.campaign-copy-cell > span:last-child { white-space: nowrap; }
+
+/* The icon sits under the picture and shows through whenever it cannot be
+   fetched, so the row needs no client component to handle a failed load. */
+.campaign-thumb {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-faint);
+  overflow: hidden;
+}
+
+.campaign-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.campaign-thumb-more {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  padding: 0 3px;
+  border-top-left-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 13px;
+}
+
 .empty {
   padding: 34px 20px;
   text-align: center;
