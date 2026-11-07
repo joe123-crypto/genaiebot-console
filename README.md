@@ -98,7 +98,8 @@ even when backend writes are disabled.
 
 Changes save automatically in this browser, separately for each campaign, and
 survive navigation, reloads and automatic refreshes. **Reset draft** discards local
-changes and restores current live targets. Draft additions that are no longer known
+changes and restores current live targets. Open tabs synchronize saved drafts and
+resets for the same campaign. Draft additions that are no longer known
 or active are removed with a notice. If browser storage is unavailable, edits stay
 in memory and the table reports that they cannot persist.
 
