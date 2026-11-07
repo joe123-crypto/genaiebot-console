@@ -34,8 +34,8 @@ export const BOT_SOURCE: BotSource = BOT_API_BASE_URL ? "remote" : "local";
 
 /**
  * The write API. It is a separate service from the read one, on its own port
- * and behind its own token: the read API is read-only by construction and
- * refuses every method but GET and HEAD, and that property is worth keeping.
+ * and behind its own token. The gateway API handles account lifecycle controls;
+ * canonical group and campaign edits use this separate write service.
  */
 export const BOT_WRITE_API_BASE_URL = process.env.BOT_WRITE_API_BASE_URL?.trim() || "";
 export const BOT_WRITE_TOKEN = process.env.BOT_WRITE_TOKEN?.trim() || "";
@@ -60,6 +60,11 @@ export const WRITE_SOURCE: BotSource = BOT_WRITE_API_BASE_URL ? "remote" : "loca
 export const WRITES_ENABLED =
   process.env.CONSOLE_WRITES?.trim() === "1" &&
   (WRITE_SOURCE === "remote" ? Boolean(BOT_WRITE_TOKEN) : Boolean(GENAEBOT_CHECKOUT));
+
+/** Account controls share the console's opt-in switch but require the live
+ * gateway API rather than the canonical group/campaign writer. */
+export const ACCOUNT_WRITES_ENABLED =
+  process.env.CONSOLE_WRITES?.trim() === "1" && Boolean(BOT_API_BASE_URL && BOT_API_TOKEN);
 
 /** Campaign sends are planned in Harare time; so is every slot the UI shows. */
 export const BOT_TIMEZONE = "Africa/Harare";
