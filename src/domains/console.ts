@@ -2,10 +2,12 @@ import { cache } from "react";
 import { BotUnavailableError, getOverview } from "@/src/lib/bot-client";
 import type { Group, Overview } from "@/src/lib/types";
 
-/** The day's slots and the rules read off them live apart from this module:
- *  they are pure, and the Schedule screen's draggable timeline is a client
- *  component, which cannot import anything that reaches the bot adapters. */
+/** The day's slots and the rules read off them live apart from this module, and
+ *  so does the Groups table's filter: they are pure, and both the Schedule
+ *  screen's draggable timeline and the Groups table are client components,
+ *  which cannot import anything that reaches the bot adapters. */
 export * from "@/src/domains/schedule";
+export * from "@/src/domains/group-filter";
 
 /** Deduped so the layout and the page it wraps share one read per request. */
 export const loadOverview = cache(async (): Promise<
@@ -21,16 +23,9 @@ export const loadOverview = cache(async (): Promise<
 
 export type Attention = { label: string; detail?: string };
 
-/**
- * Anything not advertising right now is what an operator has to decide about.
- *
- * The Groups page partitions its rows with this and the sidebar badge counts
- * it; they used to ask the question differently and disagreed by the groups
- * the bot has left, so the badge said 9 while the card listed 12.
- */
-export function needsDecision(group: Pick<Group, "status">) {
-  return group.status !== "active";
-}
+/** `needsDecision` now lives in `@/src/domains/group-filter` and is re-exported
+ *  above: the Groups table asks the same question in the browser, and it must
+ *  be the same function doing the asking. */
 
 /** The same question asked of the status tally, which is all the sidebar has.
  *  Counting down from the total rather than adding the three known non-active

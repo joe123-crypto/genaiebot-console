@@ -63,7 +63,7 @@ npm run build
 | Screen | State |
 |---|---|
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
-| Groups | Live. Review queue, advertising table, caps, rotation, operator notes. |
+| Groups | Live. One searchable, filterable table: caps, rotation, operator notes. |
 | Campaigns | Live. All ten with slot, reach, line split, ref prefix, copy. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are listed, not yet shown or editable. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
@@ -86,6 +86,48 @@ Caption persistence also requires the companion bot update in
 [`integrations/genaebot-caption-variants.patch`](integrations/genaebot-caption-variants.patch).
 See [`integrations/README.md`](integrations/README.md) for its base revision,
 installation and verification. Deploy that update before enabling caption writes.
+
+## Group search and filters
+
+Eighty-odd groups do not fit on a screen, and most of them have no name — the
+jid is the only thing that tells two rows apart. So the Groups screen is one
+table with a search box and four filters above it, rather than the three fixed
+cards it used to be.
+
+**Search** matches a group's name and its id. Both forms of the jid are
+searched, so a jid pasted whole out of a log finds its row and so do the bare
+digits printed under the name. A group with no name is searchable as
+`unnamed group`, which is the label it actually shows; without that the one
+thing on screen would be the one thing you could not look for.
+
+**Status** carries the old partition and the four statuses in one control. The
+views — needs a decision, advertising, active in no campaign — are the three
+cards, and they ask the question through the same `needsDecision` the sidebar
+badge counts, so the two cannot drift apart again. **Line**, **Campaign** and
+**Tier** are built from the rows actually on screen. Campaign lists the
+campaigns a group is configured for, switched-off ones included and marked
+`(off)`: `promos` is intent and deliberately keeps them, so leaving them out
+would make their groups unreachable from here. Every filter narrows the last.
+
+Rows needing a decision still sort first, so the flat table reads top to bottom
+in the order the three cards did.
+
+**Filtering happens in the browser**, over the payload the page already holds.
+The read bridge takes no query parameter but `date` and returns every group
+anyway, so there is nothing to gain by asking the bot to narrow them and a
+keystroke that waited on the network to answer would be worse. Automatic
+refreshes bring new rows in under whatever filter is set, and never disturb a
+half-typed search.
+
+The view lives in the URL (`?q=…&status=…&line=…&campaign=…&tier=…`), so a
+filtered table can be reloaded, bookmarked or pasted to someone else, and it is
+already filtered on the first paint rather than flashing the full list. The URL
+is written a quarter-second after you stop typing and replaces its history
+entry rather than stacking one per keystroke, so **Back** leaves the page
+instead of walking backwards through a search. A hand-edited or truncated one
+falls back to showing everything rather than an empty table, and a line or
+campaign whose groups have since gone stays in its menu, marked, instead of the
+control silently switching to a different filter.
 
 ## Campaign group drafts
 
