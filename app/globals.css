@@ -286,6 +286,58 @@ a { color: inherit; text-decoration: none; }
 .pill-danger  { background: var(--danger-soft);  border-color: var(--danger-border);  color: #9e3123; }
 .pill-info    { background: var(--primary-soft); border-color: var(--primary-border); color: #1a5bb5; }
 
+/* -------------------------------------------------------------- filters ---- */
+
+/* The Groups table's search and facets. Native control appearance is kept on
+   purpose; the box is borrowed from .modal-input rather than forking it. */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.filter-field-search { flex: 1 1 220px; }
+
+.filter-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.filter-bar input[type="search"],
+.filter-bar select {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  max-width: 100%;
+}
+
+.filter-bar input[type="search"]:focus-visible,
+.filter-bar select:focus-visible {
+  outline: 2px solid var(--primary-strong);
+  outline-offset: 1px;
+}
+
+.filter-bar select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.filter-actions { margin-left: auto; }
+
+.filter-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
 /* --------------------------------------------------------------- table ----- */
 
 .table-wrap { overflow-x: auto; }
@@ -611,6 +663,8 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .campaign-group-option input { margin: 4px 0 0; accent-color: var(--primary); }
 .campaign-group-option input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 @media (max-width: 600px) {
+  .filter-field { flex: 1 1 100%; }
+  .filter-actions { margin-left: 0; }
   .campaign-groups .card-head { align-items: flex-start; }
   .campaign-groups .card-head > .campaign-group-actions { width: 100%; justify-content: flex-end; }
   .campaign-group-deltas { display: block; margin-left: 0; }

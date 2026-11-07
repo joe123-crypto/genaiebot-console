@@ -47,7 +47,8 @@ const STATUS_TONE: Record<GroupStatus, string> = {
   "not-a-member": "pill",
 };
 
-const STATUS_LABEL: Record<GroupStatus, string> = {
+/** Exported so the Groups filter offers exactly the statuses the pills show. */
+export const STATUS_LABEL: Record<GroupStatus, string> = {
   active: "Active",
   "on-hold": "On hold",
   "admin-only": "Admins only",
