@@ -1,8 +1,8 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef } from "react";
 import {
-  Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useFilterUrl,
+  Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
 import { STATUS_LABEL, StatusPill } from "@/app/_components/ui";
 import { DeleteGroup } from "@/app/groups/_components/delete-group";
@@ -39,13 +39,10 @@ const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-membe
 
 export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilter }: Props) {
   const id = useId();
-  // Seeded once, deliberately. AutoRefresh re-renders the server page every 60
-  // seconds and sends a fresh `initialFilter`; syncing it back into state would
-  // reset the box an operator is halfway through typing into.
-  const [filter, setFilter] = useState<GroupFilter>(initialFilter);
+  // The hook decides which incoming filters are news: a link navigated to
+  // while already here is applied, the sixty-second refresh is not.
+  const [filter, setFilter] = useUrlFilter(initialFilter, groupFilterQuery, GROUP_FILTER_KEYS);
   const search = useRef<HTMLInputElement>(null);
-
-  useFilterUrl(filter, groupFilterQuery, GROUP_FILTER_KEYS);
 
   const off = new Set(disabledPromos);
   const visible = sortGroupsForTable(filterGroups(groups, filter));
@@ -57,7 +54,7 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
   }
 
   function clear() {
-    setFilter(DEFAULT_GROUP_FILTER);
+    setFilter(() => DEFAULT_GROUP_FILTER);
     // The button disables itself on this click, and a disabled element drops
     // focus to the body, which strands anyone navigating by keyboard.
     search.current?.focus();
