@@ -9,8 +9,9 @@ It is **not** a reimplementation of OpenClaw's own control UI.
 
 ## How it reads state
 
-The console keeps no database and no copy of anything. Every screen is rendered
-from genaebot's own state, through one of two adapters in
+The console keeps no database or authoritative copy of bot state. Campaign group
+drafts are stored only in the browser. Live data on every screen comes from
+genaebot's own state, through one of two adapters in
 [`src/lib/bot-client.ts`](src/lib/bot-client.ts):
 
 - **local** (development) — runs `workspace/bin/console-read` out of a genaebot
@@ -85,6 +86,25 @@ Caption persistence also requires the companion bot update in
 [`integrations/genaebot-caption-variants.patch`](integrations/genaebot-caption-variants.patch).
 See [`integrations/README.md`](integrations/README.md) for its base revision,
 installation and verification. Deploy that update before enabling caption writes.
+
+## Campaign group drafts
+
+The campaign’s **Where it goes** table supports browser-saved drafts. **Add groups**
+selects existing active groups from the Groups list; **Remove** asks for confirmation
+before removing an assignment from this campaign’s draft. **Pause** keeps the
+assignment but marks it paused for this campaign only, and **Resume** restores
+participation under the normal cap and cadence rules. These controls are available
+even when backend writes are disabled.
+
+Changes save automatically in this browser, separately for each campaign, and
+survive navigation, reloads and automatic refreshes. **Reset draft** discards local
+changes and restores current live targets. Draft additions that are no longer known
+or active are removed with a notice. If browser storage is unavailable, edits stay
+in memory and the table reports that they cannot persist.
+
+**Drafts do not change the bot or its configuration.** The statistics above the
+table stay live, and added rows have no calculated posting preview. Applying group
+assignments or pauses to real sends needs a future backend integration.
 
 ## Campaign pictures
 
