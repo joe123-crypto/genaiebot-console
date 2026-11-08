@@ -1,0 +1,60 @@
+import { Empty } from "@/app/_components/ui";
+import type { DiscoveredGroup, GroupDiscovery } from "@/src/lib/types";
+
+function observedAt(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC") : "Unknown";
+}
+
+/** Server-rendered inventory; these rows are deliberately outside ad settings. */
+export function DiscoveredGroups({ groups, discovery }: {
+  groups?: DiscoveredGroup[];
+  discovery?: GroupDiscovery;
+}) {
+  if (groups === undefined && discovery === undefined) return null;
+  const rows = groups ?? [];
+  return (
+    <section className="card" style={{ marginBottom: 16 }} aria-labelledby="unassigned-groups-title">
+      <div className="card-head">
+        <h2 className="card-title" id="unassigned-groups-title">Unassigned <span className="pill">{rows.length}</span></h2>
+        <span className="card-note">Saved automatically. No campaigns are assigned automatically.</span>
+      </div>
+      {discovery ? (
+        <div className="card-note" style={{ padding: "0 20px 16px" }}>
+          {!discovery.enabled ? <p>Automatic discovery is paused. Saved observations are retained.</p> : null}
+          {discovery.accounts.map((account) => (
+            <p key={account.accountId}>
+              <strong>{account.accountId}</strong>{": "}
+              {account.status === "waiting" ? "Waiting for the first scan after this account connects." :
+                account.status === "disabled" ? "Discovery paused." :
+                  account.status === "error" ? "Discovery unavailable; previous observations are retained." :
+                    account.status === "stale" ? "Observations are out of date; the account may be offline or in standby." :
+                      "Discovery up to date."}
+              {account.lastSuccessAt ? <> Last successful scan: <time dateTime={account.lastSuccessAt}>{observedAt(account.lastSuccessAt)}</time>.</> : null}
+            </p>
+          ))}
+          <p>Last seen records an observation, not a guarantee that the bot is still a member.</p>
+        </div>
+      ) : null}
+      {rows.length > 0 ? (
+        <div className="table-wrap">
+          <table className="data">
+            <thead><tr><th>Group</th><th>Joined accounts</th><th>Last seen</th></tr></thead>
+            <tbody>
+              {rows.map((group) => (
+                <tr key={group.jid}>
+                  <td>
+                    <div className="cell-strong">{group.name || "Unnamed group"}</div>
+                    <div className="cell-mono">{group.jid}</div>
+                  </td>
+                  <td className="cell-muted">{group.accounts.map((account) => account.accountId).join(", ")}</td>
+                  <td className="cell-muted"><time dateTime={group.lastSeenAt}>{observedAt(group.lastSeenAt)}</time></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <Empty>No saved unassigned groups.</Empty>}
+    </section>
+  );
+}

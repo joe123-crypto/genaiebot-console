@@ -5,7 +5,8 @@ import { isAdvertising, parseGroupFilter } from "@/src/domains/console";
 import { plural } from "@/src/lib/format";
 import { WRITES_ENABLED } from "@/src/config";
 import { GroupsTable } from "@/app/groups/_components/groups-table";
-import type { Group } from "@/src/lib/types";
+import { DiscoveredGroups } from "@/app/groups/_components/discovered-groups";
+import type { Group, DiscoveredGroup, GroupDiscovery } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,10 @@ export default async function GroupsPage({
 
   let groups: Group[];
   let disabledPromos: string[];
+  let discoveredGroups: DiscoveredGroup[] | undefined;
+  let groupDiscovery: GroupDiscovery | undefined;
   try {
-    ({ groups, disabledPromos } = await getGroups());
+    ({ groups, disabledPromos, discoveredGroups, groupDiscovery } = await getGroups());
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
     return (
@@ -42,6 +45,7 @@ export default async function GroupsPage({
           "advertising",
         )}`}
       />
+      <DiscoveredGroups groups={discoveredGroups} discovery={groupDiscovery} />
       <GroupsTable
         groups={groups}
         disabledPromos={disabledPromos}
