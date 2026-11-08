@@ -8,6 +8,7 @@ import {
   Megaphone,
   MessageCircle,
   ScrollText,
+  SlidersHorizontal,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -21,6 +22,7 @@ const items: ReadonlyArray<{ href: string; label: string; icon: LucideIcon }> = 
   { href: "/schedule", label: "Schedule", icon: CalendarClock },
   { href: "/lines", label: "WhatsApp Lines", icon: MessageCircle },
   { href: "/activity", label: "Activity", icon: ScrollText },
+  { href: "/settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
 export function ConsoleNav({ counts }: { counts: NavCounts }) {
