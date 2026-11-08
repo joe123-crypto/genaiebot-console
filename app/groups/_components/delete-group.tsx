@@ -3,19 +3,26 @@
 import { useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteGroupAction } from "@/app/groups/actions";
+import type { WriteGate } from "@/src/lib/write-capabilities";
 
 /**
- * What a delete actually does today, in one place.
+ * What a delete actually does, in one place.
  *
- * It is worth being plain about the half that is missing. The console can
- * remove a group from the bot's records; taking the bot's number out of the
- * WhatsApp group is a separate piece of work in genaebot and is not built, so
- * the dialog must not let an operator infer that the bot has left.
+ * It is worth being plain about the half that is missing. The console removes a
+ * group from the bot's records -- the bot keeps the whole record in its audit
+ * trail, written in the same change, so it can be recreated -- but taking the
+ * bot's number out of the WhatsApp group is not built. The dialog must not let an
+ * operator infer that the bot has left, or that the group is gone for good.
  */
 export const DELETE_EXPLAINER =
-  "The group is removed from the bot's records and stops appearing here.";
+  "The group leaves the bot's records and every campaign. Its full record is kept in the audit trail.";
 export const DELETE_CAVEAT =
-  "The bot stays in the WhatsApp group — taking its number out is not built yet.";
+  "The bot stays in the WhatsApp group, so it will reappear under Unassigned — taking its number out is not built yet.";
+/** The gentler way out, which keeps the group's campaigns for later. */
+export const DELETE_ALTERNATIVE =
+  "To stop advertising but keep its campaigns, set its status to on hold instead.";
+
+const ALLOWED: WriteGate = { allowed: true };
 
 /** Typing the name is the confirmation: a group the operator cannot name is a
  *  group they have not read the row of.
@@ -29,10 +36,16 @@ export function confirmationMatches(typed: string, expected: string) {
   return typed.trim().toLowerCase() === wanted;
 }
 
-export function DeleteGroup({ jid, label }: { jid: string; label: string }) {
+export function DeleteGroup({ jid, label, gate = ALLOWED }: {
+  jid: string;
+  label: string;
+  /** Whether the bot will take a delete; the button says why when it will not. */
+  gate?: WriteGate;
+}) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<{ detail: string; problems?: string[] } | null>(null);
   const [pending, startTransition] = useTransition();
 
   const armed = confirmationMatches(typed, label);
@@ -40,22 +53,21 @@ export function DeleteGroup({ jid, label }: { jid: string; label: string }) {
   function close() {
     setOpen(false);
     setTyped("");
+    setReason("");
     setError(null);
   }
 
   function submit() {
     if (!armed || pending) return;
     startTransition(async () => {
-      const outcome = await deleteGroupAction(jid);
+      const outcome = await deleteGroupAction(jid, reason);
       if (outcome.ok) {
         // The row is about to be removed by the revalidation this action
         // triggered, so there is nothing to put the dialog back for.
-        setOpen(false);
-        setTyped("");
-        setError(null);
+        close();
         return;
       }
-      setError(outcome.detail);
+      setError({ detail: outcome.detail, problems: outcome.problems });
     });
   }
 
@@ -65,6 +77,8 @@ export function DeleteGroup({ jid, label }: { jid: string; label: string }) {
         type="button"
         className="row-action row-action-danger"
         onClick={() => setOpen(true)}
+        disabled={!gate.allowed}
+        title={gate.allowed ? undefined : gate.reason}
         aria-label={`Delete ${label}`}
       >
         <Trash2 size={15} aria-hidden />
@@ -83,8 +97,21 @@ export function DeleteGroup({ jid, label }: { jid: string; label: string }) {
               Delete {label}?
             </h2>
             <p className="modal-body">
-              {DELETE_EXPLAINER} <strong>{DELETE_CAVEAT}</strong>
+              {DELETE_EXPLAINER} <strong>{DELETE_CAVEAT}</strong> {DELETE_ALTERNATIVE}
             </p>
+            {gate.allowed && gate.warning ? <p className="modal-warning">{gate.warning}</p> : null}
+            <label className="modal-label" htmlFor="delete-group-reason">
+              Reason (kept in the audit trail, optional)
+            </label>
+            <input
+              id="delete-group-reason"
+              className="modal-input"
+              value={reason}
+              maxLength={500}
+              autoComplete="off"
+              onChange={(event) => setReason(event.target.value)}
+              style={{ marginBottom: 12 }}
+            />
             <label className="modal-label" htmlFor="delete-group-confirm">
               Type <code>{label}</code> to confirm
             </label>
@@ -100,7 +127,14 @@ export function DeleteGroup({ jid, label }: { jid: string; label: string }) {
                 if (event.key === "Escape") close();
               }}
             />
-            {error ? <p className="modal-error">{error}</p> : null}
+            {error ? (
+              <div className="modal-error" role="alert">
+                <p>{error.detail}</p>
+                {error.problems?.length ? (
+                  <ul>{error.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
+                ) : null}
+              </div>
+            ) : null}
             <div className="modal-actions">
               <button type="button" className="btn" onClick={close} disabled={pending}>
                 Cancel

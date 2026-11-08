@@ -1,4 +1,6 @@
 import { Empty } from "@/app/_components/ui";
+import { ADD_EXPLAINER, AddDiscoveredGroup } from "@/app/groups/_components/add-discovered-group";
+import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { DiscoveredGroup, GroupDiscovery } from "@/src/lib/types";
 
 function observedAt(value: string) {
@@ -6,10 +8,13 @@ function observedAt(value: string) {
   return Number.isFinite(date.getTime()) ? date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC") : "Unknown";
 }
 
-/** Server-rendered inventory; these rows are deliberately outside ad settings. */
-export function DiscoveredGroups({ groups, discovery }: {
+/** Server-rendered inventory; these rows are deliberately outside ad settings
+ *  until an operator adds one -- which puts it on record in no campaign. The
+ *  Add column appears only when the console's writes are switched on. */
+export function DiscoveredGroups({ groups, discovery, addGate }: {
   groups?: DiscoveredGroup[];
   discovery?: GroupDiscovery;
+  addGate?: WriteGate;
 }) {
   if (groups === undefined && discovery === undefined) return null;
   const rows = groups ?? [];
@@ -38,8 +43,14 @@ export function DiscoveredGroups({ groups, discovery }: {
       ) : null}
       {rows.length > 0 ? (
         <div className="table-wrap">
+          {addGate ? <p className="card-note" style={{ padding: "0 20px 12px" }}>{ADD_EXPLAINER}</p> : null}
           <table className="data">
-            <thead><tr><th>Group</th><th>Joined accounts</th><th>Last seen</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Group</th><th>Joined accounts</th><th>Last seen</th>
+                {addGate ? <th><span className="visually-hidden">Actions</span></th> : null}
+              </tr>
+            </thead>
             <tbody>
               {rows.map((group) => (
                 <tr key={group.jid}>
@@ -49,6 +60,11 @@ export function DiscoveredGroups({ groups, discovery }: {
                   </td>
                   <td className="cell-muted">{group.accounts.map((account) => account.accountId).join(", ")}</td>
                   <td className="cell-muted"><time dateTime={group.lastSeenAt}>{observedAt(group.lastSeenAt)}</time></td>
+                  {addGate ? (
+                    <td className="cell-actions">
+                      <AddDiscoveredGroup jid={group.jid} label={group.name || group.jid} gate={addGate} />
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
