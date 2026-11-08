@@ -76,3 +76,17 @@ export function clockLabel(minutes: number) {
   const whole = Math.round(minutes);
   return `${String(Math.floor(whole / 60)).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
 }
+
+/**
+ * Why a declared campaign is not posting, in a few words -- or null when it is.
+ * Two switches decide it: the operator's own (in Firestore) and whether a cron
+ * is registered. A bot older than the split reports only the combined one.
+ */
+export function campaignOffLabel(campaign: { enabled: boolean; storeEnabled?: boolean; cronEnabled?: boolean }) {
+  if (campaign.enabled) return null;
+  const switchedOff = campaign.storeEnabled === false;
+  const noCron = campaign.cronEnabled === false;
+  if (switchedOff && noCron) return "switched off · no cron";
+  if (noCron) return "no cron registered";
+  return "switched off";
+}

@@ -1020,3 +1020,22 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .account-pairing { text-align: center; }
 .account-pairing img { display: block; width: min(280px, 100%); height: auto; margin: 18px auto; image-rendering: pixelated; }
 @media (max-width: 600px) { .account-stats { gap: 22px; } .account-actions { gap: 8px; } }
+
+/* The campaign's own on/off switch, above its statistics. */
+.campaign-switch { margin-bottom: 16px; }
+.campaign-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.campaign-switch .btn { display: inline-flex; align-items: center; gap: 6px; }
+.campaign-switch p + p { margin-top: 8px; }
+.account-config { border-top: 1px solid var(--border, rgba(0,0,0,.08)); padding-top: 12px; }
+
+/* Settings: the daily cap form. */
+.cap-settings { max-width: 640px; }
+.cap-settings-fields { border: 0; margin: 16px 0 0; padding: 0; min-width: 0; }
+.cap-settings-fields:disabled { opacity: 0.7; }
+.cap-settings-switch { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.cap-settings-switch + .card-note { margin-top: 6px; }
+.cap-settings .form-field { margin-top: 16px; }
+.cap-settings-bands { margin-top: 16px; }
+.cap-settings-bands caption { text-align: left; padding-bottom: 6px; }
+.cap-settings-bands .modal-input { max-width: 110px; }
+.cap-settings .modal-actions { margin-top: 16px; }

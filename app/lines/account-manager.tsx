@@ -1,11 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react';
 import { Link2, Pause, Play, Plus, RefreshCw, Unplug, X } from 'lucide-react';
 import { PageHead } from '@/app/_components/ui';
 import { ACCOUNT_ID, type AccountsPayload, type LinkSession, type WhatsAppAccount } from '@/src/lib/account-types';
 import type { LineSummary } from '@/src/domains/console';
 import { campaignTitle } from '@/src/lib/format';
+import { ConfirmDialog } from '@/app/_components/confirm-dialog';
+import { setContactLineAction, syncLineNumberAction } from '@/app/lines/actions';
+import { linkedNumberChange } from '@/src/domains/line-edit';
+import { canWrite } from '@/src/lib/write-capabilities';
+import type { WriteCapabilities } from '@/src/lib/types';
+
+/** A change to the line's configuration, waiting for the operator's yes. */
+type LineChange =
+  | { kind: 'number'; id: string; from: string; to: string }
+  | { kind: 'contact'; id: string; number: string }
+  | { kind: 'no-contact'; id: string };
 
 class AccountRequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -84,13 +95,23 @@ function connection(account: WhatsAppAccount, unavailable: boolean) {
   return { label: account.running ? 'Connecting' : 'Disconnected', tone: 'pill-warning' };
 }
 
-export function AccountManager({ writesEnabled = false }: { writesEnabled?: boolean }) {
+export function AccountManager({ writesEnabled = false, configWrites = false }: {
+  /** Link, Unlink, Pause and Start: the gateway's account controls. */
+  writesEnabled?: boolean;
+  /** The line's configuration -- its number and the contact line -- which goes
+   *  through the bot's config writer, gated separately on what it accepts. */
+  configWrites?: boolean;
+}) {
   const [data, setData] = useState<AccountsPayload | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [membership, setMembership] = useState<LineSummary[] | null>(null);
   const [membershipError, setMembershipError] = useState(false);
+  const [configCapabilities, setConfigCapabilities] = useState<WriteCapabilities | undefined>(undefined);
+  const [lineChange, setLineChange] = useState<LineChange | null>(null);
+  const [lineError, setLineError] = useState<{ detail: string; problems?: string[] } | null>(null);
+  const [linePending, startLineChange] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const actionRunning = useRef(false);
   const reading = useRef<Promise<void> | null>(null);
@@ -113,7 +134,10 @@ export function AccountManager({ writesEnabled = false }: { writesEnabled?: bool
     return work;
   }, []);
   const refreshMembership = useCallback(async () => {
-    try { const result = await request<{ lines: LineSummary[] }>('/api/account-membership'); setMembership(result.lines); setMembershipError(false); }
+    try {
+      const result = await request<{ lines: LineSummary[]; writes?: WriteCapabilities }>('/api/account-membership');
+      setMembership(result.lines); setConfigCapabilities(result.writes); setMembershipError(false);
+    }
     catch { setMembershipError(true); }
   }, []);
   const pollSession = useCallback(async () => {
@@ -174,6 +198,24 @@ export function AccountManager({ writesEnabled = false }: { writesEnabled?: bool
     if (!ACCOUNT_ID.test(newId)) { setActionError('Use 1–64 lowercase letters, digits, underscores or hyphens.'); return; }
     void act(newId, 'link', true);
   }
+  function closeLineChange() { setLineChange(null); setLineError(null); }
+  function applyLineChange() {
+    if (!lineChange) return;
+    const change = lineChange;
+    startLineChange(async () => {
+      const outcome = change.kind === 'number' ? await syncLineNumberAction(change.id)
+        : await setContactLineAction(change.kind === 'contact' ? change.id : null);
+      if (!outcome.ok) { setLineError({ detail: outcome.detail, problems: outcome.problems }); return; }
+      closeLineChange();
+      setNotice(change.kind === 'number' ? `${change.id}: adverts now give ${change.to}, from each campaign's next run.`
+        : change.kind === 'contact' ? `${change.id} is now the contact line, from each campaign's next run.`
+          : 'No contact line: each advert gives the number of the line that posts it, from its next run.');
+      await refreshMembership();
+    });
+  }
+  const numberGate = canWrite(configWrites, configCapabilities, 'lines', 'number');
+  const contactGate = canWrite(configWrites, configCapabilities, 'settings', 'contact_account');
+  const lineChangeGate = lineChange?.kind === 'number' ? numberGate : contactGate;
   const unavailable = Boolean(readError || !available);
   const disabled = !writesEnabled || unavailable || Boolean(busy) || !data;
   const configured = new Map(membership?.map((line) => [line.id, line]));
@@ -219,6 +261,26 @@ export function AccountManager({ writesEnabled = false }: { writesEnabled?: bool
                 {line?.promos.length ? <div className="tag-row">{line.promos.map((promo) => <span className={`tag${promo.off ? ' tag-off' : ''}`} key={promo.slug}>{campaignTitle(promo.slug)} · {promo.count}</span>)}</div> : null}
                 <p className="card-note">Counts show configured assignments; deliveries depend on connection and account state.</p>
                 {account?.startBlockedReason ? <p className="card-note">{account.startBlockedReason}</p> : null}
+                {configWrites && line ? (() => {
+                  const linked = account ? linkedNumberChange(line.number, account.number) : null;
+                  return (
+                    <div className="account-config">
+                      {linked ? <p className="card-note">Adverts on this line give <strong>{line.number}</strong>, but WhatsApp reports <strong>{linked}</strong>.</p> : null}
+                      <div className="account-actions">
+                        {linked ? <button className="account-button" disabled={!numberGate.allowed || linePending}
+                          title={numberGate.allowed ? undefined : numberGate.reason}
+                          onClick={() => setLineChange({ kind: 'number', id, from: line.number, to: linked })}>Use the linked number</button> : null}
+                        {line.isContact
+                          ? <button className="account-button" disabled={!contactGate.allowed || linePending}
+                              title={contactGate.allowed ? undefined : contactGate.reason}
+                              onClick={() => setLineChange({ kind: 'no-contact', id })}>Stop using as contact line</button>
+                          : <button className="account-button" disabled={!contactGate.allowed || linePending || !line.number}
+                              title={!contactGate.allowed ? contactGate.reason : !line.number ? 'This line has no number yet.' : undefined}
+                              onClick={() => setLineChange({ kind: 'contact', id, number: line.number })}>Make this the contact line</button>}
+                      </div>
+                    </div>
+                  );
+                })() : null}
                 {account?.hasError && !unavailable ? <p className="card-note">The gateway reported a connection error. Refresh status; Unlink, then Link, if the saved login is invalid.</p> : null}
                 <div className="account-actions" aria-busy={busy === id}>
                   <button className="account-button" disabled={blocked || Boolean(account?.startBlockedReason) || account?.linked === true && !account.pairingSessionId}
@@ -234,6 +296,24 @@ export function AccountManager({ writesEnabled = false }: { writesEnabled?: bool
         })}
       </div>
       {data && ids.length === 0 ? <p className="empty">No accounts configured. Add an account to connect WhatsApp.</p> : null}
+      {lineChange ? (
+        <ConfirmDialog
+          title={lineChange.kind === 'number' ? `Use the linked number for ${lineChange.id}?`
+            : lineChange.kind === 'contact' ? `Make ${lineChange.id} the contact line?` : `Stop using ${lineChange.id} as the contact line?`}
+          confirmLabel={lineChange.kind === 'number' ? 'Use the linked number' : lineChange.kind === 'contact' ? 'Make contact line' : 'Stop using it'}
+          warning={lineChangeGate.allowed ? lineChangeGate.warning : undefined}
+          pending={linePending}
+          error={lineError}
+          onConfirm={applyLineChange}
+          onClose={closeLineChange}
+        >
+          {lineChange.kind === 'number'
+            ? <p>Adverts on this line will send customers to <strong>{lineChange.to}</strong> instead of {lineChange.from}, from each campaign&apos;s next run.</p>
+            : lineChange.kind === 'contact'
+              ? <p>Every advert will give <strong>{lineChange.number}</strong> as the number to contact, whichever line posts it, from each campaign&apos;s next run.</p>
+              : <p>Each advert will give the number of the line that posts it, from each campaign&apos;s next run.</p>}
+        </ConfirmDialog>
+      ) : null}
       {adding ? <Modal title="Add WhatsApp account" close={() => !busy && setAdding(false)}>
         <form onSubmit={add} className="account-form">
           <label htmlFor="account-id">Account ID</label>

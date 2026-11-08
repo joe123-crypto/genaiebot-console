@@ -2,18 +2,26 @@
 
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { Pause, Play, Plus, Trash2, X } from "lucide-react";
+import { applyCampaignGroupsAction, type ApplyGroupsOutcome } from "@/app/campaigns/actions";
 import { groupLabel, plural, shortJid } from "@/src/lib/format";
 import {
-  emptyGroupDraft, groupDraftKey, hasGroupDraft, parseGroupDraft, reconcileGroupDraft,
+  draftedJids, emptyGroupDraft, groupDraftKey, hasGroupDraft, isPausedInDraft, parseGroupDraft,
+  reconcileGroupDraft, togglePause, withoutJids,
   type CampaignGroupDraft, type CampaignGroupRow, type KnownCampaignGroup,
 } from "@/src/lib/campaign-group-draft";
+import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type Props = {
   slug: string;
   liveGroups: CampaignGroupRow[];
   knownGroups: KnownCampaignGroup[];
   variantCount: number;
+  /** Absent while the console is read-only: the draft then stays a browser
+   *  scratchpad, as it always was. Present, it decides whether Apply is armed. */
+  gate?: WriteGate;
 };
+
+type ApplyFailure = Extract<ApplyGroupsOutcome, { ok: false }>;
 
 type BrowserDraft = { draft: CampaignGroupDraft; raw: string | null; invalid: boolean };
 const INVALID_DRAFT_NOTICE = "The saved group draft could not be read. Showing the latest live groups instead.";
@@ -131,12 +139,58 @@ function AddGroupsDialog({ groups, close, add }: {
   );
 }
 
+export const APPLY_EXPLAINER =
+  "The bot checks every change before it makes any of them. They take effect from the campaign’s next run; a run already under way keeps what it started with.";
+
+function draftSummary(draft: CampaignGroupDraft) {
+  return [
+    [draft.added.length, "added"], [draft.removed.length, "removed"],
+    [draft.paused.length, "paused"], [draft.resumed?.length ?? 0, "resumed"],
+  ].filter(([count]) => Number(count) > 0).map(([count, what]) => `${count} ${what}`).join(" · ");
+}
+
+function ApplyDialog({ draft, warning, close, confirm }: {
+  draft: CampaignGroupDraft;
+  warning?: string;
+  close: () => void;
+  confirm: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const id = useId();
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const element = dialog.current;
+    element?.showModal();
+    cancel.current?.focus();
+    return () => { element?.close(); if (previous?.isConnected) previous.focus(); };
+  }, []);
+
+  return (
+    <dialog ref={dialog} className="campaign-group-dialog" role="alertdialog"
+      aria-labelledby={`${id}-title`} aria-describedby={`${id}-help`}
+      onCancel={(event) => { event.preventDefault(); close(); }}>
+      <h2 className="modal-title" id={`${id}-title`}>Apply changes to the bot?</h2>
+      <p className="modal-body" id={`${id}-help`}>
+        {plural(draftedJids(draft).length, "group")} will change for this campaign: {draftSummary(draft)}.
+        {" "}{APPLY_EXPLAINER}
+      </p>
+      {warning ? <p className="modal-warning">{warning}</p> : null}
+      <div className="modal-actions">
+        <button ref={cancel} type="button" className="btn" onClick={close}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={confirm}>Apply changes</button>
+      </div>
+    </dialog>
+  );
+}
+
 // A campaign change must remount storage state, even when a caller reuses this component.
 export function CampaignGroups(props: Props) {
   return <CampaignGroupEditor key={props.slug} {...props} />;
 }
 
-function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Props) {
+function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate }: Props) {
   const id = useId();
   const key = groupDraftKey(slug);
   // Keep the observed storage value with its draft: even a pending effect from
@@ -148,6 +202,9 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
   const addButton = useRef<HTMLButtonElement>(null);
   const [storageFailed, setStorageFailed] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [failure, setFailure] = useState<ApplyFailure | null>(null);
 
   useEffect(() => {
     function load(external: boolean) {
@@ -217,7 +274,6 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
 
   const current = draft ? reconcileGroupDraft(draft, liveGroups, knownGroups).draft : emptyGroupDraft();
   const removed = new Set(current.removed);
-  const paused = new Set(current.paused);
   const knownById = new Map(knownGroups.map((group) => [group.jid, group]));
   const rows: { group: CampaignGroupRow | KnownCampaignGroup; live: CampaignGroupRow | null }[] =
     liveGroups.filter((group) => !removed.has(group.jid)).map((group) => ({ group, live: group }));
@@ -229,6 +285,10 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
   const available = knownGroups.filter((group) => group.status === "active" && !assigned.has(group.jid));
   const removalRow = rows.find(({ group }) => group.jid === removeJid);
   const removalAvailable = removalRow !== undefined;
+  const pausedCount = rows.filter(({ group, live }) => isPausedInDraft(current, group.jid, live)).length;
+  // Nothing in the draft may move while it is being sent.
+  const busy = draft === null || applying;
+  const staged = draftedJids(current).length;
 
   useEffect(() => {
     // A refreshed target list can remove the row while its warning is open.
@@ -238,6 +298,35 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
   function change(next: CampaignGroupDraft) {
     setSnapshot({ draft: next, raw: snapshot?.raw ?? null, invalid: false });
     setNotice(null);
+    setFailure(null);
+  }
+
+  function labelOf(jid: string) {
+    const group = knownById.get(jid);
+    return group ? groupLabel(group) : shortJid(jid);
+  }
+
+  async function apply() {
+    setConfirming(false);
+    setApplying(true);
+    setFailure(null);
+    setNotice(null);
+    let outcome: ApplyGroupsOutcome;
+    try {
+      outcome = await applyCampaignGroupsAction(slug, current);
+    } catch {
+      outcome = { ok: false, done: [], detail: "The changes could not be sent. Some may have been made: reload to see what the bot has now." };
+    }
+    // What is now true on the bot leaves the draft; the rest stays staged.
+    setSnapshot((previous) => previous && outcome.done.length > 0
+      ? { ...previous, draft: withoutJids(previous.draft, outcome.done), invalid: false }
+      : previous);
+    if (outcome.ok) {
+      setNotice(`Applied to ${plural(outcome.done.length, "group")}. The campaign uses it from its next run.`);
+    } else {
+      setFailure(outcome);
+    }
+    setApplying(false);
   }
 
   function add(jids: string[]) {
@@ -254,24 +343,47 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
       <div className="card-head">
         <div>
           <h2 className="card-title" id={`${id}-title`}>Where it goes</h2>
-          <p className="card-note campaign-group-help">Changes are saved in this browser only and do not affect the bot.</p>
+          <p className="card-note campaign-group-help">{gate?.allowed
+            ? "Stage changes here, then apply them to the bot."
+            : "Changes are saved in this browser only and do not affect the bot."}</p>
+          {gate && !gate.allowed ? <p className="card-note">{gate.reason}</p> : null}
         </div>
         <div className="campaign-group-actions">
-          <button type="button" className="btn" disabled={draft === null || !hasGroupDraft(current)}
+          <button type="button" className="btn" disabled={busy || !hasGroupDraft(current)}
             onClick={() => change(emptyGroupDraft())}>Reset draft</button>
-          <button ref={addButton} type="button" className="btn campaign-group-add" disabled={draft === null} onClick={() => setOpen(true)}>
+          <button ref={addButton} type="button" className="btn campaign-group-add" disabled={busy} onClick={() => setOpen(true)}>
             <Plus size={16} aria-hidden /> Add groups
           </button>
+          {gate ? (
+            <button type="button" className="btn btn-primary"
+              disabled={busy || !gate.allowed || staged === 0}
+              title={gate.allowed ? undefined : gate.reason}
+              onClick={() => setConfirming(true)}>
+              {applying ? "Applying…" : staged > 0 ? `Apply ${plural(staged, "change")}` : "Apply changes"}
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="campaign-group-feedback">
-        <p className="card-note">{plural(rows.length, "group")} in draft · {rows.length - paused.size} participating · {paused.size} paused
+        <p className="card-note">{plural(rows.length, "group")} in draft · {rows.length - pausedCount} participating · {pausedCount} paused
           <span className="campaign-group-deltas">{current.added.length} added · {current.removed.length} removed</span>
         </p>
         <p className="card-note" role="status">{draft === null ? "Loading browser draft…" : storageFailed
           ? "Browser storage is unavailable. Edits are kept on this page only; reloading may restore an older draft."
           : hasGroupDraft(current) ? "Draft saved in this browser. Pause applies only to this campaign." : "No local changes. Pause applies only to this campaign."}</p>
         {notice ? <p className="card-note" role="status">{notice}</p> : null}
+        {failure ? (
+          <div className="modal-error" role="alert">
+            <p>{failure.detail}</p>
+            {failure.failures?.length ? (
+              <ul>{failure.failures.map((entry) => (
+                <li key={entry.jid}><strong>{labelOf(entry.jid)}</strong>: {entry.detail}
+                  {entry.problems?.length ? <ul>{entry.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : null}
+                </li>
+              ))}</ul>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="table-wrap" role="region" aria-label="Campaign groups, scroll horizontally for actions" tabIndex={0}>
         <table className="data">
@@ -280,14 +392,18 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
             <th scope="col">Line</th><th scope="col">Replies to</th><th scope="col">Cadence</th><th scope="col">Actions</th>
           </tr></thead>
           <tbody>
-            {rows.map(({ group, live }) => (
+            {rows.map(({ group, live }) => {
+              const pausedHere = isPausedInDraft(current, group.jid, live);
+              const stagedPause = current.paused.includes(group.jid);
+              return (
               <tr key={group.jid}>
                 <td>
                   <div className="cell-strong">{groupLabel(group)}</div>
                   <div className="cell-mono">{shortJid(group.jid)}</div>
                   {!live ? <span className="pill pill-info campaign-group-draft-badge">Draft addition</span> : null}
                 </td>
-                <td>{paused.has(group.jid) ? <span className="pill pill-warning">Paused · draft</span>
+                <td>{pausedHere ? <span className="pill pill-warning">{stagedPause ? "Paused · draft" : "Paused"}</span>
+                  : live?.paused ? <span className="pill pill-info">Resumes · draft</span>
                   : !live ? <span className="cell-muted">—</span>
                     : live.sendsToday ? <span className="pill pill-success">Posts</span>
                       : <span className="pill pill-warning" title={`today goes to ${live.allowedToday.join(", ")}`}>At cap</span>}</td>
@@ -298,20 +414,20 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
                 <td className="cell-muted">{!live ? "daily (draft)" : live.weekly.length > 0 ? live.weekly.join(", ") : "daily"}</td>
                 <td className="cell-actions">
                   <div className="campaign-group-row-actions">
-                    <button type="button" className="btn campaign-group-toggle" disabled={draft === null}
-                      aria-label={`${paused.has(group.jid) ? "Resume" : "Pause"} ${groupLabel(group)} in this campaign`}
-                      onClick={() => change({ ...current, paused: paused.has(group.jid)
-                        ? current.paused.filter((jid) => jid !== group.jid) : [...current.paused, group.jid] })}>
-                      {paused.has(group.jid) ? <Play size={14} aria-hidden /> : <Pause size={14} aria-hidden />}
-                      {paused.has(group.jid) ? "Resume" : "Pause"}
+                    <button type="button" className="btn campaign-group-toggle" disabled={busy}
+                      aria-label={`${pausedHere ? "Resume" : "Pause"} ${groupLabel(group)} in this campaign`}
+                      onClick={() => change(togglePause(current, group.jid, live))}>
+                      {pausedHere ? <Play size={14} aria-hidden /> : <Pause size={14} aria-hidden />}
+                      {pausedHere ? "Resume" : "Pause"}
                     </button>
-                    <button type="button" className="row-action row-action-danger" disabled={draft === null}
+                    <button type="button" className="row-action row-action-danger" disabled={busy}
                       aria-label={`Remove ${groupLabel(group)} from campaign`} title="Remove from campaign draft"
                       onClick={() => setRemoveJid(group.jid)}><Trash2 size={16} aria-hidden /></button>
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {rows.length === 0 ? <tr><td colSpan={8}><div className="empty">No groups in this draft. Add groups to get started.</div></td></tr> : null}
           </tbody>
         </table>
@@ -320,14 +436,15 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount }: Pr
       {removalRow ? <RemoveGroupDialog group={removalRow.group} close={() => setRemoveJid(null)}
         fallbackFocus={addButton} confirm={() => {
           const jid = removalRow.group.jid;
-          change({
-            ...current,
-            added: current.added.filter((entry) => entry !== jid),
-            removed: removalRow.live ? [...current.removed, jid] : current.removed,
-            paused: current.paused.filter((entry) => entry !== jid),
-          });
+          // A removal takes the group's pause or resume with it.
+          const rest = withoutJids(current, [jid]);
+          change({ ...rest, removed: removalRow.live ? [...rest.removed, jid] : rest.removed });
           setRemoveJid(null);
         }} /> : null}
+      {confirming && gate?.allowed ? (
+        <ApplyDialog draft={current} warning={gate.warning}
+          close={() => setConfirming(false)} confirm={() => { void apply(); }} />
+      ) : null}
     </section>
   );
 }

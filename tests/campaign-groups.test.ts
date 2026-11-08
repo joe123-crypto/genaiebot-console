@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { apply } = vi.hoisted(() => ({ apply: vi.fn() }));
+vi.mock("@/app/campaigns/actions", () => ({ applyCampaignGroupsAction: apply }));
+
 import { CampaignGroups } from "@/app/campaigns/_components/campaign-groups";
 import {
   groupDraftKey, type CampaignGroupRow, type KnownCampaignGroup,
@@ -53,7 +57,7 @@ beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); apply.mockReset(); });
 
 describe("campaign group drafts", () => {
   it.each([null, { version: 1, added: [], removed: [], paused: ["1@g.us"] }])(
@@ -288,5 +292,96 @@ describe("campaign group drafts", () => {
     cleanup(); mount({ slug: "empty", liveGroups: [] });
     const dialog = picker(); select(dialog, "New Market"); click("Add selected");
     expect(screen.getByText("Draft addition")).toBeTruthy();
+  });
+});
+
+describe("applying a campaign's group changes", () => {
+  const ALLOWED = { allowed: true as const };
+  function mountWith(gate?: Parameters<typeof CampaignGroups>[0]["gate"], liveGroups = live) {
+    return render(createElement(CampaignGroups, { ...props, liveGroups, gate }));
+  }
+  async function confirmApply() {
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Apply changes" }));
+    });
+  }
+
+  it("offers no Apply while the console is read-only", () => {
+    mountWith(undefined);
+    expect(screen.queryByRole("button", { name: /^Apply/ })).toBeNull();
+  });
+
+  it("disables Apply, saying why, when the bot cannot take the change", () => {
+    mountWith({ allowed: false, reason: "The bot has no write key installed, so it cannot save changes yet." });
+    click("Pause Market One in this campaign");
+    const button = screen.getByRole("button", { name: "Apply 1 change" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toMatch(/no write key/);
+    expect(screen.getByText(/no write key/, { selector: "p" })).toBeTruthy();
+    expect(screen.getByText("Changes are saved in this browser only and do not affect the bot.")).toBeTruthy();
+  });
+
+  it("confirms, sends the draft, and empties it once applied", async () => {
+    apply.mockResolvedValue({ ok: true, done: ["1@g.us"] });
+    mountWith(ALLOWED);
+    expect((screen.getByRole("button", { name: "Apply changes" }) as HTMLButtonElement).disabled).toBe(true);
+    click("Pause Market One in this campaign");
+    click("Apply 1 change");
+    const dialog = screen.getByRole("alertdialog", { name: "Apply changes to the bot?" });
+    expect(within(dialog).getByText(/1 group will change for this campaign: 1 paused/)).toBeTruthy();
+    expect(within(dialog).getByText(/next run/)).toBeTruthy();
+    expect(apply).not.toHaveBeenCalled();
+    await confirmApply();
+    expect(apply).toHaveBeenCalledWith("borehole", { version: 1, added: [], removed: [], paused: ["1@g.us"] });
+    expect(stored()).toBeNull();
+    expect(screen.getByText(/Applied to 1 group/)).toBeTruthy();
+  });
+
+  it("sends nothing when the confirmation is cancelled", () => {
+    mountWith(ALLOWED);
+    click("Pause Market One in this campaign");
+    click("Apply 1 change");
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    expect(apply).not.toHaveBeenCalled();
+    expect(stored().paused).toEqual(["1@g.us"]);
+  });
+
+  it("keeps what was not applied and names each refusal", async () => {
+    apply.mockResolvedValue({
+      ok: false, done: ["1@g.us"], detail: "Stopped after 1 of 2 groups; the rest are still in the draft.",
+      failures: [{ jid: "2@g.us", detail: "the bot said no", problems: ["group 2: unknown campaign"] }],
+    });
+    mountWith(ALLOWED);
+    click("Pause Market One in this campaign");
+    click("Pause Market Two in this campaign");
+    click("Apply 2 changes");
+    await confirmApply();
+    expect(stored().paused).toEqual(["2@g.us"]);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/Stopped after 1 of 2 groups/);
+    expect(within(alert).getByText("Market Two")).toBeTruthy();
+    expect(alert.textContent).toMatch(/the bot said no/);
+    expect(alert.textContent).toMatch(/unknown campaign/);
+  });
+
+  it("keeps the whole draft when the request itself fails", async () => {
+    apply.mockRejectedValue(new Error("network"));
+    mountWith(ALLOWED);
+    click("Pause Market One in this campaign");
+    click("Apply 1 change");
+    await confirmApply();
+    expect(stored().paused).toEqual(["1@g.us"]);
+    expect(screen.getByRole("alert").textContent).toMatch(/reload to see what the bot has now/);
+  });
+
+  it("shows a group the bot has paused, and stages resuming it", () => {
+    mountWith(ALLOWED, [live[0], { ...live[1], paused: true, sendsToday: false }]);
+    expect(within(row("Market Two")).getByText("Paused")).toBeTruthy();
+    expect(screen.getByText(/2 groups in draft · 1 participating · 1 paused/)).toBeTruthy();
+    click("Resume Market Two in this campaign");
+    expect(within(row("Market Two")).getByText("Resumes · draft")).toBeTruthy();
+    expect(stored()).toEqual({ version: 1, added: [], removed: [], paused: [], resumed: ["2@g.us"] });
+    click("Pause Market Two in this campaign");
+    expect(stored()).toBeNull();
   });
 });

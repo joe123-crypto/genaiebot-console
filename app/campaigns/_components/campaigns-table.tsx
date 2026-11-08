@@ -20,7 +20,7 @@ import {
   type CampaignFilter,
   type CampaignStatusChoice,
 } from "@/src/domains/campaign-filter";
-import { campaignTitle, plural, slotLabel } from "@/src/lib/format";
+import { campaignOffLabel, campaignTitle, plural, slotLabel } from "@/src/lib/format";
 import type { Campaign } from "@/src/lib/types";
 
 type Props = {
@@ -146,7 +146,7 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
                     fontVariantNumeric: "tabular-nums",
                     ...(campaign.enabled ? {} : { textDecoration: "line-through", opacity: 0.6 }),
                   }}
-                  title={campaign.enabled ? undefined : "no cron is installed for this slot"}
+                  title={campaignOffLabel(campaign) ?? undefined}
                 >
                   {slotLabel(campaign)}
                 </td>
@@ -162,12 +162,8 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
                   </div>
                   <div className="cell-mono">{campaign.name}</div>
                   {campaign.enabled ? null : (
-                    <div
-                      className="pill pill-warning"
-                      style={{ marginTop: 4 }}
-                      title={"enabled is false in deploy/promo-crons.json"}
-                    >
-                      switched off
+                    <div className="pill pill-warning" style={{ marginTop: 4 }}>
+                      {campaignOffLabel(campaign)}
                     </div>
                   )}
                   {campaign.error ? (
