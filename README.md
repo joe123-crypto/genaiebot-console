@@ -161,6 +161,21 @@ the number in the card and the rows on screen cannot disagree. The three group
 items in that card link the same way. Items with no view that isolates them —
 the Firestore comparison, the config source — stay plain text.
 
+## Automatically discovered groups
+
+The Groups page includes an **Unassigned** section when the bot provides
+`discoveredGroups` and `groupDiscovery`. It shows the full group name and JID,
+every observed account and the last-seen time. These rows are metadata
+observations, not advertising configuration; no campaigns or write controls are
+attached automatically. Already configured groups remain in the existing tables.
+
+The bot scans through its existing WhatsApp connections after connect and
+hourly, saving observations on its persistent volume. The console only reads
+that saved inventory. Waiting, stale, failed and disabled discovery are shown
+beside retained observations, which are not proof of present membership. The
+section is hidden for older bot versions that omit the extra fields. This works
+with either the local or remote read adapter and needs no console write access.
+
 ## Campaign group drafts
 
 The campaign’s **Where it goes** table supports browser-saved drafts. **Add groups**

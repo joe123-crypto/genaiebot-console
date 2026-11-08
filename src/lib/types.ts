@@ -129,4 +129,26 @@ export type GroupsPayload = {
   date: string;
   disabledPromos: string[];
   groups: Group[];
+  /** Optional for compatibility with bot versions before automatic discovery. */
+  discoveredGroups?: DiscoveredGroup[];
+  groupDiscovery?: GroupDiscovery;
+};
+
+export type DiscoveredGroup = {
+  jid: string;
+  name: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  accounts: { accountId: string; firstSeenAt: string; lastSeenAt: string }[];
+};
+
+export type GroupDiscovery = {
+  enabled: boolean;
+  accounts: {
+    accountId: string;
+    status: "waiting" | "ok" | "stale" | "error" | "disabled";
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    lastError: string | null;
+  }[];
 };
