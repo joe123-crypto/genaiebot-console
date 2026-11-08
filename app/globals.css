@@ -945,6 +945,26 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   margin-top: 18px;
 }
 
+/* A dialog with several fields: each label + control pair, spaced like the
+   single-field dialogs space their one input from the actions. */
+.form-field + .form-field { margin-top: 12px; }
+.modal-input:disabled { background: var(--surface-muted); color: var(--text-muted); }
+
+/* A save that will be accepted but will not change what is sent. */
+.modal-warning {
+  color: #8c5608;
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  margin: 0 0 14px;
+}
+
+/* The bot's own reasons for a refusal, one per line. */
+.modal-error p { margin: 0; }
+.modal-error ul { margin: 6px 0 0; padding-left: 18px; }
+
 @media (max-width: 900px) {
   .console-app { grid-template-columns: 1fr; }
   .console-sidebar {

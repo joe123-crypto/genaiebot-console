@@ -18,19 +18,31 @@ async function loadAction(writesEnabled: boolean) {
     OPERATOR_NAME: "Joseph Munemo",
   }));
   vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
-  vi.doMock("@/src/lib/bot-client", () => ({
-    deleteGroup,
-    BotUnavailableError: class extends Error {
+  vi.doMock("@/src/lib/bot-client", () => {
+    class BotUnavailableError extends Error {
       detail: string;
       constructor(detail: string) {
         super("unavailable");
         this.detail = detail;
       }
-    },
-    WritesDisabledError: class extends Error {
-      detail = "writes are off";
-    },
-  }));
+    }
+    // The real hierarchy: a refusal is a kind of "could not change it".
+    class WriteRefusedError extends BotUnavailableError {
+      problems: string[];
+      constructor(detail: string, problems: string[]) {
+        super(detail);
+        this.problems = problems;
+      }
+    }
+    return {
+      deleteGroup,
+      BotUnavailableError,
+      WriteRefusedError,
+      WritesDisabledError: class extends Error {
+        detail = "writes are off";
+      },
+    };
+  });
   return import("@/app/groups/actions");
 }
 
@@ -70,6 +82,32 @@ describe("deleteGroupAction", () => {
     expect(await deleteGroupAction("1203@g.us")).toEqual({
       ok: false,
       detail: "the write service is busy",
+    });
+  });
+
+  it("leaves the reason out when none was given, and trims one that was", async () => {
+    const { deleteGroupAction } = await loadAction(true);
+    deleteGroup.mockResolvedValue({});
+    await deleteGroupAction("1203@g.us", "   ");
+    expect(deleteGroup).toHaveBeenLastCalledWith("1203@g.us", { by: "Joseph Munemo" });
+    await deleteGroupAction("1203@g.us", "  bot was removed  ");
+    expect(deleteGroup).toHaveBeenLastCalledWith("1203@g.us",
+      { by: "Joseph Munemo", reason: "bot was removed" });
+  });
+
+  it("refuses an oversized reason before reaching the bot", async () => {
+    const { deleteGroupAction } = await loadAction(true);
+    expect((await deleteGroupAction("1203@g.us", "x".repeat(501))).ok).toBe(false);
+    expect(deleteGroup).not.toHaveBeenCalled();
+  });
+
+  it("hands back the bot's own reasons when it refuses", async () => {
+    const { deleteGroupAction } = await loadAction(true);
+    const { WriteRefusedError } = await import("@/src/lib/bot-client");
+    deleteGroup.mockRejectedValue(new (WriteRefusedError as unknown as new (
+      d: string, p: string[]) => Error)("groups/1203@g.us does not exist", ["no such group"]));
+    expect(await deleteGroupAction("1203@g.us")).toEqual({
+      ok: false, detail: "groups/1203@g.us does not exist", problems: ["no such group"],
     });
   });
 

@@ -6,6 +6,8 @@ import {
 } from "@/app/_components/filter-bar";
 import { STATUS_LABEL, StatusPill } from "@/app/_components/ui";
 import { DeleteGroup } from "@/app/groups/_components/delete-group";
+import { EditGroup } from "@/app/groups/_components/edit-group";
+import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
 import {
   DEFAULT_GROUP_FILTER,
   GROUP_FILTER_KEYS,
@@ -23,6 +25,27 @@ import {
 import { campaignTitle, confirmLabel, groupLabel, shortJid } from "@/src/lib/format";
 import type { Group, GroupStatus } from "@/src/lib/types";
 
+/** What the row actions may do, worked out on the server from the console's
+ *  switch and the bot's own report, and the vocabulary the Edit form offers. */
+export type GroupEditing = {
+  edit: WriteGate;
+  /** The Edit dialog's fields the bot accepts; the rest show, disabled. */
+  editableFields: string[];
+  delete: WriteGate;
+  lines: string[];
+  tiers: string[];
+};
+
+/** Nothing armed. Used when a caller passes no gates, so forgetting them can
+ *  only ever make the table more read-only, never less. */
+const NO_EDITING: GroupEditing = {
+  edit: { allowed: false, reason: READ_ONLY_REASON },
+  editableFields: [],
+  delete: { allowed: false, reason: READ_ONLY_REASON },
+  lines: [],
+  tiers: [],
+};
+
 type Props = {
   /** Every group on record. The table narrows them; it never refetches. */
   groups: Group[];
@@ -30,6 +53,7 @@ type Props = {
   /** `WRITES_ENABLED` reads an unprefixed environment variable, so it is false
    *  in a browser bundle. The server page has to hand it over. */
   writesEnabled: boolean;
+  editing?: GroupEditing;
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: GroupFilter;
 };
@@ -37,7 +61,9 @@ type Props = {
 const VIEWS: GroupView[] = ["all", "needs-decision", "advertising", "no-campaign"];
 const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-member"];
 
-export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilter }: Props) {
+export function GroupsTable({
+  groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
+}: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
   // while already here is applied, the sixty-second refresh is not.
@@ -194,24 +220,28 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
                     <div className="tag-row">
                       {group.promos.map((promo) => {
                         const isOff = off.has(promo);
-                        const sendsToday = !isOff && group.allowedToday.includes(promo);
+                        const isPaused = (group.pausedPromos ?? []).includes(promo);
+                        const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
                         const weekly = group.weekly[promo];
                         return (
                           <span
                             key={promo}
-                            className={`tag${isOff ? " tag-off" : sendsToday ? " tag-on" : ""}`}
+                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}`}
                             title={
                               isOff
-                                ? "campaign is switched off — it installs no cron and never posts"
-                                : weekly
-                                  ? `only on ${weekly.join(", ")}`
-                                  : sendsToday
-                                    ? "posts today"
-                                    : "held back by today's cap"
+                                ? "campaign is switched off — it posts nowhere"
+                                : isPaused
+                                  ? "paused for this group — still assigned, but nothing is sent"
+                                  : weekly
+                                    ? `only on ${weekly.join(", ")}`
+                                    : sendsToday
+                                      ? "posts today"
+                                      : "held back by today's cap"
                             }
                           >
                             {campaignTitle(promo)}
                             {weekly ? ` · ${weekly.join("/")}` : ""}
+                            {isPaused ? " · paused" : ""}
                           </span>
                         );
                       })}
@@ -221,7 +251,15 @@ export function GroupsTable({ groups, disabledPromos, writesEnabled, initialFilt
                 <td className="cell-note" title={group.note ?? undefined}>{group.note ?? ""}</td>
                 {writesEnabled ? (
                   <td className="cell-actions">
-                    <DeleteGroup jid={group.jid} label={confirmLabel(group)} />
+                    <EditGroup
+                      group={group}
+                      label={confirmLabel(group)}
+                      lines={editing.lines}
+                      tiers={editing.tiers}
+                      gate={editing.edit}
+                      editable={editing.editableFields}
+                    />
+                    <DeleteGroup jid={group.jid} label={confirmLabel(group)} gate={editing.delete} />
                   </td>
                 ) : null}
               </tr>
