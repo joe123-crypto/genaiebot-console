@@ -15,6 +15,9 @@ export type Group = {
   account: string;
   dailyCapOverride: number | null;
   promos: string[];
+  /** Campaigns this group stays assigned to but is paused for: they neither post
+   *  to it nor take one of its daily cap turns. Absent from an older bot. */
+  pausedPromos?: string[];
   weekly: Record<string, string[]>;
   note: string | null;
   cap: number | null;
@@ -33,9 +36,15 @@ export type Tracking = {
 export type Campaign = {
   slug: string;
   name: string;
-  /** False when the manifest switches the campaign off: it is still declared
-   *  and still has copy, but installs no cron and so never posts. */
+  /** Whether the campaign actually posts: on only if both switches below are.
+   *  False when either is off -- it is still declared and still has copy. */
   enabled: boolean;
+  /** The operator's own switch in Firestore, and the one a toggle edits. */
+  storeEnabled?: boolean;
+  /** Whether the manifest registers a cron at all. Read-only here: no toggle can
+   *  create a cron, so a screen must not pretend one can. Both absent from a bot
+   *  older than the console's config writes. */
+  cronEnabled?: boolean;
   cron: string;
   hour: number | null;
   minute: number | null;
@@ -86,6 +95,29 @@ export type ConfigShadow = {
   lastCheck: ShadowCheck | null;
 };
 
+/**
+ * What the bot will accept from the console, reported by the writer itself so a
+ * screen cannot offer an edit the bot is going to refuse. `fields` and `delete`
+ * are its `EDITABLE` / `DELETABLE` verbatim.
+ */
+export type WriteCapabilities = {
+  /** Whether the bot's console API holds a write key at all. */
+  enabled: boolean;
+  /** Whether a saved change reaches the campaigns. False before the Firestore
+   *  cutover: a write would land in the store while runs still read the file. */
+  affectsProduction: boolean;
+  fields: Record<string, string[]>;
+  delete: string[];
+};
+
+/** The settings every group's daily allowance derives from, in the shape a
+ *  form edits them. */
+export type CapSettings = {
+  enabled: boolean;
+  defaultActivity: string;
+  bands: Record<string, [number, number]>;
+};
+
 export type Overview = {
   date: string;
   groupsByStatus: Partial<Record<GroupStatus, number>>;
@@ -97,6 +129,10 @@ export type Overview = {
   /** Absent from a bridge older than the shadow work, so optional: this one is
    *  safe to miss, unlike `enabled`, because nothing reads it as a decision. */
   configShadow?: ConfigShadow;
+  /** Absent from a bot older than the console's config writes. That is read as
+   *  "this bot cannot be written to", never as "everything is writable". */
+  writes?: WriteCapabilities;
+  capSettings?: CapSettings;
   campaigns: Campaign[];
 };
 
@@ -109,9 +145,24 @@ export type PreviewRow = {
   variant: number | null;
   caption: string | null;
   cap: number | null;
+  /** Still assigned, but paused for this campaign. The row is listed anyway --
+   *  this is where a pause is resumed from -- and `sendsToday` is false. */
+  paused?: boolean;
   sendsToday: boolean;
   allowedToday: string[];
   weekly: string[];
+};
+
+/** What the bot reports after a config write (or a dry run of one). */
+export type WriteResult = {
+  collection: string;
+  id: string;
+  change: "created" | "updated" | "unchanged" | "deleted";
+  fields: string[];
+  warnings: string[];
+  /** The audit document the change was committed with; null for a dry run or a
+   *  change that changed nothing. */
+  audit: string | null;
 };
 
 export type CampaignPreview = {

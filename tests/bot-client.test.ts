@@ -196,23 +196,34 @@ describe("deleteGroup", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("posts to the write service with its own token", async () => {
+  it("posts a delete to the bot's one config route", async () => {
+    // The route the bot actually has: earlier versions called
+    // groups/<jid>/delete, which never existed on the bot.
     const { deleteGroup } = await loadWith("remote", REMOTE);
-    const calls = stubFetch({ body: '{"jid":"1203@g.us"}' });
+    const result = { collection: "groups", id: "1203@g.us", change: "deleted",
+                     fields: ["name"], warnings: [], audit: "20261108T000000Z-ab" };
+    const calls = stubFetch({ body: JSON.stringify({ ok: true, status: 200, ...result }) });
 
-    await expect(deleteGroup("1203@g.us", { by: "Joseph", reason: "left" })).resolves.toEqual({
-      jid: "1203@g.us",
-    });
+    await expect(deleteGroup("1203@g.us", { by: "Joseph", reason: "left" }))
+      .resolves.toMatchObject(result);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(
-      "https://write.example/internal/console/groups/1203%40g.us/delete",
+      "https://write.example/internal/console/config/groups/1203%40g.us",
     );
     expect(calls[0].init.method).toBe("POST");
     expect((calls[0].init.headers as Record<string, string>).authorization).toBe(
       "Bearer write-token",
     );
-    expect(JSON.parse(String(calls[0].init.body))).toEqual({ by: "Joseph", reason: "left" });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(
+      { delete: true, reason: "left", actor: "Joseph" });
+  });
+
+  it("leaves the reason out when none was given", async () => {
+    const { deleteGroup } = await loadWith("remote", REMOTE);
+    const calls = stubFetch({ body: "{}" });
+    await deleteGroup("1203@g.us", { by: "Joseph" });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ delete: true, actor: "Joseph" });
   });
 
   it("bounds the call, unlike the reads", async () => {
@@ -246,9 +257,11 @@ describe("deleteGroup", () => {
     );
   });
 
-  it("runs the write bridge, not the read one, and passes the jid as one argument",
+  it("runs the write bridge, not the read one, with the delete as JSON on stdin",
     async () => {
-      const spawned = await mockSpawn({ stdout: '{"jid":"1203@g.us"}' });
+      // console-write has no delete-group subcommand: it reads one JSON request,
+      // so the jid is a field of that, never an argument a shell could see.
+      const spawned = await mockSpawn({ stdout: '{"ok":true,"change":"deleted"}' });
       const { deleteGroup } = await loadWith("local", {
         WRITE_SOURCE: "local",
         WRITES_ENABLED: true,
@@ -257,16 +270,10 @@ describe("deleteGroup", () => {
       await deleteGroup("1203@g.us", { by: "Joseph", reason: "left" });
 
       expect(spawned).toHaveLength(1);
-      expect(spawned[0].argv).toEqual([
-        "-I",
-        "/checkout/workspace/bin/console-write",
-        "delete-group",
-        "1203@g.us",
-        "--by",
-        "Joseph",
-        "--reason",
-        "left",
-      ]);
+      expect(spawned[0].argv).toEqual(["-I", "/checkout/workspace/bin/console-write"]);
+      expect(JSON.parse(spawned[0].stdin!)).toEqual({
+        collection: "groups", id: "1203@g.us", delete: true, reason: "left", actor: "Joseph",
+      });
     });
 
   it("surfaces the local bridge's curated error", async () => {
@@ -278,6 +285,130 @@ describe("deleteGroup", () => {
     expect(await detailOfAsync(() => deleteGroup("1203@g.us", { by: "Joseph" }))).toBe(
       "membership.json has no 1203@g.us",
     );
+  });
+});
+
+/**
+ * Every config edit goes through one function, to one route, so these pin the
+ * route per collection and -- most of all -- that a refusal arrives with the
+ * bot's own reasons. "This change would stop the group being advertised to"
+ * means little without the validator's line saying which field broke it.
+ */
+describe("writeConfig", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals(); vi.doUnmock("node:child_process"); vi.doUnmock("node:fs");
+  });
+
+  const REMOTE = {
+    BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "t",
+    WRITE_SOURCE: "remote", WRITES_ENABLED: true,
+  };
+
+  function stubFetch(reply: { ok?: boolean; status?: number; body?: string }) {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, body: JSON.parse(String(init.body)) });
+      return { ok: reply.ok ?? true, status: reply.status ?? 200,
+               text: async () => reply.body ?? "{}" } as Response;
+    });
+    return calls;
+  }
+
+  it("routes each collection to config/<collection>/<id>", async () => {
+    const client = await loadWith("remote", REMOTE);
+    const calls = stubFetch({});
+    await client.updateGroup("1@g.us", { status: "on-hold" }, { by: "Joseph" });
+    await client.updateCampaign("cv", { enabled: false }, { by: "Joseph" });
+    await client.updateLine("ads", { number: "+263700000000" }, { by: "Joseph" });
+    await client.updateSettings({ caps_enabled: true }, { by: "Joseph" });
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://bot.example/internal/console/config/groups/1%40g.us",
+      "https://bot.example/internal/console/config/campaigns/cv",
+      "https://bot.example/internal/console/config/lines/ads",
+      "https://bot.example/internal/console/config/settings/defaults",
+    ]);
+    expect(calls[0].body).toEqual({ fields: { status: "on-hold" }, actor: "Joseph" });
+  });
+
+  it("passes a dry run through, and only when asked", async () => {
+    const client = await loadWith("remote", REMOTE);
+    const calls = stubFetch({});
+    await client.updateGroup("1@g.us", { note: "x" }, { by: "Joseph", dryRun: true });
+    await client.updateGroup("1@g.us", { note: "x" }, { by: "Joseph" });
+    expect(calls[0].body).toMatchObject({ dryRun: true });
+    expect(calls[1].body).not.toHaveProperty("dryRun");
+  });
+
+  it("refuses before contacting anything while writes are off", async () => {
+    const { updateGroup, WritesDisabledError } = await loadWith("remote");
+    const calls = stubFetch({});
+    await expect(updateGroup("1@g.us", { note: "x" }, { by: "Joseph" }))
+      .rejects.toBeInstanceOf(WritesDisabledError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("carries the bot's reasons on a remote refusal", async () => {
+    const { updateGroup, WriteRefusedError } = await loadWith("remote", REMOTE);
+    stubFetch({ ok: false, status: 400, body: JSON.stringify({
+      ok: false, status: 400, error: "this change would stop 1@g.us being advertised to",
+      problems: ["group 1@g.us: paused_promos names promo 'cv' which is not in its promos"],
+    }) });
+    const error = await updateGroup("1@g.us", { paused_promos: ["cv"] }, { by: "Joseph" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(WriteRefusedError);
+    const refused = error as InstanceType<typeof WriteRefusedError>;
+    expect(refused.detail).toBe("this change would stop 1@g.us being advertised to");
+    expect(refused.problems).toEqual(
+      ["group 1@g.us: paused_promos names promo 'cv' which is not in its promos"]);
+    expect(refused.status).toBe(400);
+  });
+
+  it("carries them from the local bridge too", async () => {
+    await mockSpawn({ failWith: JSON.stringify({
+      ok: false, status: 400, error: "this change would be read differently",
+      problems: ["caps_enabled must be true or false, got 'false'"] }) });
+    const { updateSettings, WriteRefusedError } = await loadWith("local", { WRITES_ENABLED: true });
+    const error = await updateSettings({ caps_enabled: "false" }, { by: "Joseph" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(WriteRefusedError);
+    expect((error as InstanceType<typeof WriteRefusedError>).problems).toHaveLength(1);
+  });
+
+  it("is still a BotUnavailableError, so existing screens keep showing it", async () => {
+    const { updateGroup, BotUnavailableError } = await loadWith("remote", REMOTE);
+    stubFetch({ ok: false, status: 409, body: '{"ok":false,"status":409,"error":"cannot be read"}' });
+    await expect(updateGroup("1@g.us", { note: "x" }, { by: "Joseph" }))
+      .rejects.toBeInstanceOf(BotUnavailableError);
+  });
+
+  it("does not mistake the write route's own 503 for a refusal", async () => {
+    // "Writes are not enabled" comes from the API, not from console-write, so it
+    // has no `ok` field: the outcome is "could not write", not "refused".
+    const { updateGroup, WriteRefusedError } = await loadWith("remote", REMOTE);
+    stubFetch({ ok: false, status: 503,
+                body: '{"error":"Operator-config writes are not enabled on this gateway."}' });
+    const error = await updateGroup("1@g.us", { note: "x" }, { by: "Joseph" })
+      .catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(WriteRefusedError);
+    expect((error as { detail: string }).detail).toMatch(/not enabled/);
+  });
+});
+
+describe("captionSaveUnavailableReason", () => {
+  const WRITES = { enabled: true, affectsProduction: true,
+                   fields: { campaigns: ["enabled"] }, delete: ["groups"] };
+
+  it("says captions wait on the bot while it does not accept them", async () => {
+    const { captionSaveUnavailableReason } = await loadWith("remote", {
+      WRITE_SOURCE: "remote", WRITES_ENABLED: true });
+    expect(captionSaveUnavailableReason(WRITES)).toMatch(/does not accept changes to captions/);
+  });
+
+  it("allows saving once the bot lists captions", async () => {
+    const { captionSaveUnavailableReason } = await loadWith("remote", {
+      WRITE_SOURCE: "remote", WRITES_ENABLED: true });
+    expect(captionSaveUnavailableReason(
+      { ...WRITES, fields: { campaigns: ["enabled", "captions"] } })).toBeUndefined();
   });
 });
 

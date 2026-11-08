@@ -17,7 +17,10 @@ import type {
   CampaignPreview,
   GroupsPayload,
   Overview,
+  WriteCapabilities,
+  WriteResult,
 } from "@/src/lib/types";
+import { canWrite } from "@/src/lib/write-capabilities";
 
 const run = promisify(execFile);
 
@@ -44,17 +47,26 @@ export class BotUnavailableError extends Error {
 const BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-read");
 
 /**
- * Writes go through a different script, and on the remote side a different
- * service: the read API refuses every method but GET and HEAD, and keeping it
- * that way is worth more than the convenience of one endpoint.
+ * Writes go through a different script: `console-write`, which judges every
+ * change with the bot's own validator. Remotely it is the same console API as
+ * the reads, on its one POST route, `config/<collection>/<id>`.
  */
 const WRITE_BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-write");
 
-export function captionSaveUnavailableReason(): string | undefined {
+/**
+ * Why captions cannot be saved, or undefined when they can. The bot decides:
+ * caption overrides need a companion bot update, and until it adds `captions` to
+ * the writer's editable fields, `writes` says so and the editor stays a draft
+ * rather than failing on save.
+ */
+export function captionSaveUnavailableReason(
+  writes: WriteCapabilities | undefined,
+): string | undefined {
   if (WRITES_ENABLED && WRITE_SOURCE === "local" && !existsSync(WRITE_BRIDGE)) {
     return "Saving is not connected to the bot yet. You can edit a draft here.";
   }
-  return undefined;
+  const gate = canWrite(WRITES_ENABLED, writes, "campaigns", "captions");
+  return gate.allowed ? undefined : `${gate.reason} You can edit a draft here.`;
 }
 
 /**
@@ -67,6 +79,43 @@ export function captionSaveUnavailableReason(): string | undefined {
  */
 export function imageWritesUnavailableReason(): string {
   return "Picture changes need the companion bot update — the bot still reads each campaign\u2019s picture from its post_ad.py, not from the record the console can write.";
+}
+
+/**
+ * The bot refused a config change and said why. Unlike "could not reach the
+ * bot", the change definitely did not happen, and `problems` carries the bot's
+ * own reasons -- for a group, the validator's words about what the change would
+ * have broken. A subclass of BotUnavailableError so every existing catch still
+ * shows `detail`; a screen that can show the reasons checks for this one.
+ */
+export class WriteRefusedError extends BotUnavailableError {
+  readonly problems: string[];
+  readonly status: number;
+  constructor(detail: string, problems: string[], status: number) {
+    super(detail);
+    this.name = "WriteRefusedError";
+    this.problems = problems;
+    this.status = status;
+  }
+}
+
+/** console-write's refusal: `{"ok": false, "status", "error", "problems"}`. A read
+ *  bridge's error has no `ok`, so this never mistakes one for the other. */
+function refusalFrom(text: string | undefined): WriteRefusedError | null {
+  if (!text) return null;
+  try {
+    const payload: unknown = JSON.parse(text);
+    if (!payload || typeof payload !== "object") return null;
+    const body = payload as { ok?: unknown; status?: unknown; error?: unknown; problems?: unknown };
+    if (body.ok !== false || typeof body.error !== "string") return null;
+    const problems = Array.isArray(body.problems)
+      ? body.problems.filter((p): p is string => typeof p === "string")
+      : [];
+    return new WriteRefusedError(body.error, problems,
+      typeof body.status === "number" ? body.status : 400);
+  } catch {
+    return null;
+  }
 }
 
 /** The bridge reports a refusal as `{"error": ...}` and a non-zero exit. */
@@ -114,7 +163,7 @@ async function runBridge<T>(bridge: string, args: string[], input?: unknown): Pr
     if (err.code === "ENOENT") {
       throw new BotUnavailableError("python3 is not on PATH");
     }
-    throw new BotUnavailableError(
+    throw refusalFrom(err.stdout) ?? new BotUnavailableError(
       reportedError(err.stdout) || err.stderr?.trim() || err.message,
     );
   }
@@ -299,35 +348,86 @@ async function writeRemote<T>(route: string, body: unknown): Promise<T> {
 
   const text = await response.text();
   if (!response.ok) {
-    throw new BotUnavailableError(
+    throw refusalFrom(text) ?? new BotUnavailableError(
       reportedError(text) || `${route} returned ${response.status}`,
     );
   }
   return (text ? JSON.parse(text) : {}) as T;
 }
 
-export type DeleteGroupResult = { jid: string };
+/** The collections the bot's writer knows. Anything else is a typo here, and is
+ *  refused before a request is built rather than by the bot. */
+export type ConfigCollection = "groups" | "lines" | "campaigns" | "settings";
+
+/** One change: named fields, or a delete. Never both -- the bot refuses that. */
+export type ConfigChange =
+  | { fields: Record<string, unknown>; dryRun?: boolean }
+  | { delete: true; reason?: string; dryRun?: boolean };
 
 /**
- * Remove a group from the bot's records. The jid is passed as one argument and
- * never interpolated into a shell, and the remote form puts it in the path the
- * write service validates.
+ * Send one config change to the bot's writer, which validates it with the bot's
+ * own rules and commits it together with its audit record. A refusal throws
+ * WriteRefusedError carrying the bot's reasons; anything that leaves the outcome
+ * unknown throws BotUnavailableError and says so.
+ *
+ * The id goes in the URL path percent-encoded (a group JID carries an "@") or
+ * as one field of the JSON on the local bridge's stdin; neither form ever passes
+ * through a shell.
  */
-export async function deleteGroup(
-  jid: string,
-  { by, reason }: { by: string; reason?: string },
-): Promise<DeleteGroupResult> {
+export async function writeConfig(
+  collection: ConfigCollection,
+  id: string,
+  change: ConfigChange,
+  { by }: { by: string },
+): Promise<WriteResult> {
   if (!WRITES_ENABLED) throw new WritesDisabledError();
-
+  const body = { ...change, actor: by };
   if (WRITE_SOURCE === "remote") {
-    return writeRemote<DeleteGroupResult>(
-      `groups/${encodeURIComponent(jid)}/delete`,
-      { by, reason },
-    );
+    return writeRemote<WriteResult>(
+      `config/${collection}/${encodeURIComponent(id)}`, body);
   }
-  const args = ["delete-group", jid, "--by", by];
-  if (reason) args.push("--reason", reason);
-  return runBridge<DeleteGroupResult>(WRITE_BRIDGE, args);
+  return runBridge<WriteResult>(WRITE_BRIDGE, [], { collection, id, ...body });
+}
+
+type WriteOptions = { by: string; dryRun?: boolean };
+
+export function updateGroup(jid: string, fields: Record<string, unknown>,
+                            { by, dryRun }: WriteOptions) {
+  return writeConfig("groups", jid, { fields, ...(dryRun ? { dryRun } : {}) }, { by });
+}
+
+export function updateCampaign(slug: string, fields: Record<string, unknown>,
+                               { by, dryRun }: WriteOptions) {
+  return writeConfig("campaigns", slug, { fields, ...(dryRun ? { dryRun } : {}) }, { by });
+}
+
+export function updateLine(id: string, fields: Record<string, unknown>,
+                           { by, dryRun }: WriteOptions) {
+  return writeConfig("lines", id, { fields, ...(dryRun ? { dryRun } : {}) }, { by });
+}
+
+/** The cap settings and the contact line live in one document, `defaults`. */
+export function updateSettings(fields: Record<string, unknown>,
+                               { by, dryRun }: WriteOptions) {
+  return writeConfig("settings", "defaults", { fields, ...(dryRun ? { dryRun } : {}) },
+                     { by });
+}
+
+/**
+ * Remove a group from the bot's records. The bot commits the whole record into
+ * the audit trail in the same write, so a delete can be undone by hand from
+ * there -- and while the bot is still in the WhatsApp group, discovery lists it
+ * again as unconfigured.
+ */
+export function deleteGroup(
+  jid: string,
+  { by, reason, dryRun }: WriteOptions & { reason?: string },
+): Promise<WriteResult> {
+  return writeConfig("groups", jid, {
+    delete: true,
+    ...(reason ? { reason } : {}),
+    ...(dryRun ? { dryRun } : {}),
+  }, { by });
 }
 
 /** Uses the bot's validated, audited config writer, rather than a console copy. */
@@ -336,11 +436,5 @@ export async function updateCampaignCaptions(
   captions: string[],
   { by }: { by: string },
 ): Promise<void> {
-  if (!WRITES_ENABLED) throw new WritesDisabledError();
-  const request = { fields: { captions }, actor: by };
-  if (WRITE_SOURCE === "remote") {
-    await writeRemote(`config/campaigns/${encodeURIComponent(slug)}`, request);
-    return;
-  }
-  await runBridge(WRITE_BRIDGE, [], { collection: "campaigns", id: slug, ...request });
+  await writeConfig("campaigns", slug, { fields: { captions } }, { by });
 }

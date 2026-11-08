@@ -33,12 +33,24 @@ export type BotSource = "local" | "remote";
 export const BOT_SOURCE: BotSource = BOT_API_BASE_URL ? "remote" : "local";
 
 /**
- * The write API. It is a separate service from the read one, on its own port
- * and behind its own token. The gateway API handles account lifecycle controls;
- * canonical group and campaign edits use this separate write service.
+ * Where config edits go. The bot serves them from the same console API as the
+ * reads -- `POST /internal/console/config/...`, behind the same token -- so by
+ * default a write goes exactly where the reads come from. Override only to point
+ * writes at a different bot on purpose.
+ *
+ * The default is the point. With reads remote and writes falling back to a local
+ * checkout, every save would be judged by whatever code that checkout happened
+ * to have checked out, with a write key the laptop should never hold, while the
+ * screen showed production. Now reads and writes cannot name different bots
+ * unless someone sets both URLs to say so.
  */
-export const BOT_WRITE_API_BASE_URL = process.env.BOT_WRITE_API_BASE_URL?.trim() || "";
-export const BOT_WRITE_TOKEN = process.env.BOT_WRITE_TOKEN?.trim() || "";
+export const BOT_WRITE_API_BASE_URL =
+  process.env.BOT_WRITE_API_BASE_URL?.trim() || BOT_API_BASE_URL;
+/** The read token only follows the read URL: a token is never sent to a
+ *  different host than the one it was issued for. */
+export const BOT_WRITE_TOKEN =
+  process.env.BOT_WRITE_TOKEN?.trim() ||
+  (BOT_WRITE_API_BASE_URL === BOT_API_BASE_URL ? BOT_API_TOKEN : "");
 
 /** Chosen the same way as BOT_SOURCE, so a write and a read cannot disagree
  *  about which genaebot they are talking to. */
@@ -55,7 +67,10 @@ export const WRITE_SOURCE: BotSource = BOT_WRITE_API_BASE_URL ? "remote" : "loca
  * there is a decision that waits for authentication.
  *
  * A target still has to be configured, so setting the flag alone cannot arm a
- * button that has nothing to call.
+ * button that has nothing to call. And this is only the console's half: the
+ * bot reports separately whether it holds a write key and which fields it will
+ * accept (`overview.writes`, see `src/lib/write-capabilities`), and every control
+ * gates on both.
  */
 export const WRITES_ENABLED =
   process.env.CONSOLE_WRITES?.trim() === "1" &&

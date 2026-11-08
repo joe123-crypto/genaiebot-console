@@ -51,6 +51,12 @@ By default it reads `/home/joseph/projects/genaebot`. Point it elsewhere with
 | `GENAEBOT_CHECKOUT` | Path to a genaebot checkout (local adapter) |
 | `BOT_API_BASE_URL` | Console API base URL; set this and the remote adapter is used |
 | `BOT_API_TOKEN` | Bearer token; must match `CONSOLE_API_TOKEN` on the bot |
+| `CONSOLE_WRITES` | `1` arms editing controls; anything else keeps every screen read-only |
+| `BOT_WRITE_API_BASE_URL`, `BOT_WRITE_TOKEN` | Normally unset: writes then go to the same bot as the reads |
+
+`npm run dev` binds to `127.0.0.1`. The console has no login, so with writes on,
+anyone who can reach the port can edit the bot's config; keeping it to this
+machine is what makes that acceptable until there is authentication.
 
 ```bash
 npm run typecheck
@@ -71,9 +77,22 @@ npm run build
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
 
 Writes are off by default. Set `CONSOLE_WRITES=1` in an environment where console
-access is controlled, and configure the bot's write service to enable editing.
-Caption changes use the bot's canonical Firestore campaign document, rather than
-keeping separate copy in the console.
+access is controlled. Edits go to the bot's config writer -- the same console API
+as the reads, `POST /internal/console/config/<collection>/<id>`, behind the same
+token -- which judges every change with the bot's own validator and commits it
+with an audit record. A refusal comes back with the bot's reasons. Caption changes
+use the bot's canonical Firestore campaign document, rather than keeping separate
+copy in the console.
+
+**Two switches have to agree before a control is armed.** The console's own
+`CONSOLE_WRITES`, and the bot's report of what it will accept: `overview.writes`
+says whether the bot holds a write key and lists, field by field, what its writer
+takes (`src/lib/write-capabilities.ts`). A control the bot cannot honour is shown
+disabled with the bot's reason -- no write key yet, a field it does not accept
+yet, or a bot too old to report any of this -- rather than failing on save. When
+the bot reports `affectsProduction: false` (its campaigns still read
+membership.json), saving is allowed but every screen warns that it will not change
+what is sent.
 
 On a campaign page, **+ Add variant** creates a blank caption, the trash button
 removes a variant, and **Save changes** commits the whole set. At least one
@@ -85,7 +104,9 @@ and a save refuses captions that changed since editing began.
 Caption persistence also requires the companion bot update in
 [`integrations/genaebot-caption-variants.patch`](integrations/genaebot-caption-variants.patch).
 See [`integrations/README.md`](integrations/README.md) for its base revision,
-installation and verification. Deploy that update before enabling caption writes.
+installation and verification. Until a bot with it is deployed, the bot does not
+list `captions` among its editable fields, so **Save changes** stays disabled with
+that reason and the editor works as a draft.
 
 ## Searching and filtering a list
 
