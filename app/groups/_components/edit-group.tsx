@@ -62,11 +62,16 @@ type Props = {
 
 export function EditGroup({ group, label, lines, tiers, gate, editable }: Props) {
   const [open, setOpen] = useState(false);
+  // The group as it was when the dialog opened. The page refreshes every
+  // minute; diffing the form against a refreshed `group` would mistake someone
+  // else's change for this operator's edit, send it back with their value as
+  // "expected", pass the stale check, and quietly revert them.
+  const [opened, setOpened] = useState<Group>(group);
   const [draft, setDraft] = useState<Draft>(() => asDraft(group));
   const [error, setError] = useState<{ detail: string; problems?: string[] } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const { form } = touchedFields(group, draft);
+  const { form } = touchedFields(open ? opened : group, draft);
   const dirty = Object.keys(form).length > 0;
   const accepts = new Set(editable);
   const id = `edit-${group.jid}`;
@@ -74,6 +79,7 @@ export function EditGroup({ group, label, lines, tiers, gate, editable }: Props)
   function openDialog() {
     // Start from what the row shows now, not from a draft left behind by a
     // dialog that was cancelled before the last refresh.
+    setOpened(group);
     setDraft(asDraft(group));
     setError(null);
     setOpen(true);
@@ -91,7 +97,7 @@ export function EditGroup({ group, label, lines, tiers, gate, editable }: Props)
 
   function submit() {
     if (!dirty || pending) return;
-    const { form: change, expected } = touchedFields(group, draft);
+    const { form: change, expected } = touchedFields(opened, draft);
     startTransition(async () => {
       const outcome = await updateGroupAction(group.jid, change, expected);
       if (outcome.ok) {

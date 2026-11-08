@@ -75,6 +75,37 @@ describe("EditGroup", () => {
     expect(update).toHaveBeenCalledWith("120363111@g.us", { status: "on-hold" }, { status: "active" });
   });
 
+  it("never sends back a change someone else made while the dialog was open", async () => {
+    // The page refreshes every minute. Someone puts the group on hold while this
+    // operator edits only the note: saving must not restore "active".
+    update.mockResolvedValue({ ok: true });
+    const view = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Harare Market" }));
+    view.rerender(createElement(EditGroup, {
+      group: group({ status: "on-hold" }), label: "Harare Market", lines: ["default", "ads"],
+      tiers: ["busy", "normal", "quiet"], gate: { allowed: true }, editable: ALL,
+    }));
+    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Busy on weekends" } });
+    await act(async () => fireEvent.click(save));
+    expect(update).toHaveBeenCalledWith("120363111@g.us", { note: "Busy on weekends" }, { note: null });
+  });
+
+  it("starts from the refreshed group when opened again", async () => {
+    update.mockResolvedValue({ ok: true });
+    const view = mount();
+    view.rerender(createElement(EditGroup, {
+      group: group({ status: "on-hold" }), label: "Harare Market", lines: ["default", "ads"],
+      tiers: ["busy", "normal", "quiet"], gate: { allowed: true }, editable: ALL,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Harare Market" }));
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("on-hold");
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "active" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save changes" })));
+    expect(update).toHaveBeenCalledWith("120363111@g.us", { status: "active" }, { status: "on-hold" });
+  });
+
   it("disables a field the bot does not accept, and says so", () => {
     mount({ editable: ["status"] });
     fireEvent.click(screen.getByRole("button", { name: "Edit Harare Market" }));

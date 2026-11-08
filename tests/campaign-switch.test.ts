@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { setEnabled } = vi.hoisted(() => ({ setEnabled: vi.fn() }));
@@ -32,6 +32,21 @@ describe("CampaignSwitch", () => {
     });
     expect(setEnabled).toHaveBeenCalledWith("borehole", false);
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("keeps the question it asked when a refresh changes the switch underneath", async () => {
+    // Another tab turns the campaign off while this one asks "Turn off?".
+    setEnabled.mockResolvedValue({ ok: true });
+    const view = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Turn off" }));
+    view.rerender(createElement(CampaignSwitch, {
+      slug: "borehole", title: "Borehole", storeEnabled: false, cronEnabled: true, gate: { allowed: true },
+    }));
+    const dialog = screen.getByRole("alertdialog", { name: "Turn off Borehole?" });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Turn off" }));
+    });
+    expect(setEnabled).toHaveBeenCalledWith("borehole", false);
   });
 
   it("does nothing when the question is cancelled", () => {

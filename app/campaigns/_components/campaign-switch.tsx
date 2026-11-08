@@ -26,17 +26,19 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
   cronEnabled?: boolean;
   gate: WriteGate;
 }) {
-  const [confirming, setConfirming] = useState(false);
+  // What the operator asked for, fixed when they clicked: a refresh while the
+  // question is open must not flip it under their cursor.
+  const [target, setTarget] = useState<boolean | null>(null);
   const [error, setError] = useState<{ detail: string; problems?: string[] } | null>(null);
   const [pending, startTransition] = useTransition();
-  const target = !storeEnabled;
 
   function close() {
-    setConfirming(false);
+    setTarget(null);
     setError(null);
   }
 
   function confirm() {
+    if (target === null) return;
     startTransition(async () => {
       const outcome = await setCampaignEnabledAction(slug, target);
       if (outcome.ok) close();
@@ -54,14 +56,14 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
         <p className="card-note"><strong>{state}</strong></p>
         <button type="button" className="btn" disabled={!gate.allowed || pending}
           title={gate.allowed ? undefined : gate.reason}
-          onClick={() => setConfirming(true)}>
+          onClick={() => setTarget(!storeEnabled)}>
           {storeEnabled ? <Pause size={15} aria-hidden /> : <Play size={15} aria-hidden />}
           {storeEnabled ? "Turn off" : "Turn on"}
         </button>
       </div>
       {cronEnabled === false ? <p className="card-note">{NO_CRON_NOTE}</p> : null}
       {!gate.allowed ? <p className="card-note">{gate.reason}</p> : null}
-      {confirming && gate.allowed ? (
+      {target !== null && gate.allowed ? (
         <ConfirmDialog
           title={`${target ? "Turn on" : "Turn off"} ${title}?`}
           confirmLabel={target ? "Turn on" : "Turn off"}
