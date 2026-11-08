@@ -14,6 +14,7 @@ import { CampaignImages } from "@/app/campaigns/_components/campaign-images";
 import { CampaignGroups } from "@/app/campaigns/_components/campaign-groups";
 import { CaptionVariants } from "@/app/campaigns/_components/caption-variants";
 import { campaignAssetDir } from "@/src/lib/campaign-images";
+import { loadOverview } from "@/src/domains/console";
 import { WRITES_ENABLED } from "@/src/config";
 import { campaignTitle, groupLabel, slotLabel } from "@/src/lib/format";
 import type { Campaign, CampaignPreview, GroupsPayload } from "@/src/lib/types";
@@ -47,6 +48,11 @@ export default async function CampaignPage({
   }
 
   if (!campaign) notFound();
+
+  // What the bot will accept. Already read for this request by the layout, so
+  // this costs nothing; if the overview could not be read, nothing is offered.
+  const loaded = await loadOverview();
+  const writes = loaded.ok ? loaded.overview.writes : undefined;
 
   const sendingToday = preview.groups.filter((row) => row.sendsToday);
   // One group per variant, so the operator sees each caption exactly as it will
@@ -103,7 +109,7 @@ export default async function CampaignPage({
         slug={slug}
         captions={preview.captions}
         writable={WRITES_ENABLED}
-        saveUnavailableReason={captionSaveUnavailableReason()}
+        saveUnavailableReason={captionSaveUnavailableReason(writes)}
         samples={samples.map((sample) => sample ? {
           label: groupLabel(sample), ref: sample.ref, caption: sample.caption,
         } : null)}
