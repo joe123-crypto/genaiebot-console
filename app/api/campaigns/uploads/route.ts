@@ -8,8 +8,12 @@ import { imageUploadConfigured, signCampaignUpload } from "@/src/lib/campaign-up
 export async function POST(request: Request) {
   const refuse = (error: string, status = 400) => NextResponse.json({ error }, { status });
   if (!WRITES_ENABLED) return refuse("The console is in read-only mode.", 403);
+  const url = new URL(request.url);
+  // Next can normalize the URL to its internal bind hostname. Host retains
+  // the authority the browser used, including its port.
+  const expectedOrigin = `${url.protocol}//${request.headers.get("host") ?? url.host}`;
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) return refuse("Cross-origin uploads are not allowed.", 403);
+  if (origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") return refuse("Cross-origin uploads are not allowed.", 403);
   if (!imageUploadConfigured()) return refuse("Picture upload storage is not configured on the console.", 503);
   if (Number(request.headers.get("content-length")) > 4096) return refuse("Upload metadata is too large.");
   try {
