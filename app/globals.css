@@ -1146,3 +1146,9 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 
 .modal-warning ul { margin: 0; padding-left: 18px; }
 .modal-warning li + li { margin-top: 4px; }
+
+/* A delete that landed but could not finish everything asked of it. It sits
+   above the table, not in the row, because the row is what the delete removed. */
+.groups-table-notice { margin: 0 0 14px; }
+.groups-table-notice p { margin: 0 0 6px; }
+.groups-table-notice .btn { margin-top: 10px; }

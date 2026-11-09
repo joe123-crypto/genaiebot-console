@@ -84,6 +84,10 @@ export function GroupsTable({
   const [filter, setFilter] = useUrlFilter(initialFilter, groupFilterQuery, GROUP_FILTER_KEYS);
   const search = useRef<HTMLInputElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  /** A delete that landed but could not finish everything asked of it. Held
+   *  here rather than in the row, which the delete itself removes. */
+  const [incomplete, setIncomplete] =
+    useState<{ label: string; warnings: string[] } | null>(null);
 
   const off = new Set(disabledPromos);
   const visible = sortGroupsForTable(filterGroups(groups, filter));
@@ -166,6 +170,22 @@ export function GroupsTable({
           </button>
         </FilterActions>
       </FilterBar>
+
+      {incomplete ? (
+        /* Deliberately outside the table body. A delete removes its own row, so
+           a warning rendered inside that row would unmount with it the moment
+           the revalidated groups arrive. */
+        <div className="groups-table-notice modal-warning" role="status">
+          <p>
+            <strong>Deleted {incomplete.label}.</strong> Not everything asked for alongside it
+            came off:
+          </p>
+          <ul>{incomplete.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+          <button type="button" className="btn" onClick={() => setIncomplete(null)}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       <FilterSummary
         shown={visible.length}
@@ -294,6 +314,7 @@ export function GroupsTable({
                         jid={group.jid}
                         label={confirmLabel(group)}
                         account={group.account}
+                        onIncomplete={(label, warnings) => setIncomplete({ label, warnings })}
                         gate={editing.delete}
                         leaveGate={editing.leave}
                         clearGate={editing.clearRecords}

@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { remove } = vi.hoisted(() => ({ remove: vi.fn() }));
+const onIncomplete = vi.fn();
 vi.mock("@/app/groups/actions", () => ({ deleteGroupAction: remove }));
 
 import {
@@ -20,6 +21,7 @@ import {
 function mount(props: Partial<Parameters<typeof DeleteGroup>[0]> = {}) {
   return render(createElement(DeleteGroup, {
     jid: "120363111@g.us", label: "Harare Market", account: "ads",
+    onIncomplete,
     gate: { allowed: true }, leaveGate: { allowed: true }, clearGate: { allowed: true },
     ...props,
   }));
@@ -39,6 +41,7 @@ const box = (label: string) =>
 afterEach(() => {
   cleanup();
   remove.mockReset();
+  onIncomplete.mockReset();
   remove.mockResolvedValue({ ok: true });
 });
 
@@ -92,7 +95,7 @@ describe("the delete dialog's optional halves", () => {
 
     // The bot's answer changed under the open dialog, as a refresh can do.
     rerender(createElement(DeleteGroup, {
-      jid: "120363111@g.us", label: "Harare Market", account: "ads",
+      jid: "120363111@g.us", label: "Harare Market", account: "ads", onIncomplete,
       gate: { allowed: true }, clearGate: { allowed: true },
       leaveGate: { allowed: false, reason: "Group actions are switched off." },
     }));
@@ -104,11 +107,9 @@ describe("the delete dialog's optional halves", () => {
       expect.objectContaining({ leave: false }));
   });
 
-  it("stays open on a half-done delete, because the row is about to go", async () => {
-    remove.mockResolvedValue({
-      ok: true,
-      warnings: ["The bot could not leave the WhatsApp group, so its number is still in it."],
-    });
+  it("hands a half-done delete upward rather than showing it in the doomed row", async () => {
+    const warnings = ["The bot could not leave the WhatsApp group, so its number is still in it."];
+    remove.mockResolvedValue({ ok: true, warnings });
     mount();
     open();
     fireEvent.click(box(LEAVE_LABEL));
@@ -117,11 +118,10 @@ describe("the delete dialog's optional halves", () => {
       fireEvent.click(screen.getByRole("button", { name: "Delete group" }));
     });
 
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByText(/Deleted Harare Market/)).toBeTruthy();
-    expect(screen.getByText(/still in it/)).toBeTruthy();
-    // The delete is not offered again: the record really is gone.
-    expect(screen.queryByRole("button", { name: "Delete group" })).toBeNull();
+    // Reported to the owner of the table, which outlives this row, and the
+    // dialog closes rather than waiting to be unmounted mid-sentence.
+    expect(onIncomplete).toHaveBeenCalledWith("Harare Market", warnings);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("closes without a word when everything asked for came off", async () => {
@@ -133,6 +133,7 @@ describe("the delete dialog's optional halves", () => {
       fireEvent.click(screen.getByRole("button", { name: "Delete group" }));
     });
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onIncomplete).not.toHaveBeenCalled();
   });
 
   it("forgets the ticks when reopened, so a delete cannot inherit the last one", async () => {
