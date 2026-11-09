@@ -29,7 +29,7 @@ with the same ref code, the same `wa.me` link and the same daily cap decision.
 It never changes operator config, contacts the gateway, or records a cap snapshot.
 The bot maintains private config display caches and outage snapshots on its volume.
 
-Console config displays share one five-minute cache across pages and tabs. Metrics
+Console config displays share a three-minute cache across pages and tabs. Metrics
 and discovery retain their existing refresh schedules. Save preflight reads use
 `fresh=1` (`--fresh-config` locally) to bypass both backend caches and require live
 Firestore config; failed live reads never authorize a save from a snapshot. Deploy
