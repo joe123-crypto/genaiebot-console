@@ -2,25 +2,30 @@
 
 import { useState } from "react";
 import { Image as ImageIcon, Plus, Trash2 } from "lucide-react";
-import { IMAGES_SERVED, campaignImageSrc } from "@/src/lib/campaign-images";
+import { campaignImageSrc } from "@/src/lib/campaign-images";
 import { plural } from "@/src/lib/format";
+import type { AdAssets, CampaignAsset } from "@/src/lib/types";
+
+const NO_ASSETS: CampaignAsset[] = [];
 
 /**
  * One campaign's first picture, for a row in the campaigns list.
  *
  * A failed <img> paints the browser's own broken-image glyph, which no CSS can
  * suppress, so the element is dropped on error and the muted square with its
- * icon is what remains. That square is all a row can show until something
- * serves bytes.
+ * icon is what remains.
  */
-export function CampaignThumb({ slug, images }: { slug: string; images: string[] }) {
+export function CampaignThumb({ images, assets = NO_ASSETS }: {
+  images: string[];
+  assets?: CampaignAsset[];
+}) {
   const [broken, setBroken] = useState(false);
-  const name = images[0];
+  const src = images[0] ? campaignImageSrc(assets, images[0]) : undefined;
   return (
     <span className="campaign-thumb" aria-hidden>
       <ImageIcon size={14} aria-hidden />
-      {IMAGES_SERVED && name && !broken ? (
-        <img src={campaignImageSrc(slug, name)} alt="" loading="lazy" decoding="async"
+      {src && !broken ? (
+        <img src={src} alt="" loading="lazy" decoding="async"
           onError={() => setBroken(true)} />
       ) : null}
       {images.length > 1 ? <span className="campaign-thumb-more">+{images.length - 1}</span> : null}
@@ -31,23 +36,34 @@ export function CampaignThumb({ slug, images }: { slug: string; images: string[]
 /**
  * A campaign's pictures, in the order the bot declares them.
  *
- * `writeUnavailableReason` is required rather than optional: nothing can store a
- * picture yet, so the add and remove controls are always rendered disabled with
- * the reason beside them. Making the reason impossible to omit is what keeps a
- * control from appearing that would silently do nothing.
+ * The tiles are `images` — what the campaign's own post script declares, and
+ * what a run attaches until the R2 cutover. The pixels come from `assets`, the
+ * bot's Firestore index of what is in the bucket, joined by filename. A tile
+ * with no entry keeps its unavailable state and says why: that is a picture
+ * the post script declares and the index has never heard of, which is worth
+ * seeing rather than hiding.
+ *
+ * `writeUnavailableReason` is required rather than optional: nothing can store
+ * a picture yet, so the add and remove controls are always rendered disabled
+ * with the reason beside them. Making the reason impossible to omit is what
+ * keeps a control from appearing that would silently do nothing.
  */
 export function CampaignImages({
-  slug, images, assetDir, writable, writeUnavailableReason,
+  images, assets = NO_ASSETS, adAssets, assetDir, writable, writeUnavailableReason,
 }: {
-  slug: string;
   images: string[];
+  assets?: CampaignAsset[];
+  adAssets?: AdAssets;
   assetDir: string | null;
   writable: boolean;
   writeUnavailableReason: string;
 }) {
   // A tile falls back to naming its file once the browser cannot fetch it,
-  // which is both "no route serves bytes yet" and "the file left the checkout".
+  // which covers an object that has left the bucket as well as a bad URL.
   const [broken, setBroken] = useState<string[]>([]);
+  // One explanation for the whole card beats the same sentence on every tile.
+  const indexed = images.filter((name) => campaignImageSrc(assets, name));
+  const missing = images.length - indexed.length;
 
   return (
     <section className="card campaign-images" aria-labelledby="campaign-images-title">
@@ -71,7 +87,8 @@ export function CampaignImages({
       {writable ? <div className="caption-feedback"><p className="card-note">{writeUnavailableReason}</p></div> : null}
       <div className="card-pad grid campaign-image-grid">
         {images.map((name, index) => {
-          const shown = IMAGES_SERVED && !broken.includes(name);
+          const src = campaignImageSrc(assets, name);
+          const shown = src && !broken.includes(name);
           return (
             <figure className="campaign-image" key={name}>
               <div className="campaign-image-head">
@@ -86,7 +103,7 @@ export function CampaignImages({
               </div>
               <div className="campaign-image-frame">
                 {shown ? (
-                  <img src={campaignImageSrc(slug, name)} alt="" loading="lazy" decoding="async"
+                  <img src={src} alt="" loading="lazy" decoding="async"
                     onError={() => setBroken((names) => names.includes(name) ? names : [...names, name])} />
                 ) : (
                   <div className="campaign-image-missing">
@@ -106,14 +123,59 @@ export function CampaignImages({
           </p>
         ) : null}
       </div>
-      {assetDir && images.length > 0 ? (
+      {images.length > 0 ? (
         <div className="caption-feedback">
-          <p className="card-note">
-            The console can list a campaign&rsquo;s pictures but cannot fetch them yet, so tiles name
-            their file instead. The files themselves are in <span className="cell-mono">{assetDir}</span>.
-          </p>
+          <PictureSource indexed={indexed.length} missing={missing} adAssets={adAssets}
+            assetDir={assetDir} />
         </div>
       ) : null}
     </section>
   );
+}
+
+/**
+ * Where the pictures above came from, in the operator's terms.
+ *
+ * Three different facts can leave a tile blank — the bot is too old to report
+ * the index, the index could not be read, or the index simply does not list
+ * that picture — and an operator about to go looking for a missing picture
+ * needs to know which. The mode matters too: before the R2 cutover the tile is
+ * the bucket's copy while the run still attaches the one baked into the
+ * container, and claiming otherwise would be a lie by omission.
+ */
+function PictureSource({ indexed, missing, adAssets, assetDir }: {
+  indexed: number;
+  missing: number;
+  adAssets?: AdAssets;
+  assetDir: string | null;
+}) {
+  if (!adAssets) {
+    return <p className="card-note">
+      This bot does not report where its pictures are stored yet, so tiles name their file
+      instead.{assetDir ? <> The files are in <span className="cell-mono">{assetDir}</span>.</> : null}
+    </p>;
+  }
+  return <>
+    <p className="card-note">
+      {indexed > 0
+        ? <>Pictures are served from the bot&rsquo;s asset index — the bucket its images were
+            moved to, named in Firestore.</>
+        : <>The bot&rsquo;s asset index lists no picture for this campaign, so tiles name their
+            file instead.</>}
+      {missing > 0 && indexed > 0
+        ? <> {plural(missing, "picture")} below {missing === 1 ? "is" : "are"} declared by the
+            campaign but absent from the index, so {missing === 1 ? "it has" : "they have"} no
+            preview.</>
+        : null}
+    </p>
+    {adAssets.note ? <p className="card-note">The index could not be read: {adAssets.note}</p> : null}
+    {adAssets.mode !== "r2" ? (
+      <p className="card-note">
+        The bot still attaches the copy baked into its container
+        {indexed > 0 ? <>, not the one shown here</> : null} — its picture source is{" "}
+        <span className="cell-mono">{adAssets.mode}</span>.
+        {assetDir ? <> That copy is in <span className="cell-mono">{assetDir}</span>.</> : null}
+      </p>
+    ) : null}
+  </>;
 }
