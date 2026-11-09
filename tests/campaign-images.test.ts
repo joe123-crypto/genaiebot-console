@@ -113,6 +113,16 @@ describe("campaign pictures", () => {
     expect(screen.queryByText(/baked into its container/)).toBeNull();
   });
 
+  it("says a mirrored set is the deploy's, not the live index", () => {
+    mount({ adAssets: { ...adAssets, source: "mirror",
+      note: "firestore.googleapis.com answered HTTP 429" } });
+    // The pictures are real and shown, so it must not say the index failed flat.
+    expect(sources({ container: document.body })).toHaveLength(2);
+    expect(screen.getByText(/set committed at the bot’s last deploy/)).toBeTruthy();
+    expect(screen.queryByText(/The index could not be read/)).toBeNull();
+    expect(screen.getByText(/Why the live index was not read/).textContent).toContain("429");
+  });
+
   it("repeats the bot's own account of an index it could not read", () => {
     mount({ assets: [], adAssets: { ...adAssets, source: null, note: "no service account configured" } });
     expect(screen.getByText(/no service account configured/)).toBeTruthy();
