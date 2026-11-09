@@ -142,7 +142,7 @@ describe('line actions', () => {
         constructor(detail: string) { super(detail); this.detail = detail; }
       }
       return {
-        updateLine, updateSettings, getOverview, BotUnavailableError,
+        updateLine, updateSettings, getOverview, getConfiguration: getOverview, BotUnavailableError,
         WriteRefusedError: class extends BotUnavailableError { problems: string[] = []; },
         WritesDisabledError: class extends Error { detail = 'writes off'; },
       };

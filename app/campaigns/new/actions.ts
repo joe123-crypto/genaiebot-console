@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { WRITES_ENABLED } from "@/src/config";
 import { campaignCreateError, type NewCampaign, type CreateCampaignOutcome } from "@/src/domains/campaign-create";
-import { createCampaign, getOverview, WriteRefusedError, WritesDisabledError } from "@/src/lib/bot-client";
+import { createCampaign, getCapabilities, WriteRefusedError, WritesDisabledError } from "@/src/lib/bot-client";
 import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { failedWrite } from "@/src/lib/write-outcome";
 
@@ -12,8 +12,8 @@ export async function createCampaignAction(input: NewCampaign): Promise<CreateCa
   if (error) return { ok: false, detail: error, outcome: "not-created" };
   let submitted = false;
   try {
-    const overview = await getOverview();
-    const gate = canCreateCampaign(WRITES_ENABLED, overview.writes);
+    const writes = await getCapabilities();
+    const gate = canCreateCampaign(WRITES_ENABLED, writes);
     if (!gate.allowed) return { ok: false, detail: gate.reason, outcome: "not-created" };
     // The bot validates active membership inside its creation transaction.
     // Replays must reach its receipt even if a group changed after the save.

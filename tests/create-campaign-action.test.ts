@@ -3,7 +3,7 @@ import { validCampaign } from "./fixtures/new-campaign";
 const mock = vi.hoisted(() => ({ writable: true, overview: vi.fn(), groups: vi.fn(), create: vi.fn(), revalidate: vi.fn() }));
 vi.mock("@/src/config", async (original) => ({ ...await original<typeof import("@/src/config")>(), get WRITES_ENABLED() { return mock.writable; } }));
 vi.mock("next/cache", () => ({ revalidatePath: mock.revalidate }));
-vi.mock("@/src/lib/bot-client", async (original) => ({ ...await original<typeof import("@/src/lib/bot-client")>(), getOverview: mock.overview, getGroups: mock.groups, createCampaign: mock.create }));
+vi.mock("@/src/lib/bot-client", async (original) => ({ ...await original<typeof import("@/src/lib/bot-client")>(), getOverview: mock.overview, getConfiguration: mock.overview, getCapabilities: async () => (await mock.overview()).writes, getGroups: mock.groups, createCampaign: mock.create }));
 import { BotUnavailableError, WriteRefusedError } from "@/src/lib/bot-client";
 import { createCampaignAction } from "@/app/campaigns/new/actions";
 beforeEach(() => {

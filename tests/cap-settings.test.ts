@@ -131,7 +131,7 @@ describe("saveCapSettingsAction", () => {
         constructor(detail: string) { super(detail); this.detail = detail; }
       }
       return {
-        updateSettings, getOverview, BotUnavailableError,
+        updateSettings, getOverview, getConfiguration: getOverview, BotUnavailableError,
         WriteRefusedError: class extends BotUnavailableError { problems: string[] = []; },
         WritesDisabledError: class extends Error { detail = "writes off"; },
       };

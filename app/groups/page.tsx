@@ -67,7 +67,7 @@ export default async function GroupsPage({
     : undefined;
 
   return (
-    <Shell>
+    <Shell overview={overview}>
       {/* The record, not the filtered view: how many groups there are does not
           change because someone searched. The table reports its own count. */}
       <PageHead

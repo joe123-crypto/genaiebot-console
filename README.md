@@ -384,6 +384,40 @@ reduces collisions with the gateway's two-process bridge limit; independent
 console processes can still encounter a busy gateway. Writes are never retried
 automatically. Bot routes and payloads remain unchanged.
 
+## Firestore read budgets
+
+The bot update in `integrations/genaebot-firestore-scoped-reads.patch` replaces
+full configuration scans with operation-specific reads. Deploy that compatible
+backend before this console; older bots retain the previous read and save paths.
+
+- Campaign details and previews query groups whose `promos` array contains the
+  selected campaign. Weekly and paused assignments remain included. Campaign
+  sends use the same targeting query, with live reads and bounded snapshots.
+- Editing or deleting an existing group reads that group and shared validation
+  dependencies. Campaign creation reads only the selected groups. Switch and
+  caption save checks read just the campaign document. Settings and caption checks read no group collection. The
+  capabilities endpoint reads no Firestore documents. Sidebar badges use count
+  aggregations instead of downloading groups, previews or pictures.
+- The campaign's group directory loads when **Add groups** opens. Saved browser
+  draft additions are checked by ID; a failed check retains the draft.
+- Console configuration displays share a process-safe cache for 180 seconds.
+  With the existing response cache and polling interval, healthy external edits
+  appear within five minutes. Failed refreshes wait at least 300 seconds, or a
+  longer upstream retry delay. Strict save checks bypass these display caches.
+- Campaign group changes use one transactional batch (up to 100 existing groups),
+  reading shared rules once and committing changed groups with their audits.
+  Validation or conflict failures write nothing; uncertain commits are never
+  replayed automatically. An older bot uses the existing per-group save path.
+- Schedule reconciliation queries only console-created campaigns every five
+  minutes, backs off after failures, and skips unchanged status writes. Campaign
+  configuration saves wake reconciliation immediately.
+
+Broad reads remain for the overview, complete group/campaign lists, creation
+rank allocation and shared-setting validation that can affect other groups.
+No data migration, billing setting change or additional database is required.
+The backend keeps scope-specific snapshots separate from full snapshots, and
+cache invalidation fences in-flight reads both in the bot and console process.
+
 ## WhatsApp account controls
 
 Set `BOT_API_BASE_URL` and `BOT_API_TOKEN` to the live console API, even when

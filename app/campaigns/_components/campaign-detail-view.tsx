@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { loadCampaignGroupChoices } from "@/app/campaigns/actions";
 import { useRouter } from "next/navigation";
 import { PageHead, Stat } from "@/app/_components/ui";
 import { CampaignGroups } from "@/app/campaigns/_components/campaign-groups";
@@ -73,6 +74,8 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
   const campaign = campaignSnapshot?.data;
   const preview = previewSnapshot?.data;
   const membership = membershipSnapshot?.data;
+  const knownGroups = useMemo(() => membership ? membership.groups.map(({ jid, name, account, status }) =>
+    ({ jid, name, account, status })) : NO_GROUPS, [membership]);
   // A stale capability response must never leave a write armed.
   const writes = detail.writes.ok ? detail.writes.data ?? undefined : undefined;
   const configurationFresh = detail.campaign.ok && detail.writes.ok;
@@ -127,7 +130,8 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
     {notice("Group membership", detail.membership, membershipSnapshot?.receivedAt)}
     {preview ? <CampaignGroups slug={slug}
       liveGroups={preview.groups.map(({ caption, cap, ...row }) => row)}
-      knownGroups={membership ? membership.groups.map(({ jid, name, account, status }) => ({ jid, name, account, status })) : NO_GROUPS}
+      knownGroups={knownGroups}
+      loadChoices={detail.membershipScoped ? loadCampaignGroupChoices : undefined}
       variantCount={preview.captions.length} gate={groupsGate}
       membershipAvailable={detail.membership.ok} membershipLoaded={Boolean(membership)}
       previewAvailable={detail.preview.ok} /> : <UnavailableSection title="Where it goes" />}

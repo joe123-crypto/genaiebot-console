@@ -212,3 +212,40 @@ unconfirmed, and the request stays queued for a reconnecting account.
 Deploy the bot update first, then this console. Validate the bot with
 `./deploy/ci-check.sh` and the adapter-pinned integration tests; validate the
 console with `npm test`, `npm run typecheck` and `npm run build`.
+
+## Firestore scoped reads and group batches
+
+`genaebot-firestore-scoped-reads.patch` applies to genaebot
+`e5406adc5eb0aa8b2b7a800523b384ccd049c599`. It includes the console-only display
+cache and quota-error handling, targeted campaign/group/asset queries, sidebar
+aggregations, transactional group batches, and scheduler read/write reductions.
+It requires no Firestore data migration or new composite indexes; targeting uses
+the existing single-field array index on `groups.promos`.
+
+Deploy this backend update before the console. Narrow-route and batch fallbacks
+support earlier bots that already accept the `fresh=1` save-read contract. Save
+checks against older bots may require this patch; they never silently accept
+cached data in place of an explicitly requested live read.
+
+From a clean bot checkout at that revision:
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-firestore-scoped-reads.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-firestore-scoped-reads.patch
+bash deploy/ci-check.sh
+```
+
+For newer bot revisions, run the patch check first and reconcile any overlapping
+cache changes before applying it.
+
+Healthy display configuration is cached for 180 seconds, leaving room for the
+30-second API cache and 60-second polling interval within a five-minute display
+freshness budget. Failed refreshes wait at least 300 seconds. Writers and campaign
+runs use live reads, and outage snapshots retain the existing age limit. Cache
+invalidation covers attempted/uncertain mutations and overlapping old reads.
+
+The route contract and read/write budgets are covered by the bot's
+`test_scoped_reads.py`, `test_console_config.py`, `test_scoped_console_api.py` and
+existing regression suites. Console tests cover the narrow API routes, old-bot
+fallback, lazy group choices, saved draft lookups, atomic batch application, and
+protection against reusing a pre-save read after a mutation.

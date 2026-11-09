@@ -35,6 +35,8 @@ async function loadAction(writes = true) {
     }
     return {
       getGroups, getOverview, updateGroup, deleteGroup: vi.fn(),
+      getCapabilities: async () => (await getOverview()).writes,
+      getCampaignState: async (id: string) => (await getOverview()).campaigns.find((row: { slug: string }) => row.slug === id) ?? null,
       BotUnavailableError, WriteRefusedError,
       WritesDisabledError: class extends Error { detail = "writes off"; },
     };

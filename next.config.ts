@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: process.cwd(),
-  // The console renders live operator state; nothing here is safe to cache.
+  // Page payloads stay fresh; the bot owns the bounded display-config cache.
   experimental: { staleTimes: { dynamic: 0, static: 0 } },
 };
 

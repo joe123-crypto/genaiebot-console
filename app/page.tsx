@@ -25,7 +25,7 @@ export default async function OverviewPage() {
   const widest = Math.max(1, ...slots.map((slot) => slot.targetCount));
 
   return (
-    <Shell>
+    <Shell overview={overview}>
       <PageHead
         title="Overview"
         subtitle={`Everything the bot plans to do on ${overview.date}, in ${BOT_TIMEZONE} time.`}

@@ -7,17 +7,19 @@ import {
   WriteRefusedError,
   WritesDisabledError,
   getCampaignPreview,
-  getCampaigns,
+  getCampaignState,
   getGroups,
   updateCampaign,
   updateCampaignCaptions,
   updateGroup,
+  updateGroupBatch,
 } from "@/src/lib/bot-client";
 import {
   draftedJids,
   parseGroupDraft,
   planAssignmentWrites,
   type CampaignGroupDraft,
+  type KnownCampaignGroup,
 } from "@/src/lib/campaign-group-draft";
 import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
 import { READ_ONLY_REASON } from "@/src/lib/write-capabilities";
@@ -29,6 +31,14 @@ import { READ_ONLY_REASON } from "@/src/lib/write-capabilities";
  */
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+/** Load the directory only when the picker opens, or look up just saved draft additions. */
+export async function loadCampaignGroupChoices(jids?: string[]): Promise<KnownCampaignGroup[]> {
+  if (jids !== undefined && (!Array.isArray(jids) || jids.length > 100 ||
+    jids.some((jid) => typeof jid !== "string" || !/^\d+(?:-\d+)?@g\.us$/.test(jid)))) throw new Error("Invalid group selection.");
+  const { groups } = await getGroups(undefined, { jids });
+  return groups.map(({ jid, name, account, status }) => ({ jid, name, account, status }));
+}
 
 function refreshCampaign(slug: string) {
   revalidatePath(`/campaigns/${slug}`);
@@ -58,7 +68,7 @@ export async function saveCaptionsAction(
   }
 
   try {
-    const current = await getCampaignPreview(slug, undefined, { fresh: true });
+    const current = await getCampaignPreview(slug, undefined, { fresh: true, captionsOnly: true });
     if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
       return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving." };
     }
@@ -109,9 +119,8 @@ function stopped(error: unknown, jid: string | null, done: string[], detail?: st
  *
  * Each group's new lists are worked out from its record as the bot has it now,
  * so a change made elsewhere since the page loaded is kept, not overwritten.
- * Every write is dry-run first: if the bot would refuse any of them, none is
- * made, and the page names each group and why. Only then are they committed,
- * one group at a time.
+ * A supporting bot validates and commits the changed groups together against
+ * one transactional snapshot. Older bots retain the dry-run/per-group path.
  */
 export async function applyCampaignGroupsAction(
   slug: string,
@@ -138,8 +147,10 @@ export async function applyCampaignGroupsAction(
   }
 
   let plan;
+  let expectedGroups;
   try {
-    const { groups } = await getGroups(undefined, { fresh: true });
+    const { groups } = await getGroups(undefined, { fresh: true, jids });
+    expectedGroups = new Map(groups.map((group) => [group.jid, group]));
     plan = planAssignmentWrites(slug, staged, groups);
   } catch (error) {
     return stopped(error, null, []);
@@ -147,6 +158,23 @@ export async function applyCampaignGroupsAction(
   const done = [...plan.absorbed];
   if (plan.failures.length > 0) {
     return { ok: false, done, detail: "Nothing was changed.", failures: plan.failures };
+  }
+
+  if (plan.writes.length > 0) {
+    try {
+      const result = await updateGroupBatch(plan.writes.map(({ jid, fields }) => {
+        const group = expectedGroups.get(jid)!;
+        const values: Record<string, unknown> = { promos: group.promos, weekly: group.weekly, paused_promos: group.pausedPromos ?? [] };
+        return { id: jid, fields, expected: Object.fromEntries(Object.keys(fields).map((key) => [key, values[key]])) };
+      }), { by: OPERATOR_NAME });
+      if (result) {
+        refreshCampaign(slug);
+        return { ok: true, done: [...done, ...result.done] };
+      }
+    } catch (error) {
+      refreshCampaign(slug);
+      return stopped(error, null, done);
+    }
   }
 
   const refused: GroupFailure[] = [];
@@ -192,7 +220,7 @@ export async function setCampaignEnabledAction(slug: string, enabled: boolean): 
   }
   if (typeof enabled !== "boolean") return { ok: false, detail: "The change could not be read." };
   try {
-    const campaign = (await getCampaigns(undefined, { fresh: true })).find((entry) => entry.slug === slug);
+    const campaign = await getCampaignState(slug, { fresh: true });
     if (!campaign) return { ok: false, detail: "This campaign is no longer on record." };
     if ((campaign.storeEnabled ?? campaign.enabled) === enabled) return { ok: true };
     await updateCampaign(slug, { enabled }, { by: OPERATOR_NAME });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { Pause, Play, Plus, Trash2, X } from "lucide-react";
 import { applyCampaignGroupsAction, type ApplyGroupsOutcome } from "@/app/campaigns/actions";
 import { groupLabel, plural, shortJid } from "@/src/lib/format";
@@ -15,6 +15,7 @@ type Props = {
   slug: string;
   liveGroups: CampaignGroupRow[];
   knownGroups: KnownCampaignGroup[];
+  loadChoices?: (jids?: string[]) => Promise<KnownCampaignGroup[]>;
   variantCount: number;
   /** Failed reads are not evidence that a group disappeared. */
   membershipAvailable?: boolean;
@@ -194,7 +195,7 @@ export function CampaignGroups(props: Props) {
   return <CampaignGroupEditor key={props.slug} {...props} />;
 }
 
-function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate,
+function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups, loadChoices, variantCount, gate,
   membershipAvailable = true, membershipLoaded = true, previewAvailable = true }: Props) {
   const id = useId();
   const key = groupDraftKey(slug);
@@ -210,6 +211,44 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
   const [confirming, setConfirming] = useState(false);
   const [applying, setApplying] = useState(false);
   const [failure, setFailure] = useState<ApplyFailure | null>(null);
+  const [choices, setChoices] = useState<KnownCampaignGroup[]>([]);
+  const [choicesLoading, setChoicesLoading] = useState(false);
+  const [lookup, setLookup] = useState<{ source: KnownCampaignGroup[]; key: string; groups: KnownCampaignGroup[] } | null>(null);
+  const additionsKey = draft?.added.join(",") ?? "";
+  const missingAdditions = (draft?.added ?? []).filter((jid) => !initialKnownGroups.some((group) => group.jid === jid));
+  const additionsChecked = !loadChoices || missingAdditions.length === 0 ||
+    (lookup?.source === initialKnownGroups && lookup.key === additionsKey);
+  const knownGroups = useMemo(() => {
+    if (!loadChoices) return initialKnownGroups;
+    const result = new Map(choices.map((group) => [group.jid, group]));
+    if (lookup?.source === initialKnownGroups) {
+      for (const jid of lookup.key.split(",")) result.delete(jid);
+      for (const group of lookup.groups) result.set(group.jid, group);
+    }
+    for (const group of initialKnownGroups) result.set(group.jid, group);
+    return [...result.values()];
+  }, [choices, lookup, initialKnownGroups, loadChoices]);
+  const canReconcile = membershipAvailable && previewAvailable && additionsChecked;
+
+  useEffect(() => {
+    if (!loadChoices || !additionsKey) return;
+    const ids = additionsKey.split(",").filter((jid) => !initialKnownGroups.some((group) => group.jid === jid));
+    if (ids.length === 0) return;
+    let stopped = false;
+    loadChoices(ids).then((groups) => {
+      if (!stopped) setLookup({ source: initialKnownGroups, key: additionsKey, groups });
+    }, () => { if (!stopped) setNotice("Could not check saved draft additions. Your draft is kept; reopen this page to retry."); });
+    return () => { stopped = true; };
+  }, [additionsKey, initialKnownGroups, loadChoices]);
+
+  async function openChoices() {
+    if (!loadChoices) { setOpen(true); return; }
+    if (choicesLoading) return;
+    setChoicesLoading(true);
+    try { setChoices(await loadChoices()); setOpen(true); }
+    catch { setNotice("Could not load groups to add. Your draft is kept; try Add groups again."); }
+    finally { setChoicesLoading(false); }
+  }
 
   useEffect(() => {
     if (!gate?.allowed || !membershipAvailable || !previewAvailable) setConfirming(false);
@@ -259,7 +298,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
       readable = false;
       setStorageFailed(true);
     }
-    const result = membershipAvailable && previewAvailable
+    const result = canReconcile
       ? reconcileGroupDraft(snapshot.draft, liveGroups, knownGroups)
       : { draft: snapshot.draft, droppedAdditions: 0 };
     if (result.draft !== snapshot.draft) setSnapshot({ ...snapshot, draft: result.draft });
@@ -281,9 +320,9 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
     } catch {
       setStorageFailed(true);
     }
-  }, [snapshot, key, liveGroups, knownGroups, membershipAvailable, previewAvailable]);
+  }, [snapshot, key, liveGroups, knownGroups, canReconcile]);
 
-  const current = draft ? membershipAvailable && previewAvailable
+  const current = draft ? canReconcile
     ? reconcileGroupDraft(draft, liveGroups, knownGroups).draft : draft : emptyGroupDraft();
   const removed = new Set(current.removed);
   const knownById = new Map(knownGroups.map((group) => [group.jid, group]));
@@ -369,7 +408,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
         <div className="campaign-group-actions">
           <button type="button" className="btn" disabled={busy || !hasGroupDraft(current)}
             onClick={() => change(emptyGroupDraft())}>Reset draft</button>
-          <button ref={addButton} type="button" className="btn campaign-group-add" disabled={busy || !membershipLoaded} onClick={() => setOpen(true)}>
+          <button ref={addButton} type="button" className="btn campaign-group-add" disabled={busy || !membershipLoaded || choicesLoading} onClick={() => { void openChoices(); }}>
             <Plus size={16} aria-hidden /> Add groups
           </button>
           {gate ? (
