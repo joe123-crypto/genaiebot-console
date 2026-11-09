@@ -7,6 +7,7 @@ import {
 import { STATUS_LABEL, StatusPill } from "@/app/_components/ui";
 import { DeleteGroup } from "@/app/groups/_components/delete-group";
 import { EditGroup } from "@/app/groups/_components/edit-group";
+import { AddGroupCampaign, type GroupCampaignOption } from "@/app/groups/_components/add-group-campaign";
 import { DmcHeading, DmcValue, GroupDetails, MemberValue } from "@/app/groups/_components/group-metrics";
 import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
 import {
@@ -47,6 +48,9 @@ const NO_EDITING: GroupEditing = {
   tiers: [],
 };
 
+const NO_CAMPAIGNS: GroupCampaignOption[] = [];
+const NO_CAMPAIGN_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
+
 type Props = {
   /** Every group on record. The table narrows them; it never refetches. */
   groups: Group[];
@@ -55,6 +59,8 @@ type Props = {
    *  in a browser bundle. The server page has to hand it over. */
   writesEnabled: boolean;
   editing?: GroupEditing;
+  campaigns?: GroupCampaignOption[];
+  campaignGate?: WriteGate;
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: GroupFilter;
 };
@@ -64,6 +70,7 @@ const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-membe
 
 export function GroupsTable({
   groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
+  campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES,
 }: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
@@ -169,7 +176,7 @@ export function GroupsTable({
       </FilterSummary>
 
       <div
-        className="table-wrap"
+        className="table-wrap groups-table-wrap"
         role="region"
         aria-label="Groups, scroll horizontally for counts and actions"
         tabIndex={0}
@@ -221,39 +228,38 @@ export function GroupsTable({
                     )}
                   </td>
                   <td>
-                    {group.promos.length === 0 ? (
-                      <span className="cell-muted">none</span>
-                    ) : (
-                      <div className="tag-row">
-                        {group.promos.map((promo) => {
-                          const isOff = off.has(promo);
-                          const isPaused = (group.pausedPromos ?? []).includes(promo);
-                          const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
-                          const weekly = group.weekly[promo];
-                          return (
-                            <span
-                              key={promo}
-                              className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}`}
-                              title={
-                                isOff
-                                  ? "campaign is switched off — it posts nowhere"
-                                  : isPaused
-                                    ? "paused for this group — still assigned, but nothing is sent"
-                                    : weekly
-                                      ? `only on ${weekly.join(", ")}`
-                                      : sendsToday
-                                        ? "posts today"
-                                        : "held back by today's cap"
-                              }
-                            >
-                              {campaignTitle(promo)}
-                              {weekly ? ` · ${weekly.join("/")}` : ""}
-                              {isPaused ? " · paused" : ""}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <div className="tag-row group-campaign-tags">
+                      {group.promos.length === 0 ? (
+                        <span className="cell-muted">none</span>
+                      ) : group.promos.map((promo) => {
+                        const isOff = off.has(promo);
+                        const isPaused = (group.pausedPromos ?? []).includes(promo);
+                        const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
+                        const weekly = group.weekly[promo];
+                        return (
+                          <span
+                            key={promo}
+                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}`}
+                            title={
+                              isOff
+                                ? "campaign is switched off — it posts nowhere"
+                                : isPaused
+                                  ? "paused for this group — still assigned, but nothing is sent"
+                                  : weekly
+                                    ? `only on ${weekly.join(", ")}`
+                                    : sendsToday
+                                      ? "posts today"
+                                      : "held back by today's cap"
+                            }
+                          >
+                            {campaignTitle(promo)}
+                            {weekly ? ` · ${weekly.join("/")}` : ""}
+                            {isPaused ? " · paused" : ""}
+                          </span>
+                        );
+                      })}
+                      {writesEnabled ? <AddGroupCampaign group={group} campaigns={campaigns} gate={campaignGate} /> : null}
+                    </div>
                   </td>
                   <td>
                     <button type="button" className="btn group-more"
