@@ -669,6 +669,31 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .campaign-group-option .cell-mono { display: block; }
 .campaign-group-option input { margin: 4px 0 0; accent-color: var(--primary); }
 .campaign-group-option input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Keep the absolute, hidden Actions label inside the scrolling Groups table. */
+.groups-table-wrap { position: relative; }
+.group-campaign-tags { align-items: center; }
+.row-action.group-campaign-add { border: 1px dashed var(--border); flex-shrink: 0; }
+.group-campaign-dialog { width: min(440px, calc(100vw - 32px)); }
+.group-campaign-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.group-campaign-option + .group-campaign-option { border-top: 1px solid var(--border); }
+.group-campaign-option:hover { background: var(--surface-muted); }
+.group-campaign-option:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.group-campaign-option:disabled { opacity: .6; cursor: not-allowed; }
+.group-campaign-option > span { min-width: 0; overflow-wrap: anywhere; }
+.group-campaign-option > svg { flex-shrink: 0; }
 @media (max-width: 600px) {
   .filter-field { flex: 1 1 100%; }
   .filter-actions { margin-left: 0; }

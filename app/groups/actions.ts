@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
 import { deleteGroup, getGroups, getOverview, updateGroup } from "@/src/lib/bot-client";
+import { emptyGroupDraft, planAssignmentWrites } from "@/src/lib/campaign-group-draft";
+import { canWrite } from "@/src/lib/write-capabilities";
 import {
   changedGroupFields,
   currentGroupValues,
@@ -41,6 +43,41 @@ async function vocabulary(): Promise<{ lines: string[]; tiers: string[] }> {
     lines: overview.accounts.map((line) => line.id),
     tiers: overview.capSettings ? Object.keys(overview.capSettings.bands) : TIERS_FALLBACK,
   };
+}
+
+/** Add one campaign without sending the browser's potentially stale membership list. */
+export async function addGroupCampaignAction(jid: string, slug: string): Promise<WriteOutcome> {
+  if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
+  if (typeof jid !== "string" || !jid.endsWith("@g.us")) {
+    return { ok: false, detail: "No valid group was named." };
+  }
+  if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    return { ok: false, detail: "No valid campaign was named." };
+  }
+
+  try {
+    const [{ groups }, overview] = await Promise.all([getGroups(), getOverview()]);
+    const gate = canWrite(WRITES_ENABLED, overview.writes, "groups", "promos");
+    if (!gate.allowed) return { ok: false, detail: gate.reason };
+    if (!overview.campaigns.some((campaign) => campaign.slug === slug)) {
+      return { ok: false, detail: "This campaign is no longer on record." };
+    }
+
+    const plan = planAssignmentWrites(slug, { ...emptyGroupDraft(), added: [jid] }, groups);
+    if (plan.failures.length > 0) return { ok: false, detail: plan.failures[0].detail };
+    for (const write of plan.writes) {
+      await updateGroup(write.jid, write.fields, { by: OPERATOR_NAME, dryRun: true });
+      await updateGroup(write.jid, write.fields, { by: OPERATOR_NAME });
+    }
+  } catch (error) {
+    return failedWrite(error);
+  }
+
+  // Refresh even if another operator already added it, so the row catches up.
+  refresh();
+  revalidatePath(`/campaigns/${slug}`);
+  revalidatePath("/campaigns");
+  return { ok: true };
 }
 
 /**

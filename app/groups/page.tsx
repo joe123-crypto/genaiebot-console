@@ -79,6 +79,8 @@ export default async function GroupsPage({
         disabledPromos={disabledPromos}
         writesEnabled={WRITES_ENABLED}
         editing={editing}
+        campaigns={(overview?.campaigns ?? []).map(({ slug, name, enabled }) => ({ slug, name, enabled }))}
+        campaignGate={canWrite(WRITES_ENABLED, overview?.writes, "groups", "promos")}
         initialFilter={initialFilter}
       />
     </Shell>
