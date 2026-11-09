@@ -45,6 +45,37 @@ export type Tracking = {
   link_line?: string;
 };
 
+/**
+ * One picture of a campaign's, as the bot's asset index reports it.
+ *
+ * `url` is absent when the bot has no address configured to serve the bytes
+ * from: the index still names the picture, which is a different thing from the
+ * campaign having none, so the tile says so rather than disappearing.
+ */
+export type CampaignAsset = {
+  filename: string;
+  url?: string | null;
+  sha256: string;
+  bytes: number;
+  contentType: string;
+  rank: number | null;
+};
+
+/** Where the pictures come from, and whether anything could be read. Reported
+ *  once per payload rather than per campaign: a failed index read is one fact
+ *  about the bot, not ten facts about ten campaigns. */
+export type AdAssets = {
+  /** What a RUN attaches today: `repo` is the copy baked into the bot's
+   *  container, `r2` the one the index names. They are the same bytes while
+   *  the index matches the checkout, which is what `lastCheck` compares. */
+  mode: string;
+  source: "firestore" | "snapshot" | null;
+  fetchedAt: string | null;
+  /** Why there are no pictures, when there are none. Shown verbatim: it is the
+   *  bot's own account of what it could not read. */
+  note: string | null;
+};
+
 export type Campaign = {
   slug: string;
   name: string;
@@ -68,7 +99,13 @@ export type Campaign = {
   timeoutSeconds: number;
   captions: string[];
   tracking: Tracking;
+  /** The basenames the campaign's own `post_ad.py` declares, in the order the
+   *  bot rotates them. Still the list a screen shows. */
   images: string[];
+  /** What the bot's asset index says those pictures are, joined to `images` by
+   *  filename. Absent from a bot older than the index read, which reads as "no
+   *  preview" and never as "no pictures". */
+  assets?: CampaignAsset[];
   targetCount: number;
   weeklyCount: number;
   accounts: Record<string, number>;

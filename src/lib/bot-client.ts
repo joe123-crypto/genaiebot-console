@@ -13,6 +13,7 @@ import {
   WRITES_ENABLED,
 } from "@/src/config";
 import type {
+  AdAssets,
   Campaign,
   CampaignPreview,
   GroupsPayload,
@@ -74,11 +75,15 @@ export function captionSaveUnavailableReason(
 
 /**
  * Captions live in the bot's own campaign document, which is why they can be
- * saved. A campaign's pictures do not: the bot still reads them from the
- * `IMAGE` / `IMAGE_PATH` constants in its `post_ad.py`, and the write bridge's
- * editable fields do not include them. The gallery therefore shows its controls
- * and says plainly why they are off, rather than offering a draft that could
- * never be committed.
+ * saved. A campaign's pictures do not: the bot still reads which pictures a
+ * campaign has from the `IMAGE` / `IMAGE_PATH` constants in its `post_ad.py`,
+ * and the write bridge's editable fields do not include them. The gallery
+ * therefore shows its controls and says plainly why they are off, rather than
+ * offering a draft that could never be committed.
+ *
+ * Only the write half is still blocked. The bot now reports where each
+ * picture's bytes are, which is what lets the tiles show them -- but changing
+ * the set a campaign rotates is still a change to a Python constant.
  */
 export function imageWritesUnavailableReason(): string {
   return "Picture changes need the companion bot update — the bot still reads each campaign\u2019s picture from its post_ad.py, not from the record the console can write.";
@@ -318,9 +323,15 @@ export async function getGroups(date?: string) {
   return read<GroupsPayload>("groups", date);
 }
 
+/** The whole campaigns payload. `adAssets` says where the pictures are stored
+ *  and whether the bot could read its index, which is one fact about the bot
+ *  rather than one per campaign -- so it rides here and not on each record. */
+export async function getCampaignsPayload(date?: string) {
+  return read<{ date: string; adAssets?: AdAssets; campaigns: Campaign[] }>("campaigns", date);
+}
+
 export async function getCampaigns(date?: string) {
-  const payload = await read<{ date: string; campaigns: Campaign[] }>("campaigns", date);
-  return payload.campaigns;
+  return (await getCampaignsPayload(date)).campaigns;
 }
 
 export function getCampaignPreview(slug: string, date?: string) {

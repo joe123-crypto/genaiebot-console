@@ -114,7 +114,8 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
     </div>
     <p className="card-note campaign-live-stats-note">Statistics show the latest loaded configuration and leave out changes not yet applied. Data marked out of date may have changed on the bot.</p>
 
-    {campaign ? <CampaignImages slug={slug} images={campaign.images} assetDir={campaignAssetDir(campaign.script)}
+    {campaign ? <CampaignImages images={campaign.images} assets={campaign.assets}
+      adAssets={detail.adAssets ?? undefined} assetDir={campaignAssetDir(campaign.script)}
       writable={writable} writeUnavailableReason={imageUnavailableReason} /> : <UnavailableSection title="Pictures" />}
 
     {preview ? <CaptionVariants slug={slug} captions={preview.captions} writable={writable}

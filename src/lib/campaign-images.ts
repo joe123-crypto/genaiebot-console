@@ -1,12 +1,22 @@
+import type { CampaignAsset } from "@/src/lib/types";
+
 /**
  * Where a campaign picture's pixels come from, and what the console will accept
  * as a new one.
  *
- * The read bridge reports a campaign's pictures as bare basenames — the files
- * themselves sit beside each `post_ad.py` in the genaebot checkout, and neither
- * adapter serves bytes. Everything that needs an image URL goes through
- * `campaignImageSrc`, so the route that eventually serves them is a one-file
- * change and no component has to be touched.
+ * The pictures live in a Cloudflare R2 bucket and the index of them in
+ * Firestore, so the bot reports each one's public URL beside the basename its
+ * `post_ad.py` declares, and a tile loads that URL directly. The console never
+ * sees the bucket, the keys or the credentials, and never proxies the bytes:
+ * the URL is composed on the bot from one environment variable, so putting a
+ * custom domain in front of the bucket moves the console with it and changes
+ * nothing here.
+ *
+ * Two lists meet in this file. `images` is what the campaign's post script
+ * declares and, until the R2 cutover, still what a run attaches; `assets` is
+ * what the index says. They agree today. `assetFor` is the join, and a name
+ * with no entry keeps its unavailable tile — which is a real signal, not a
+ * missing feature.
  */
 
 /** What the file picker offers. WhatsApp re-encodes anything it sends anyway. */
@@ -14,28 +24,16 @@ export const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-/**
- * Whether anything serves a campaign's picture files yet. Nothing does, so no
- * component asks: a tile that fetched regardless would put a doomed request and
- * a console error behind every picture on every page load and every refresh.
- * The route below is what flips this to `true`, and nothing else has to change.
- */
-export const IMAGES_SERVED: boolean = false;
+/** A campaign picture's index entry, by the name the post script declares.
+ *  `undefined` when the index does not mention it. */
+export function assetFor(assets: CampaignAsset[], name: string) {
+  return assets.find((asset) => asset.filename === name);
+}
 
-/**
- * Contract for the route that does not exist yet:
- *
- *   GET /api/campaigns/<slug>/image/<basename>
- *   200 with image/jpeg|png|webp and an immutable cache header;
- *   404 when the basename is not one of that campaign's declared pictures, or
- *   the file is not in the checkout.
- *
- * Until it exists every request 404s and each tile shows its unavailable state,
- * which is the same thing the operator sees for a picture that has gone missing
- * from the checkout. One state covers both.
- */
-export function campaignImageSrc(slug: string, name: string) {
-  return `/api/campaigns/${encodeURIComponent(slug)}/image/${encodeURIComponent(name)}`;
+/** The address a tile loads, or undefined when there is nothing to load: the
+ *  index does not know this picture, or the bot has no base URL configured. */
+export function campaignImageSrc(assets: CampaignAsset[], name: string) {
+  return assetFor(assets, name)?.url || undefined;
 }
 
 /** Why a picked file cannot become a campaign picture, if it cannot. */
@@ -61,9 +59,10 @@ export function duplicateImageName(names: string[]) {
   return undefined;
 }
 
-/** Where a campaign's picture files sit, derived from the script path the read
- *  bridge already reports. Not a URL and not fetchable — it is what an operator
- *  needs in order to find or replace a picture by hand today. */
+/** Where a campaign's picture files sit in the bot's checkout, derived from the
+ *  script path the read bridge already reports. Not a URL and not fetchable —
+ *  it is where the copy baked into the container lives, which is still what a
+ *  run attaches until the R2 cutover. */
 export function campaignAssetDir(script: string | null) {
   if (!script) return null;
   const dir = script.replace(/\/[^/]*$/, "");

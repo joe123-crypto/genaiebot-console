@@ -71,7 +71,7 @@ npm run build
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
 | Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
 | Campaigns | Live. Searchable and filterable; slot, reach, line split, ref prefix, copy. |
-| Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are listed, not yet shown or editable. |
+| Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
@@ -244,21 +244,38 @@ console names that order and deliberately does not say which picture goes out
 today, because picking it is `promo_broadcast`'s job and not something to
 reimplement here.
 
-Two parts are deliberately missing, and the screen says so rather than implying
-otherwise:
+**The pictures themselves come from the bot's asset index.** The images live in a
+Cloudflare R2 bucket and the index of them in Firestore, so the bot reports each
+picture's public URL beside the basename its `post_ad.py` declares, and a tile
+loads that URL directly. The console never holds the bucket, the keys or any
+credential, and never proxies the bytes: the URL is composed on the bot from one
+environment variable, so putting a custom domain in front of the bucket moves the
+console with it and changes nothing here. The keys are content-addressed, so a URL
+never changes meaning and the browser can cache it indefinitely.
 
-- **No picture is displayed yet.** The read bridge reports basenames only
-  (`borehole-1.jpg`), and neither adapter serves image files, so every tile names
-  its file and points at the directory it lives in. The same tile covers a
-  picture that has gone missing from the checkout.
+Two lists meet on that screen and are reported separately rather than merged,
+because they are two different claims and the day they disagree is worth seeing:
+what the campaign's post script declares, which is the tile list, and what the
+index says, which is where the pixels come from. A tile whose name the index does
+not mention keeps its unavailable state, and the card says how many — that is a
+picture the campaign declares and the bucket has never had.
+
+The screen stays honest about two further things rather than implying otherwise:
+
+- **Before the R2 cutover the tile is not what goes out.** While the bot's picture
+  source is `repo` it attaches the copy baked into its container, and the card says
+  so and names the directory that copy is in. The two are the same bytes while the
+  index matches the checkout.
 - **Add and remove are shown but switched off.** A campaign's pictures come from
   the `IMAGE` / `IMAGE_PATH` constants in its own `post_ad.py`, not from the
   record the console can write, and the write bridge has no field for them. The
   controls carry that reason in prose and as hover text.
 
-Both wait on a companion bot update — a route that serves a campaign's picture
-files, and a picture field the bot reads from its campaign document — in the same
-way caption writes waited on their patch.
+An index the bot could not read costs the pictures and nothing else: the tiles fall
+back to naming their file and the card repeats the bot's own account of what went
+wrong, rather than implying the campaigns have no pictures. Picture *writes* still
+wait on a companion bot update, in the same way caption writes waited on their
+patch.
 
 While the console is visible and online, it refreshes the current page and sidebar
 60 seconds after each completed refresh. Checks pause in hidden tabs or while

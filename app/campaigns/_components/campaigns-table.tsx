@@ -206,7 +206,7 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
                   <div className="campaign-copy-cell">
                     {/* Decorative: the counts beside it say the same thing
                         as text, for anything that cannot see the picture. */}
-                    <CampaignThumb slug={campaign.slug} images={campaign.images} />
+                    <CampaignThumb images={campaign.images} assets={campaign.assets} />
                     <span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         <Repeat2 size={14} aria-hidden />

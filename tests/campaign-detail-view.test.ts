@@ -105,7 +105,8 @@ describe("campaign read resilience", () => {
   });
 
   it("keeps the whole layout when all reads fail, then recovers without clearing edits", () => {
-    const down: CampaignDetail = { campaign: failure, preview: failure, membership: failure, writes: failure };
+    const down: CampaignDetail = { campaign: failure, adAssets: null, preview: failure,
+      membership: failure, writes: failure };
     const view = render(page(down));
     expect(screen.getByRole("heading", { name: "Borehole Drilling" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Where it goes" })).toBeTruthy();
@@ -143,7 +144,8 @@ describe("campaign read resilience", () => {
 
   it("resets retained data when navigating to another campaign", () => {
     const view = render(page()); edit();
-    view.rerender(page({ campaign: failure, preview: failure, membership: failure, writes: failure }, "cv"));
+    view.rerender(page({ campaign: failure, adAssets: null, preview: failure,
+      membership: failure, writes: failure }, "cv"));
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByText("borehole.jpg")).toBeNull();
     expect(screen.queryByText("Market One")).toBeNull();
