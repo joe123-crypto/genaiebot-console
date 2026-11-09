@@ -183,10 +183,11 @@ other way round would leave the bot outside a group it was still configured to
 advertise to.
 
 So a leave that does not come off is **not** a failed delete. The record is
-gone, and the dialog stays open to say what did not happen rather than closing
-over it — the row is about to disappear and take that chance with it. A leave
-the bot has queued but not confirmed is reported as unconfirmed, not as a
-failure, so nobody retries something that already happened.
+gone, and what did not happen is said above the table rather than inside the
+deleted row — the row disappears with the next refresh, which would take the
+warning with it. It stays there until dismissed. A leave the bot has queued but
+not confirmed is reported as unconfirmed, not as a failure, so nobody retries
+something that already happened.
 
 Both boxes need the companion bot update described in
 [integrations/README.md](integrations/README.md#leaving-a-group-and-clearing-its-records).

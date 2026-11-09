@@ -43,10 +43,19 @@ export function confirmationMatches(typed: string, expected: string) {
   return typed.trim().toLowerCase() === wanted;
 }
 
-export function DeleteGroup({ jid, label, account, gate = ALLOWED,
+export function DeleteGroup({ jid, label, account, onIncomplete, gate = ALLOWED,
                               leaveGate = ALLOWED, clearGate = ALLOWED }: {
   jid: string;
   label: string;
+  /**
+   * Where a half-done delete gets reported.
+   *
+   * It cannot be reported here. The delete succeeds, the action revalidates
+   * /groups, and this component is rendered inside the row it just removed --
+   * so the dialog unmounts with the row and takes the warning with it. The
+   * owner of the table outlives the row, so it is told instead.
+   */
+  onIncomplete: (label: string, warnings: string[]) => void;
   /** The line that is in the group. Sent with the delete, because the record
    *  that names it is gone by the time the bot is asked to leave. */
   account?: string;
@@ -64,7 +73,6 @@ export function DeleteGroup({ jid, label, account, gate = ALLOWED,
   const [leave, setLeave] = useState(false);
   const [clearRecords, setClearRecords] = useState(false);
   const [error, setError] = useState<{ detail: string; problems?: string[] } | null>(null);
-  const [warnings, setWarnings] = useState<string[] | null>(null);
   const [pending, startTransition] = useTransition();
 
   const armed = confirmationMatches(typed, label);
@@ -76,7 +84,6 @@ export function DeleteGroup({ jid, label, account, gate = ALLOWED,
     setLeave(false);
     setClearRecords(false);
     setError(null);
-    setWarnings(null);
   }
 
   function submit() {
@@ -89,14 +96,10 @@ export function DeleteGroup({ jid, label, account, gate = ALLOWED,
         account,
       });
       if (outcome.ok) {
-        // The record is gone. If something asked for alongside it did not come
-        // off, this dialog is the last place that can say so -- the row is
-        // about to be removed by the revalidation this action triggered.
-        if (outcome.warnings?.length) {
-          setError(null);
-          setWarnings(outcome.warnings);
-          return;
-        }
+        // Hand any warning to the table before closing: the revalidation this
+        // action triggered is about to unmount this row, and with it the only
+        // place that could have shown it.
+        if (outcome.warnings?.length) onIncomplete(label, outcome.warnings);
         close();
         return;
       }
@@ -127,26 +130,9 @@ export function DeleteGroup({ jid, label, account, gate = ALLOWED,
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal-title" id="delete-group-title">
-              {warnings ? `Deleted ${label}` : `Delete ${label}?`}
+              Delete {label}?
             </h2>
-            {warnings ? (
-              <>
-                <p className="modal-body">
-                  The group is gone from the bot&rsquo;s records. Not everything asked for
-                  alongside it came off:
-                </p>
-                <div className="modal-warning" role="alert">
-                  <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-                </div>
-                <div className="modal-actions">
-                  <button type="button" className="btn btn-primary" onClick={close} autoFocus>
-                    Close
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="modal-body">
+            <p className="modal-body">
                   {DELETE_EXPLAINER} <strong>{DELETE_CAVEAT}</strong> {DELETE_ALTERNATIVE}
                 </p>
                 {gate.allowed && gate.warning ? <p className="modal-warning">{gate.warning}</p> : null}
@@ -233,8 +219,6 @@ export function DeleteGroup({ jid, label, account, gate = ALLOWED,
                     {pending ? "Deleting…" : "Delete group"}
                   </button>
                 </div>
-              </>
-            )}
           </div>
         </div>
       ) : null}
