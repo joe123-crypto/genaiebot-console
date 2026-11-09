@@ -2,8 +2,10 @@ import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { BotUnavailableError, getCampaigns } from "@/src/lib/bot-client";
-import { parseCampaignFilter } from "@/src/domains/console";
+import { loadOverview, parseCampaignFilter } from "@/src/domains/console";
 import { plural } from "@/src/lib/format";
+import { campaignDeleteReason, canDelete, canWrite } from "@/src/lib/write-capabilities";
+import { WRITES_ENABLED } from "@/src/config";
 import { CampaignsTable } from "@/app/campaigns/_components/campaigns-table";
 import type { Campaign } from "@/src/lib/types";
 
@@ -40,6 +42,12 @@ export default async function CampaignsPage({
     );
   }
 
+  // Already read for this request by the layout, so this costs nothing. A read
+  // that failed leaves `writes` undefined, which every gate reads as "cannot",
+  // never as "everything is writable".
+  const loaded = await loadOverview();
+  const writes = loaded.ok ? loaded.overview.writes : undefined;
+
   return (
     <Shell>
       <PageHead title="Campaigns" subtitle={subtitle(campaigns)} actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
@@ -47,7 +55,13 @@ export default async function CampaignsPage({
       {campaigns.length === 0 ? (
         <Empty>No campaigns are declared.</Empty>
       ) : (
-        <CampaignsTable campaigns={campaigns} initialFilter={initialFilter} />
+        <CampaignsTable
+          campaigns={campaigns}
+          initialFilter={initialFilter}
+          writesEnabled={WRITES_ENABLED}
+          switchGate={canWrite(WRITES_ENABLED, writes, "campaigns", "enabled")}
+          deleteReason={campaignDeleteReason(canDelete(WRITES_ENABLED, writes, "campaigns"))}
+        />
       )}
     </Shell>
   );

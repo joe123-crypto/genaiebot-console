@@ -37,6 +37,17 @@ export function campaignTitle(slug: string) {
     .join(" ");
 }
 
+/** What to call a campaign on screen.
+ *
+ *  One created from the console was named by the operator, so that name is the
+ *  thing to show. One declared in the manifest has only a slug, and its title
+ *  is made from it. Every label for the same campaign -- its link, its row's
+ *  controls -- has to come from here, or a button ends up naming something
+ *  other than the row it sits in. */
+export function campaignLabel(campaign: { slug: string; name: string; source: "git" | "console" }) {
+  return campaign.source === "console" ? campaign.name : campaignTitle(campaign.slug);
+}
+
 export function plural(count: number, one: string, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
 }

@@ -10,6 +10,18 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 export const NO_CRON_NOTE =
   "No cron is registered for this campaign, so it stays silent whatever this switch says. Registering one is done on the gateway, not here.";
 
+/** What each half of the switch does, said once. The card below and the
+ *  Campaigns table's row ask the operator the same question, and two copies of
+ *  this sentence would eventually describe the same change differently. */
+export const TURN_ON_BODY = "It posts to its groups from its next run.";
+export const TURN_OFF_BODY =
+  "It stops posting from its next run, until it is turned back on. Its groups, copy and pictures stay as they are. A run already under way finishes.";
+
+/** The question itself, so the two confirm dialogs are titled alike. */
+export function switchTitle(turningOn: boolean, title: string) {
+  return `${turningOn ? "Turn on" : "Turn off"} ${title}?`;
+}
+
 /**
  * The operator's own on/off switch for a campaign.
  *
@@ -69,7 +81,7 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
       {!gate.allowed ? <p className="card-note">{gate.reason}</p> : null}
       {target !== null && gate.allowed ? (
         <ConfirmDialog
-          title={`${target ? "Turn on" : "Turn off"} ${title}?`}
+          title={switchTitle(target, title)}
           confirmLabel={target ? "Turn on" : "Turn off"}
           danger={!target}
           warning={gate.warning}
@@ -79,8 +91,8 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
           onClose={close}
         >
           {target
-            ? <p>It posts to its groups from its next run.{cronEnabled === false ? ` ${NO_CRON_NOTE}` : ""}</p>
-            : <p>It stops posting from its next run, until it is turned back on. Its groups, copy and pictures stay as they are. A run already under way finishes.</p>}
+            ? <p>{TURN_ON_BODY}{cronEnabled === false ? ` ${NO_CRON_NOTE}` : ""}</p>
+            : <p>{TURN_OFF_BODY}</p>}
         </ConfirmDialog>
       ) : null}
     </section>

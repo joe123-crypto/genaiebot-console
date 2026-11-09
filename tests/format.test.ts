@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  campaignLabel,
   campaignTitle,
   clockLabel,
   confirmLabel,
@@ -17,6 +18,18 @@ describe("campaignTitle", () => {
 
   it("keeps acronym slugs upper case", () => {
     expect(campaignTitle("cv")).toBe("CV");
+  });
+});
+
+describe("campaignLabel", () => {
+  it("calls a manifest campaign by the title made from its slug", () => {
+    expect(campaignLabel({ slug: "borehole-drilling", name: "borehole-drilling-promo", source: "git" }))
+      .toBe("Borehole Drilling");
+  });
+
+  it("calls a console-created campaign by the name the operator gave it", () => {
+    expect(campaignLabel({ slug: "spring-sale-2026", name: "Spring sale", source: "console" }))
+      .toBe("Spring sale");
   });
 });
 

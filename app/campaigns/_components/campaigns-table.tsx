@@ -7,6 +7,7 @@ import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
 import { CampaignThumb } from "@/app/campaigns/_components/campaign-images";
+import { CampaignRowActions } from "@/app/campaigns/_components/campaign-row-actions";
 import {
   CAMPAIGN_FILTER_KEYS,
   CAMPAIGN_STATUS_LABEL,
@@ -20,7 +21,8 @@ import {
   type CampaignFilter,
   type CampaignStatusChoice,
 } from "@/src/domains/campaign-filter";
-import { campaignOffLabel, campaignTitle, plural, slotLabel } from "@/src/lib/format";
+import { campaignLabel, campaignOffLabel, plural, slotLabel } from "@/src/lib/format";
+import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
 import type { Campaign } from "@/src/lib/types";
 
 type Props = {
@@ -29,13 +31,26 @@ type Props = {
   campaigns: Campaign[];
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: CampaignFilter;
+  /** `WRITES_ENABLED` reads an unprefixed environment variable, so it is false
+   *  in a browser bundle. The server page has to hand it over. */
+  writesEnabled?: boolean;
+  /** Whether the bot will take the campaign switch, and why not when it will
+   *  not. Defaulting to denied means a caller that forgets these can only ever
+   *  make the table more read-only, never less. */
+  switchGate?: WriteGate;
+  /** Why the delete button is switched off, in the bot's own words where it
+   *  has any. See `campaignDeleteReason`. */
+  deleteReason?: string;
 };
 
 const STATUSES: CampaignStatusChoice[] = ["all", "running", "off", "failing", "no-groups"];
 
-const COLUMNS = 6;
+const NO_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
 
-export function CampaignsTable({ campaigns, initialFilter }: Props) {
+export function CampaignsTable({
+  campaigns, initialFilter, writesEnabled = false,
+  switchGate = NO_WRITES, deleteReason = READ_ONLY_REASON,
+}: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
   // while already here is applied, the sixty-second refresh is not.
@@ -46,6 +61,7 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
 
   const visible = filterCampaigns(campaigns, filter);
   const unfiltered = isDefaultCampaignFilter(filter);
+  const columns = writesEnabled ? 7 : 6;
 
   function set(key: keyof CampaignFilter, value: string) {
     setFilter((current) => ({ ...current, [key]: value }));
@@ -135,6 +151,7 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
               <th scope="col">Line</th>
               <th scope="col">Ref</th>
               <th scope="col">Copy</th>
+              {writesEnabled ? <th scope="col">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -155,9 +172,9 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
                     <Link
                       className="campaign-preview-link"
                       href={`/campaigns/${campaign.slug}`}
-                      aria-label={`Preview ${campaign.source === "console" ? campaign.name : campaignTitle(campaign.slug)}`}
+                      aria-label={`Preview ${campaignLabel(campaign)}`}
                     >
-                      {campaign.source === "console" ? campaign.name : campaignTitle(campaign.slug)}
+                      {campaignLabel(campaign)}
                     </Link>
                   </div>
                   <div className="cell-mono">{campaign.source === "console" ? campaign.slug : campaign.name}</div>
@@ -217,11 +234,23 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
                     </span>
                   </div>
                 </td>
+                {writesEnabled ? (
+                  <td className="cell-actions">
+                    <CampaignRowActions
+                      slug={campaign.slug}
+                      title={campaignLabel(campaign)}
+                      storeEnabled={campaign.storeEnabled ?? campaign.enabled}
+                      cronEnabled={campaign.cronEnabled}
+                      gate={switchGate}
+                      deleteReason={deleteReason}
+                    />
+                  </td>
+                ) : null}
               </tr>
             ))}
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={COLUMNS}>
+                <td colSpan={columns}>
                   <div className="empty">No campaign matches these filters.</div>
                 </td>
               </tr>

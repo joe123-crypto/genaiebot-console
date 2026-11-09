@@ -3,7 +3,11 @@
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const { setEnabled } = vi.hoisted(() => ({ setEnabled: vi.fn() }));
+vi.mock("@/app/campaigns/actions", () => ({ setCampaignEnabledAction: setEnabled }));
+
 import { CampaignsTable } from "@/app/campaigns/_components/campaigns-table";
+import { CAMPAIGN_DELETE_NOT_BUILT } from "@/src/lib/write-capabilities";
 import { DEFAULT_CAMPAIGN_FILTER } from "@/src/domains/campaign-filter";
 import type { Campaign } from "@/src/lib/types";
 
@@ -45,7 +49,7 @@ const campaigns = [borehole, lighting, cv];
 
 const props = { campaigns, initialFilter: DEFAULT_CAMPAIGN_FILTER };
 
-function mount(overrides: Partial<typeof props> = {}) {
+function mount(overrides: Partial<Parameters<typeof CampaignsTable>[0]> = {}) {
   return render(createElement(CampaignsTable, { ...props, ...overrides }));
 }
 
@@ -301,5 +305,60 @@ describe("a link followed while already on the page", () => {
     );
     expect(titles()).toEqual(["Borehole Drilling", "Industrial Lighting", "Fresh Ads"]);
     expect(count()).toBe("Showing 3 of 4 campaigns");
+  });
+});
+
+describe("row actions", () => {
+  const armed = {
+    writesEnabled: true,
+    switchGate: { allowed: true } as const,
+    deleteReason: CAMPAIGN_DELETE_NOT_BUILT,
+  };
+
+  it("leaves the table alone when the console cannot write", () => {
+    mount();
+    expect(screen.queryByRole("columnheader", { name: "Actions" })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /^Turn (on|off) / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Delete / })).toHaveLength(0);
+  });
+
+  it("gives every row a switch and a delete when writes are armed", () => {
+    mount(armed);
+    expect(screen.getByRole("columnheader", { name: "Actions" })).toBeTruthy();
+    // CV is the switched-off one, so its switch offers the other direction.
+    expect(screen.getByRole("button", { name: "Turn off Borehole Drilling" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Turn on CV" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Delete / })).toHaveLength(3);
+  });
+
+  it("names a console-created campaign the way its row does", () => {
+    mount({
+      ...armed,
+      campaigns: [campaign({ slug: "spring-sale-2026", name: "Spring sale", source: "console" })],
+    });
+    expect(screen.getByRole("link", { name: "Preview Spring sale" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Turn off Spring sale" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete Spring sale" })).toBeTruthy();
+  });
+
+  it("shows the delete switched off, with the reason it was given", () => {
+    mount({ ...armed, deleteReason: "The bot does not delete campaigns." });
+    const button = screen.getByRole("button", { name: "Delete CV" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("The bot does not delete campaigns.");
+  });
+
+  it("spans the actions column when nothing matches the filter", () => {
+    mount(armed);
+    type("nothing matches this");
+    const [cell] = screen.getAllByRole("cell");
+    expect(cell.getAttribute("colspan")).toBe("7");
+  });
+
+  it("carries the switch's reason when the bot will not take it", () => {
+    mount({ ...armed, switchGate: { allowed: false, reason: "The bot has no write key installed, so it cannot save changes yet." } });
+    const button = screen.getByRole("button", { name: "Turn off Borehole Drilling" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toMatch(/no write key/);
   });
 });
