@@ -41,6 +41,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { g
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [recovery, setRecovery] = useState<NewCampaign | null>(null);
   const [saved, setSaved] = useState<{ slug: string; warning: string } | null>(null);
   const inFlight = useRef(false);
   const requestId = useRef("");
@@ -88,44 +89,66 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { g
     event.preventDefault();
     if (inFlight.current || !gate.allowed || saved) return;
     inFlight.current = true; setBusy(true); setError("");
+    let submittedRequest = recovery;
     try {
-      requestId.current ||= crypto.randomUUID();
-      const images = await Promise.all(pictures.map(describe));
-      const configuredTracking = Object.fromEntries(Object.entries(tracking).filter(([, value]) => value?.trim()).map(([key, value]) => [key, value!.trim()]));
-      const input: NewCampaign = { requestId: requestId.current, slug, name: name.trim(), enabled, captions, images,
-        schedule: { time, timezone: timezone.trim() || "Africa/Harare", weekdays: [...campaignDays] },
-        groups: Object.entries(selected).map(([jid, settings]) => ({ jid, ...settings })),
-        ...(Object.keys(configuredTracking).length ? { tracking: configuredTracking } : {}),
-        ...(comment.trim() ? { comment: comment.trim() } : {}), ...(weeklyComment.trim() ? { weeklyComment: weeklyComment.trim() } : {}),
-        ...(timeout ? { timeoutSeconds: Number(timeout) } : {}), ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
-      const invalid = campaignCreateError(input);
-      if (invalid) { setError(invalid); return; }
-      for (let index = 0; index < pictures.length; index++) {
-        const picture = pictures[index], image = images[index];
-        if (picture.uploaded?.key === image.key) continue;
-        setProgress(`Uploading picture ${index + 1} of ${pictures.length}…`);
-        const signed = await fetch("/api/campaigns/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, image }) });
-        const upload = await signed.json();
-        if (!signed.ok) throw new Error(upload.error || "The upload could not be prepared.");
-        const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: picture.file });
-        // Immutable keys: a previous identical upload is verified by the bot.
-        if (!response.ok && response.status !== 412) throw new Error(`Picture ${index + 1} could not upload. Your form is kept; try again.`);
-        setPictures((current) => current.map((item) => item.id === picture.id ? { ...item, uploaded: image } : item));
+      if (!submittedRequest) {
+        requestId.current ||= crypto.randomUUID();
+        const images = await Promise.all(pictures.map(describe));
+        const configuredTracking = Object.fromEntries(Object.entries(tracking).filter(([, value]) => value?.trim()).map(([key, value]) => [key, value!.trim()]));
+        const input: NewCampaign = { requestId: requestId.current, slug, name: name.trim(), enabled, captions, images,
+          schedule: { time, timezone: timezone.trim() || "Africa/Harare", weekdays: [...campaignDays] },
+          groups: Object.entries(selected).map(([jid, settings]) => ({ jid, ...settings })),
+          ...(Object.keys(configuredTracking).length ? { tracking: configuredTracking } : {}),
+          ...(comment.trim() ? { comment: comment.trim() } : {}), ...(weeklyComment.trim() ? { weeklyComment: weeklyComment.trim() } : {}),
+          ...(timeout ? { timeoutSeconds: Number(timeout) } : {}), ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
+        const invalid = campaignCreateError(input);
+        if (invalid) { setError(invalid); return; }
+        for (let index = 0; index < pictures.length; index++) {
+          const picture = pictures[index], image = images[index];
+          if (picture.uploaded?.key === image.key) continue;
+          setProgress(`Uploading picture ${index + 1} of ${pictures.length}…`);
+          const signed = await fetch("/api/campaigns/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, image }) });
+          const upload = await signed.json();
+          if (!signed.ok) throw new Error(upload.error || "The upload could not be prepared.");
+          const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: picture.file });
+          // Immutable keys: a previous identical upload is verified by the bot.
+          if (!response.ok && response.status !== 412) throw new Error(`Picture ${index + 1} could not upload. Your form is kept; try again.`);
+          setPictures((current) => current.map((item) => item.id === picture.id ? { ...item, uploaded: image } : item));
+        }
+        // Keep an independent snapshot of exactly what reaches the create API.
+        submittedRequest = structuredClone(input);
       }
       setProgress("Saving campaign and schedule…");
-      const result = await createCampaignAction(input);
-      if (!result.ok) { setError(result.detail); return; }
+      const result = await createCampaignAction(submittedRequest);
+      if (!result.ok) {
+        // Once any attempt is uncertain, even a later preflight refusal cannot
+        // prove that the earlier attempt did not land. Keep recovering it.
+        if (recovery || result.outcome !== "not-created") setRecovery(submittedRequest);
+        setError(result.detail);
+        return;
+      }
+      setRecovery(null);
       if (result.scheduling === "pending") {
         setSaved({ slug: result.slug, warning: result.warning || "Campaign saved. Scheduling is pending; the bot will retry automatically." });
-      } else { router.push(`/campaigns/${result.slug}`); router.refresh(); }
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "The outcome is unknown. Retry this form to check the same creation request."); }
+      } else {
+        setSaved({ slug: result.slug, warning: "Campaign saved." });
+        router.push(`/campaigns/${result.slug}`); router.refresh();
+      }
+    } catch (failure) {
+      if (submittedRequest) setRecovery(submittedRequest);
+      setError(failure instanceof Error ? failure.message : "The outcome is unknown. Retry this form to check the same creation request.");
+    }
     finally { inFlight.current = false; setBusy(false); setProgress(""); }
   }
   return <form className="new-campaign" onSubmit={submit}>
     {loadError ? <div className="banner" role="status">Could not refresh groups or save availability. Your form is kept. {loadError}</div> : null}
     {!gate.allowed ? <div className="banner" role="status">{gate.reason} You can prepare the form here.</div> : null}
     {saved ? <div className="banner" role="status">{saved.warning} <Link href={`/campaigns/${saved.slug}`}>Open saved campaign</Link></div> : null}
-    <fieldset disabled={busy || Boolean(saved)} className="campaign-create-fields">
+    {recovery ? <div className="banner" role="status">
+      Creation may already have been saved. Editing is locked until its outcome is confirmed. Retry the original request to check its result.{" "}
+      <Link href={`/campaigns/${recovery.slug}`}>Check campaign</Link>
+    </div> : null}
+    <fieldset disabled={busy || Boolean(saved) || Boolean(recovery)} className="campaign-create-fields">
       <section className="card card-pad"><h2 className="card-title">Campaign</h2>
         <label className="modal-label" htmlFor="campaign-name">Name</label><input className="modal-input" id="campaign-name" required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} />
         {slug ? <p className="card-note">Campaign ID: {slug}</p> : null}
@@ -184,7 +207,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { g
       </details>
     </fieldset>
     {error ? <div className="modal-error" role="alert">{error}</div> : null}
-    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy || !gate.allowed || Boolean(saved)}>{busy ? "Creating…" : "Create campaign"}</button></div>
+    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy || !gate.allowed || Boolean(saved)}>{busy ? "Creating…" : recovery ? "Retry original request" : "Create campaign"}</button></div>
     {progress ? <p role="status">{progress}</p> : null}
   </form>;
 }

@@ -4,7 +4,7 @@ const mock = vi.hoisted(() => ({ writable: true, overview: vi.fn(), groups: vi.f
 vi.mock("@/src/config", async (original) => ({ ...await original<typeof import("@/src/config")>(), get WRITES_ENABLED() { return mock.writable; } }));
 vi.mock("next/cache", () => ({ revalidatePath: mock.revalidate }));
 vi.mock("@/src/lib/bot-client", async (original) => ({ ...await original<typeof import("@/src/lib/bot-client")>(), getOverview: mock.overview, getGroups: mock.groups, createCampaign: mock.create }));
-import { WriteRefusedError } from "@/src/lib/bot-client";
+import { BotUnavailableError, WriteRefusedError } from "@/src/lib/bot-client";
 import { createCampaignAction } from "@/app/campaigns/new/actions";
 beforeEach(() => {
   vi.clearAllMocks(); mock.writable = true;
@@ -18,7 +18,20 @@ describe("create campaign action", () => {
     expect(mock.create).toHaveBeenCalledWith(validCampaign()); expect(mock.revalidate).toHaveBeenCalledWith("/schedule");
   });
   it("refuses read-only mode before reads", async () => { mock.writable = false; expect((await createCampaignAction(validCampaign())).ok).toBe(false); expect(mock.overview).not.toHaveBeenCalled(); });
-  it("shows the bot's transactional membership refusal", async () => { mock.create.mockRejectedValue(new WriteRefusedError("Group is no longer active", [], 409)); expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, detail: "Group is no longer active" }); });
+  it("shows the bot's transactional membership refusal", async () => { mock.create.mockRejectedValue(new WriteRefusedError("Group is no longer active", [], 409)); expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, detail: "Group is no longer active", outcome: "not-created" }); });
   it("refuses older bots", async () => { mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, fields: {}, delete: [] } }); expect((await createCampaignAction(validCampaign())).ok).toBe(false); expect(mock.create).not.toHaveBeenCalled(); });
   it("reports a saved campaign with pending scheduling as saved", async () => { mock.create.mockResolvedValue({ slug: "demo", scheduling: "pending", warning: "retrying" }); expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: true, scheduling: "pending" }); });
+  it("classifies a failed preflight read as no creation attempt", async () => {
+    mock.overview.mockRejectedValue(new BotUnavailableError("Overview unavailable"));
+    expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, outcome: "not-created" });
+    expect(mock.create).not.toHaveBeenCalled();
+  });
+  it("classifies a lost creation response as unknown", async () => {
+    mock.create.mockRejectedValue(new BotUnavailableError("Response timed out"));
+    expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, outcome: "unknown" });
+  });
+  it("treats a service failure after submission as possibly committed", async () => {
+    mock.create.mockRejectedValue(new WriteRefusedError("Firestore unavailable", [], 503));
+    expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, outcome: "unknown" });
+  });
 });

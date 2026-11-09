@@ -18,7 +18,11 @@ export type NewCampaign = {
   timeoutSeconds?: number; failureAlertTo?: string;
 };
 export type CreateCampaignResult = { slug: string; scheduling: "ready" | "pending"; warning?: string };
-export type CreateCampaignOutcome = ({ ok: true } & CreateCampaignResult) | { ok: false; detail: string };
+export type CreateCampaignOutcome = ({ ok: true } & CreateCampaignResult) | {
+  ok: false; detail: string;
+  /** Unknown outcomes must be recovered using the exact submitted payload. */
+  outcome: "not-created" | "unknown";
+};
 export function campaignSlug(name: string) {
   const slug = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64).replace(/-$/, "");
