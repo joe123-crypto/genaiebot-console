@@ -155,20 +155,31 @@ function PictureSource({ indexed, missing, adAssets, assetDir }: {
       instead.{assetDir ? <> The files are in <span className="cell-mono">{assetDir}</span>.</> : null}
     </p>;
   }
+  // A mirrored list is real pictures from a stale catalogue, which is neither
+  // "this is the index" nor "the index could not be read" — saying either one
+  // alone would be wrong, so it gets its own sentence.
+  const mirrored = adAssets.source === "mirror";
   return <>
     <p className="card-note">
-      {indexed > 0
-        ? <>Pictures are served from the bot&rsquo;s asset index — the bucket its images were
-            moved to, named in Firestore.</>
-        : <>The bot&rsquo;s asset index lists no picture for this campaign, so tiles name their
-            file instead.</>}
+      {indexed === 0
+        ? <>The bot&rsquo;s asset index lists no picture for this campaign, so tiles name their
+            file instead.</>
+        : mirrored
+          ? <>Pictures are the set committed at the bot&rsquo;s last deploy. It could not reach
+              the live index, so a picture changed since then would not show here.</>
+          : <>Pictures are served from the bot&rsquo;s asset index — the bucket its images were
+              moved to, named in Firestore.</>}
       {missing > 0 && indexed > 0
         ? <> {plural(missing, "picture")} below {missing === 1 ? "is" : "are"} declared by the
             campaign but absent from the index, so {missing === 1 ? "it has" : "they have"} no
             preview.</>
         : null}
     </p>
-    {adAssets.note ? <p className="card-note">The index could not be read: {adAssets.note}</p> : null}
+    {adAssets.note
+      ? <p className="card-note">
+          {mirrored ? "Why the live index was not read" : "The index could not be read"}: {adAssets.note}
+        </p>
+      : null}
     {adAssets.mode !== "r2" ? (
       <p className="card-note">
         The bot still attaches the copy baked into its container

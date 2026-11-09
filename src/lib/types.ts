@@ -69,7 +69,11 @@ export type AdAssets = {
    *  container, `r2` the one the index names. They are the same bytes while
    *  the index matches the checkout, which is what `lastCheck` compares. */
   mode: string;
-  source: "firestore" | "snapshot" | null;
+  /** Where the index came from. `mirror` is the copy committed to the bot's
+   *  repository, which it falls back to when Firestore cannot be read and no
+   *  snapshot has been written: deploy-time truth, so an index edited since
+   *  the last deploy is not in it. */
+  source: "firestore" | "snapshot" | "mirror" | null;
   fetchedAt: string | null;
   /** Why there are no pictures, when there are none. Shown verbatim: it is the
    *  bot's own account of what it could not read. */
