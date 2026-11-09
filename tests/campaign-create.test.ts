@@ -30,6 +30,23 @@ describe("campaign creation", () => {
     expect(canCreateCampaign(true, { ...writes, affectsProduction: false }).allowed).toBe(false);
     expect(canCreateCampaign(true, { ...writes, campaignCreation: { ...writes.campaignCreation, scheduling: false } }).allowed).toBe(false);
   });
+  it("identifies missing image configuration on an updated bot", () => {
+    const writes = { enabled: true, affectsProduction: true, fields: {}, delete: [], campaignCreation: { create: true, images: false, scheduling: true } };
+    const gate = canCreateCampaign(true, writes);
+    expect(gate.allowed).toBe(false);
+    if (gate.allowed) throw new Error("Expected image configuration to block creation");
+    expect(gate.reason).toContain("GENAIE_AD_ASSETS_SOURCE=r2");
+    expect(gate.reason).toContain("GENAIE_AD_ASSETS_BASE_URL");
+    expect(gate.reason).not.toContain("Deploy the companion bot");
+  });
+  it("keeps the upgrade explanation when creation or scheduling support is missing", () => {
+    for (const support of [undefined, { create: false, images: false, scheduling: true }, { create: true, images: false, scheduling: false }]) {
+      const gate = canCreateCampaign(true, { enabled: true, affectsProduction: true, fields: {}, delete: [], campaignCreation: support });
+      expect(gate.allowed).toBe(false);
+      if (gate.allowed) throw new Error("Expected missing bot support to block creation");
+      expect(gate.reason).toContain("Deploy the companion bot");
+    }
+  });
   it("uses normalized schedule time and excludes days without an occurrence", () => {
     const overview = { campaigns: [{ ...campaign, scheduleMinutes: 600 }, { ...campaign, slug: "off-day", scheduleMinutes: null }] } as unknown as Overview;
     expect(daySlots(overview).map((slot) => slot.time)).toEqual(["10:00"]);

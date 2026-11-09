@@ -78,6 +78,7 @@ export function canCreateCampaign(consoleWrites: boolean, writes: WriteCapabilit
   if (!gate.allowed) return gate;
   if (!writes?.affectsProduction) return { allowed: false, reason: "Campaign creation requires the bot to use live Firestore configuration." };
   const support = writes.campaignCreation;
-  if (!support?.create || !support.images || !support.scheduling) return { allowed: false, reason: "Deploy the companion bot update for campaign creation, pictures and scheduling." };
+  if (!support?.create || !support.scheduling) return { allowed: false, reason: "Deploy the companion bot update for campaign creation, pictures and scheduling." };
+  if (!support.images) return { allowed: false, reason: "Campaign creation requires R2 images on the bot. Set GENAIE_AD_ASSETS_SOURCE=r2 and GENAIE_AD_ASSETS_BASE_URL to the bucket's public HTTPS URL." };
   return { allowed: true };
 }
