@@ -357,8 +357,11 @@ is optional and collapsed: timezone (Africa/Harare by default), tracking and
 contact overrides, per-group weekdays/pauses, notes, timeout and failure alerts.
 Leaving it untouched creates a complete campaign with working defaults. Picture
 previews can be reordered; one picture rotates per scheduled run. The form
-survives automatic refreshes and errors. A saved campaign with an unverified
-schedule is shown as pending while the bot retries automatically.
+survives automatic refreshes and errors. If a save outcome is unknown, editing
+locks and **Retry original request** checks the exact submitted payload;
+**Check campaign** opens its detail page if creation already completed. Initial
+definite refusals and upload failures keep the form editable. A saved campaign
+with an unverified schedule is shown as pending while the bot retries automatically.
 
 Creation requires the companion bot patch, live Firestore/R2 modes, console
 writes enabled and server-side R2 upload configuration. Older bots show a clear
