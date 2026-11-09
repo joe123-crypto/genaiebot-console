@@ -22,7 +22,7 @@ import type {
   WriteResult,
 } from "@/src/lib/types";
 import { canWrite } from "@/src/lib/write-capabilities";
-import { deduplicateRead, withReadSlot } from "@/src/lib/remote-read";
+import { deduplicateRead, invalidateRemoteReads, withReadSlot } from "@/src/lib/remote-read";
 import { botErrorMetadata, type BotErrorMetadata } from "@/src/lib/bot-error-metadata";
 
 const run = promisify(execFile);
@@ -302,7 +302,13 @@ export function checkShape(route: string, payload: unknown): void {
     }
     return;
   }
-  if (route.startsWith("preview/") && typeof body?.enabled !== "boolean") {
+  if ((route.startsWith("campaign/") || route.startsWith("campaign-state/")) && body?.campaign !== null) {
+    requireCampaigns([body?.campaign], route);
+  }
+  if (route.startsWith("campaign-groups/") || route.startsWith("group/") || route.startsWith("groups-by-id/")) {
+    if (!Array.isArray(body?.groups) || !Array.isArray(body?.disabledPromos)) staleBridge(`${route} omits groups`);
+  }
+  if ((route.startsWith("preview/") || route.startsWith("captions/")) && typeof body?.enabled !== "boolean") {
     staleBridge(`${route} omits enabled`);
   }
 }
@@ -321,7 +327,7 @@ function localArgs(command: string, date?: string, slug?: string) {
 }
 
 async function read<T>(command: string, date?: string, slug?: string, fresh = false): Promise<T> {
-  const route = slug ? `${command}/${slug}` : command;
+  const route = slug ? `${command}/${encodeURIComponent(slug)}` : command;
   const params = query(date);
   const args = localArgs(command, date, slug);
   if (fresh) {
@@ -340,6 +346,33 @@ async function read<T>(command: string, date?: string, slug?: string, fresh = fa
 
 type ReadOptions = { fresh?: boolean };
 
+function unsupportedRead(error: unknown): boolean {
+  return error instanceof BotUnavailableError && (error.status === 404 ||
+    (BOT_SOURCE === "local" && error.detail.includes("command must be one of")));
+}
+
+export type ConfigurationPayload = Pick<Overview, "capSettings" | "accounts" | "writes">;
+export async function getConfiguration({ fresh = false }: ReadOptions = {}): Promise<ConfigurationPayload> {
+  try { return await read<ConfigurationPayload>("settings", undefined, undefined, fresh); }
+  catch (error) { if (!unsupportedRead(error)) throw error; return getOverview(undefined, { fresh }); }
+}
+
+export async function getCapabilities(): Promise<WriteCapabilities | undefined> {
+  try { return (await read<{ writes?: WriteCapabilities }>("capabilities")).writes; }
+  catch (error) { if (!unsupportedRead(error)) throw error; return (await getOverview()).writes; }
+}
+
+export type NavigationPayload = { campaignTotal: number; groupsNeedingReview: number };
+export async function getNavigation(): Promise<NavigationPayload> {
+  try { return await read<NavigationPayload>("navigation"); }
+  catch (error) {
+    if (!unsupportedRead(error)) throw error;
+    const overview = await getOverview();
+    return { campaignTotal: overview.campaignTotal,
+      groupsNeedingReview: Math.max(0, overview.groupTotal - (overview.groupsByStatus.active ?? 0)) };
+  }
+}
+
 export function getOverview(date?: string, { fresh = false }: ReadOptions = {}) {
   return read<Overview>("overview", date, undefined, fresh);
 }
@@ -347,8 +380,30 @@ export function getOverview(date?: string, { fresh = false }: ReadOptions = {}) 
 /** The whole payload, not just the rows. `disabledPromos` is what lets a screen
  *  say WHY a configured campaign is not posting today, instead of implying the
  *  daily cap held it back. */
-export async function getGroups(date?: string, { fresh = false }: ReadOptions = {}) {
-  return read<GroupsPayload>("groups", date, undefined, fresh);
+export async function getGroups(date?: string, { fresh = false, campaign, jid, jids }: ReadOptions & { campaign?: string; jid?: string; jids?: string[] } = {}) {
+  if (jids?.length === 0) return { date: date ?? "", groups: [], disabledPromos: [] } satisfies GroupsPayload;
+  try {
+    return await read<GroupsPayload>(jids ? "groups-by-id" : jid ? "group" : campaign ? "campaign-groups" : "groups", date, jids?.join(",") ?? jid ?? campaign, fresh);
+  } catch (error) {
+    if ((!jid && !campaign && !jids) || !unsupportedRead(error)) throw error;
+    const result = await read<GroupsPayload>("groups", date, undefined, fresh);
+    return { ...result, groups: result.groups.filter((group) => jids ? jids.includes(group.jid) : jid ? group.jid === jid :
+      group.promos.includes(campaign!) || campaign! in group.weekly) };
+  }
+}
+
+export async function getCampaignPayload(slug: string, date?: string, { fresh = false }: ReadOptions = {}) {
+  try { return await read<{ date: string; adAssets?: AdAssets; campaign: Campaign | null }>("campaign", date, slug, fresh); }
+  catch (error) {
+    if (!unsupportedRead(error)) throw error;
+    const result = await getCampaignsPayload(date, { fresh });
+    return { date: result.date, adAssets: result.adAssets, campaign: result.campaigns.find((entry) => entry.slug === slug) ?? null };
+  }
+}
+
+export async function getCampaignState(slug: string, { fresh = false }: ReadOptions = {}): Promise<Pick<Campaign, "slug" | "enabled" | "storeEnabled" | "cronEnabled"> | null> {
+  try { return (await read<{ campaign: Campaign | null }>("campaign-state", undefined, slug, fresh)).campaign; }
+  catch (error) { if (!unsupportedRead(error)) throw error; return (await getCampaignPayload(slug, undefined, { fresh })).campaign; }
 }
 
 /** The whole campaigns payload. `adAssets` says where the pictures are stored
@@ -362,8 +417,12 @@ export async function getCampaigns(date?: string, options: ReadOptions = {}) {
   return (await getCampaignsPayload(date, options)).campaigns;
 }
 
-export function getCampaignPreview(slug: string, date?: string, { fresh = false }: ReadOptions = {}) {
-  return read<CampaignPreview>("preview", date, slug, fresh);
+export async function getCampaignPreview(slug: string, date?: string, { fresh = false, captionsOnly = false }: ReadOptions & { captionsOnly?: boolean } = {}) {
+  try { return await read<CampaignPreview>(captionsOnly ? "captions" : "preview", date, slug, fresh); }
+  catch (error) {
+    if (!captionsOnly || !unsupportedRead(error)) throw error;
+    return read<CampaignPreview>("preview", date, slug, fresh);
+  }
 }
 
 /* ------------------------------------------------------------------ writes --
@@ -392,6 +451,13 @@ export class WritesDisabledError extends Error {
 }
 
 async function writeRemote<T>(route: string, body: unknown): Promise<T> {
+  const mutation = !(body && typeof body === "object" && "dryRun" in body && body.dryRun === true);
+  if (mutation) invalidateRemoteReads();
+  try { return await sendWriteRemote<T>(route, body); }
+  finally { if (mutation) invalidateRemoteReads(); }
+}
+
+async function sendWriteRemote<T>(route: string, body: unknown): Promise<T> {
   const url = `${BOT_WRITE_API_BASE_URL.replace(/\/$/, "")}/internal/console/${route}`;
   const headers: Record<string, string> = {
     accept: "application/json",
@@ -423,7 +489,7 @@ async function writeRemote<T>(route: string, body: unknown): Promise<T> {
   const text = await response.text();
   if (!response.ok) {
     throw refusalFrom(text) ?? new BotUnavailableError(
-      reportedError(text) || `${route} returned ${response.status}`,
+      reportedError(text) || `${route} returned ${response.status}`, response.status,
     );
   }
   return (text ? JSON.parse(text) : {}) as T;
@@ -464,6 +530,23 @@ export async function writeConfig(
 }
 
 type WriteOptions = { by: string; dryRun?: boolean };
+
+export type GroupBatchChange = { id: string; fields: Record<string, unknown>; expected?: Record<string, unknown> };
+/** null means an older bot refused the unknown route before executing a write. */
+export async function updateGroupBatch(changes: GroupBatchChange[], { by }: { by: string }): Promise<{ done: string[]; changed: number } | null> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  try {
+    const body = { changes, actor: by };
+    return WRITE_SOURCE === "remote"
+      ? await writeRemote("config/batch/groups", body)
+      : await runBridge(WRITE_BRIDGE, [], { collection: "groups", ...body });
+  } catch (error) {
+    if (error instanceof BotUnavailableError && (error.status === 404 ||
+      (WRITE_SOURCE === "local" && error instanceof WriteRefusedError && error.status === 400 &&
+       error.detail === "request is missing id"))) return null;
+    throw error;
+  }
+}
 
 export function updateGroup(jid: string, fields: Record<string, unknown>,
                             { by, dryRun }: WriteOptions) {

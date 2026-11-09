@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
-import { getOverview, updateSettings } from "@/src/lib/bot-client";
+import { getConfiguration, updateSettings } from "@/src/lib/bot-client";
 import {
   capChange, capDraftProblems, storedSettings, type CapChange, type CapDraft,
 } from "@/src/domains/cap-settings";
@@ -30,7 +30,7 @@ export async function saveCapSettingsAction(draft: CapDraft, expected: Required<
   }
 
   try {
-    const overview = await getOverview(undefined, { fresh: true });
+    const overview = await getConfiguration({ fresh: true });
     const settings = overview.capSettings;
     if (!settings) {
       return { ok: false, detail: "This bot predates editing cap settings from the console." };

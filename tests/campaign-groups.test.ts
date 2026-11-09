@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apply } = vi.hoisted(() => ({ apply: vi.fn() }));
@@ -60,6 +60,30 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); apply.mockReset(); });
 
 describe("campaign group drafts", () => {
+  it("loads the full directory only when Add groups is opened", async () => {
+    const loadChoices = vi.fn().mockResolvedValue(known);
+    render(createElement(CampaignGroups, { ...props, knownGroups: known.slice(0, 2), loadChoices }));
+    expect(loadChoices).not.toHaveBeenCalled();
+    click("Add groups");
+    await screen.findByRole("dialog");
+    expect(loadChoices).toHaveBeenCalledWith();
+    expect(screen.getByRole("checkbox", { name: /New Market/ })).toBeTruthy();
+  });
+
+  it("checks saved draft additions by ID and retains them while the check is pending", async () => {
+    const saved = { version: 1, added: ["3@g.us"], removed: [], paused: [] };
+    localStorage.setItem(groupDraftKey(props.slug), JSON.stringify(saved));
+    let finish!: (groups: KnownCampaignGroup[]) => void;
+    const loadChoices = vi.fn(() => new Promise<KnownCampaignGroup[]>((resolve) => { finish = resolve; }));
+    render(createElement(CampaignGroups, { ...props, knownGroups: known.slice(0, 2), loadChoices }));
+    expect(loadChoices).toHaveBeenCalledWith(["3@g.us"]);
+    expect(stored().added).toEqual(["3@g.us"]);
+    await act(async () => { finish([known[2]]); });
+    await waitFor(() => expect(screen.getByText("New Market")).toBeTruthy());
+    expect(stored().added).toEqual(["3@g.us"]);
+    expect(loadChoices).toHaveBeenCalledTimes(1);
+  });
+
   it.each([null, { version: 1, added: [], removed: [], paused: ["1@g.us"] }])(
     "does not overwrite another tab’s newer draft before its storage event arrives (initial: %j)", (initial) => {
       if (initial) localStorage.setItem(groupDraftKey(props.slug), JSON.stringify(initial));

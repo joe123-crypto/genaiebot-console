@@ -108,7 +108,7 @@ async function loadActions(writes = true) {
       constructor(detail: string, problems: string[]) { super(detail); this.problems = problems; }
     }
     return {
-      updateGroup, getGroups, getOverview, deleteGroup: vi.fn(),
+      updateGroup, getGroups, getOverview, getConfiguration: getOverview, deleteGroup: vi.fn(),
       BotUnavailableError, WriteRefusedError,
       WritesDisabledError: class extends Error { detail = "writes off"; },
     };
@@ -143,7 +143,7 @@ describe("updateGroupAction", () => {
     expect(await updateGroupAction(JID, { status: "on-hold", daily_cap: "2" },
                                    { status: "active", daily_cap: null })).toEqual({ ok: true });
     expect(updateGroup).toHaveBeenCalledWith(JID, { status: "on-hold", daily_cap: 2 }, { by: "Joseph" });
-    expect(getGroups).toHaveBeenCalledWith(undefined, { fresh: true });
+    expect(getGroups).toHaveBeenCalledWith(undefined, { fresh: true, jid: group().jid });
     expect(revalidate.mock.calls).toEqual([["/groups"], ["/"]]);
   });
 

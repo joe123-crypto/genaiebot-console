@@ -126,6 +126,7 @@ describe("planAssignmentWrites", () => {
 /* -------------------------------------------------------------- actions -- */
 
 const updateGroup = vi.fn();
+const updateGroupBatch = vi.fn();
 const updateCampaign = vi.fn();
 const getGroups = vi.fn();
 const getCampaigns = vi.fn();
@@ -134,6 +135,7 @@ const revalidate = vi.fn();
 async function loadActions(writes = true) {
   vi.resetModules();
   for (const fn of [updateGroup, updateCampaign, getGroups, getCampaigns, revalidate]) fn.mockReset();
+  updateGroupBatch.mockReset().mockResolvedValue(null);
   vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => {
@@ -146,8 +148,9 @@ async function loadActions(writes = true) {
       constructor(detail: string, problems: string[]) { super(detail); this.problems = problems; }
     }
     return {
-      updateGroup, updateCampaign, getGroups, getCampaigns,
+      updateGroup, updateGroupBatch, updateCampaign, getGroups, getCampaigns,
       getCampaignPreview: vi.fn(), updateCampaignCaptions: vi.fn(),
+      getCampaignState: async (id: string) => (await getCampaigns()).find((row: { slug: string }) => row.slug === id) ?? null,
       BotUnavailableError, WriteRefusedError,
       WritesDisabledError: class extends Error { detail = "writes off"; },
     };
@@ -176,6 +179,27 @@ function writes() {
 describe("applyCampaignGroupsAction", () => {
   const STAGED = draft({ added: ["1@g.us"], removed: ["2@g.us"] });
   const GROUPS = [group("1@g.us"), group("2@g.us", { promos: [SLUG] })];
+
+  it("uses one atomic batch with expected values and only reads drafted group IDs", async () => {
+    const { applyCampaignGroupsAction } = await loadActions();
+    getGroups.mockResolvedValue({ groups: GROUPS });
+    updateGroupBatch.mockResolvedValue({ done: ["1@g.us", "2@g.us"], changed: 2 });
+    expect(await applyCampaignGroupsAction(SLUG, STAGED)).toEqual({ ok: true, done: ["1@g.us", "2@g.us"] });
+    expect(getGroups).toHaveBeenCalledWith(undefined, { fresh: true, jids: ["1@g.us", "2@g.us"] });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
+      { id: "1@g.us", fields: { promos: [SLUG] }, expected: { promos: [] } },
+      { id: "2@g.us", fields: { promos: [] }, expected: { promos: [SLUG] } },
+    ], { by: "Joseph" });
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to individual writes after an uncertain batch outcome", async () => {
+    const { applyCampaignGroupsAction, refused } = await loadActions();
+    getGroups.mockResolvedValue({ groups: GROUPS });
+    updateGroupBatch.mockRejectedValue(refused("outcome unknown", []));
+    expect(await applyCampaignGroupsAction(SLUG, STAGED)).toMatchObject({ ok: false, done: [], detail: "outcome unknown" });
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
 
   it("is guarded while writes are off", async () => {
     const { applyCampaignGroupsAction } = await loadActions(false);

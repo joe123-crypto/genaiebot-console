@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ campaigns: vi.fn(), preview: vi.fn(), groups: vi.fn(), overview: vi.fn(), notFound: vi.fn() }));
 vi.mock("@/src/lib/bot-client", () => ({
   BotUnavailableError: class extends Error { constructor(public detail: string, public status?: number) { super(detail); } },
-  getCampaignsPayload: mocks.campaigns, getCampaignPreview: mocks.preview, getGroups: mocks.groups,
+  getCampaignPayload: mocks.campaigns, getCapabilities: mocks.overview, getCampaignPreview: mocks.preview, getGroups: mocks.groups,
   captionSaveUnavailableReason: () => undefined, imageWritesUnavailableReason: () => "Unavailable",
 }));
 vi.mock("@/src/domains/console", () => ({ loadOverview: mocks.overview }));
@@ -17,11 +17,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.campaigns.mockResolvedValue({
     date: "2026-11-09", adAssets: { mode: "r2", source: "firestore", fetchedAt: "x", note: null },
-    campaigns: [{ slug: "borehole", enabled: true }],
+    campaign: { slug: "borehole", enabled: true },
   });
   mocks.preview.mockResolvedValue({ groups: [], captions: [] });
   mocks.groups.mockResolvedValue({ groups: [] });
-  mocks.overview.mockResolvedValue({ ok: true, overview: { writes: { enabled: true } } });
+  mocks.overview.mockResolvedValue({ enabled: true });
   mocks.notFound.mockImplementation(() => { throw new Error("404"); });
 });
 
@@ -36,7 +36,7 @@ describe("campaign resource loading", () => {
   });
 
   it("keeps readable campaign data when capabilities cannot load", async () => {
-    mocks.overview.mockResolvedValue({ ok: false, detail: "overview unavailable" });
+    mocks.overview.mockRejectedValue(new BotUnavailableError("overview unavailable"));
     const result = await loadCampaignDetail("borehole");
     expect(result.writes).toEqual({ ok: false, error: { detail: "overview unavailable" } });
     expect(result.campaign).toMatchObject({ ok: true, receivedAt: expect.any(String) });
@@ -51,7 +51,7 @@ describe("campaign resource loading", () => {
   });
 
   it("returns 404 only when a successful list confirms the campaign is absent", async () => {
-    mocks.campaigns.mockResolvedValue({ date: "2026-11-09", campaigns: [] });
+    mocks.campaigns.mockResolvedValue({ date: "2026-11-09", campaign: null });
     await expect(CampaignPage({ params: Promise.resolve({ slug: "borehole" }) })).rejects.toThrow("404");
     expect(mocks.notFound).toHaveBeenCalledOnce();
   });
@@ -68,7 +68,7 @@ describe("campaign resource loading", () => {
   });
 
   it("survives a bot too old to say where its pictures are", async () => {
-    mocks.campaigns.mockResolvedValue({ date: "2026-11-09", campaigns: [{ slug: "borehole" }] });
+    mocks.campaigns.mockResolvedValue({ date: "2026-11-09", campaign: { slug: "borehole" } });
     const result = await loadCampaignDetail("borehole");
     expect(result.adAssets).toBeNull();
     expect(result.campaign.ok).toBe(true);

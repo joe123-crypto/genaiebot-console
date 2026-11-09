@@ -1,5 +1,4 @@
-import { loadOverview } from "@/src/domains/console";
-import { BotUnavailableError, getCampaignPreview, getCampaignsPayload, getGroups } from "@/src/lib/bot-client";
+import { BotUnavailableError, getCampaignPreview, getCampaignPayload, getCapabilities, getGroups } from "@/src/lib/bot-client";
 import type { ReadResource } from "@/src/lib/read-resource";
 import type { AdAssets, Campaign, CampaignPreview, GroupsPayload, WriteCapabilities } from "@/src/lib/types";
 
@@ -13,6 +12,7 @@ export type CampaignDetail = {
   preview: ReadResource<CampaignPreview>;
   membership: ReadResource<GroupsPayload>;
   writes: ReadResource<WriteCapabilities | null>;
+  membershipScoped?: boolean;
 };
 
 async function resource<T>(read: () => Promise<T>): Promise<ReadResource<T>> {
@@ -27,18 +27,14 @@ async function resource<T>(read: () => Promise<T>): Promise<ReadResource<T>> {
 
 export async function loadCampaignDetail(slug: string): Promise<CampaignDetail> {
   const [campaigns, preview, membership, writes] = await Promise.all([
-    resource(() => getCampaignsPayload()),
+    resource(() => getCampaignPayload(slug)),
     resource(() => getCampaignPreview(slug)),
-    resource(() => getGroups()),
-    resource(async () => {
-      const result = await loadOverview();
-      if (!result.ok) throw new BotUnavailableError(result.detail, result.status);
-      return result.overview.writes ?? null;
-    }),
+    resource(() => getGroups(undefined, { campaign: slug })),
+    resource(async () => (await getCapabilities()) ?? null),
   ]);
   const campaign: ReadResource<Campaign | null> = campaigns.ok
-    ? { ...campaigns, data: campaigns.data.campaigns.find((entry) => entry.slug === slug) ?? null }
+    ? { ...campaigns, data: campaigns.data.campaign }
     : campaigns;
   return { campaign, adAssets: campaigns.ok ? campaigns.data.adAssets ?? null : null,
-           preview, membership, writes };
+           preview, membership, writes, membershipScoped: true };
 }

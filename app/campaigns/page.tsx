@@ -49,7 +49,7 @@ export default async function CampaignsPage({
   const writes = loaded.ok ? loaded.overview.writes : undefined;
 
   return (
-    <Shell>
+    <Shell overview={loaded.ok ? loaded.overview : undefined}>
       <PageHead title="Campaigns" subtitle={subtitle(campaigns)} actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
 
       {campaigns.length === 0 ? (

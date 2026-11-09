@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { ConsoleShell } from "@/app/_components/console-shell";
-import { attentionItems, loadOverview, needsDecisionCount } from "@/src/domains/console";
+import { attentionItems, needsDecisionCount, type Attention } from "@/src/domains/console";
+import { BotUnavailableError, getNavigation } from "@/src/lib/bot-client";
+import type { Overview } from "@/src/lib/types";
 import { OPERATOR_NAME } from "@/src/config";
 
 /**
@@ -8,19 +10,22 @@ import { OPERATOR_NAME } from "@/src/config";
  * from the bot, so when it is unreachable the frame still renders and the page
  * itself shows why.
  */
-export async function Shell({ children }: { children: ReactNode }) {
-  const result = await loadOverview();
-
-  const counts = result.ok
-    ? {
-        campaigns: result.overview.campaignTotal,
-        groupsNeedingReview: needsDecisionCount(result.overview),
-      }
-    : {};
-
-  const attention = result.ok
-    ? attentionItems(result.overview)
-    : [{ label: "Cannot reach the bot" }];
+export async function Shell({ children, overview }: { children: ReactNode; overview?: Overview }) {
+  let counts: { campaigns?: number; groupsNeedingReview?: number } = {};
+  let attention: Attention[] = [];
+  if (overview) {
+    counts = { campaigns: overview.campaignTotal, groupsNeedingReview: needsDecisionCount(overview) };
+    attention = attentionItems(overview);
+  } else {
+    try {
+      const summary = await getNavigation();
+      counts = { campaigns: summary.campaignTotal, groupsNeedingReview: summary.groupsNeedingReview };
+      if (summary.groupsNeedingReview) attention = [{ label: "Groups needing a decision", detail: String(summary.groupsNeedingReview), href: "/groups?status=needs-decision" }];
+    } catch (error) {
+      if (!(error instanceof BotUnavailableError)) throw error;
+      attention = [{ label: "Cannot reach the bot" }];
+    }
+  }
 
   return (
     <ConsoleShell

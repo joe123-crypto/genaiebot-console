@@ -1,0 +1,2123 @@
+diff --git a/README.md b/README.md
+index 2ca4b15..1137df8 100644
+--- a/README.md
++++ b/README.md
+@@ -1144,6 +1144,43 @@ railway ssh -- python3 /home/joseph/.openclaw/deploy/patch-openclaw-config.py --
+ The template remains the tracked source of truth for what the config *should* be;
+ `openclaw.json` and its backup/pre-update variants are gitignored.
+ 
++## Firestore read efficiency
++
++Console displays cache validated configuration for 180 seconds across bridge
++processes. Each campaign scope has its own cache and bounded outage snapshot;
++scoped reads never overwrite a full snapshot. Failures suppress background
++retries for at least 300 seconds, respecting longer upstream retry delays.
++Mutation markers and API generations fence older in-flight reads after writes.
++Save checks use `fresh=1` (`--fresh-config` locally) and fail if a live read fails.
++
++Campaign runs and previews query only groups assigned through `promos`, which
++also covers valid weekly and paused assignments. The same shared rules and cap
++calculation apply. Existing group edits/deletions use point reads plus shared
++validation dependencies. Campaign creation reads only its selected groups;
++switch and caption save checks read one campaign document. Settings reads omit groups and campaign definitions;
++capability reports read no database documents. Sidebar counters use Firestore
++aggregations. The overview does not fetch the picture index. Image resolution
++queries only assets belonging to the current campaign.
++
++New authenticated read routes are `campaign/<slug>`, `campaign-groups/<slug>`,
++`campaign-state/<slug>`, `captions/<slug>`, `group/<jid>`, `groups-by-id/<comma-separated-jids>`, `settings`,
++`capabilities`, and `navigation`. Existing routes remain available. Group IDs
++retain both modern and legacy WhatsApp formats.
++
++`POST /internal/console/config/batch/groups` accepts `changes` (1..100 existing
++groups, each with `id`, `fields`, and optional expected values for changed
++fields), `actor`, and optional `dryRun`. It reads shared rules once inside a
++Firestore transaction, validates every change, and commits changed groups and
++per-group audits together. A refusal, conflict or dry run writes nothing;
++unchanged groups have no audit/write. An uncertain commit is reported as unknown
++and must be read back before manually retrying.
++
++Schedule reconciliation queries only `kind=console` campaigns every five
++minutes, increasing the delay after failures up to one hour. Campaign edits wake
++it immediately. Already-current schedule statuses are not rewritten. Broad
++configuration reads remain for complete list/overview screens, creation rank
++allocation, and validation of shared changes that can affect other groups.
++
+ ## Operator Console API
+ 
+ `deploy/railway/console-api.py` serves the operator console's read model over
+diff --git a/deploy/railway/console-api.py b/deploy/railway/console-api.py
+index cde913d..042d667 100755
+--- a/deploy/railway/console-api.py
++++ b/deploy/railway/console-api.py
+@@ -69,6 +69,7 @@ import hmac
+ import json
+ import os
+ import re
++import secrets
+ import subprocess
+ import sys
+ import threading
+@@ -81,7 +82,7 @@ sys.path.insert(0, os.path.dirname(__file__))
+ from console_accounts import AccountControls
+ 
+ PREFIX = "/internal/console/"
+-DATA_ROUTES = ("overview", "groups", "campaigns")
++DATA_ROUTES = ("overview", "groups", "campaigns", "capabilities", "settings", "navigation")
+ SLUG_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,63}\Z")
+ DATE_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+ 
+@@ -139,6 +140,15 @@ class Bridge:
+         self.lock = threading.Lock()
+         self.cache = {}
+         self.runs = 0
++        self.generation = secrets.token_hex(16)
++        self.config_generation = self.generation
++
++    def invalidate(self, config=True):
++        with self.lock:
++            self.cache.clear()
++            self.generation = secrets.token_hex(16)
++            if config:
++                self.config_generation = self.generation
+ 
+     def cached(self, key):
+         now = time.monotonic()
+@@ -152,9 +162,11 @@ class Bridge:
+                 return None
+             return body
+ 
+-    def store(self, key, body):
++    def store(self, key, body, generation=None):
+         now = time.monotonic()
+         with self.lock:
++            if generation is not None and generation != self.generation:
++                return
+             # Drop whatever expired before trimming, so a burst of distinct
+             # requests cannot evict live entries while dead ones sit there.
+             for stale in [k for k, (expires, _) in self.cache.items() if expires <= now]:
+@@ -166,7 +178,8 @@ class Bridge:
+     def run(self, args):
+         """Return (status, body). Never raises, and never leaks stderr."""
+         key = tuple(args)
+-        body = self.cached(key)
++        fresh = "--fresh-config" in args
++        body = None if fresh else self.cached(key)
+         if body is not None:
+             return 200, body
+ 
+@@ -174,15 +187,18 @@ class Bridge:
+             log("busy: refused %s" % " ".join(args))
+             return 503, b'{"error": "busy"}'
+         try:
+-            body = self.cached(key)
++            body = None if fresh else self.cached(key)
+             if body is not None:
+                 return 200, body
+             with self.lock:
+                 self.runs += 1
++                generation = self.generation
++                config_generation = self.config_generation
+             try:
+                 done = subprocess.run(
+                     [sys.executable, "-I", self.path] + list(args),
+                     capture_output=True, timeout=self.timeout,
++                    env={**os.environ, "GENAIE_CONSOLE_CONFIG_GENERATION": config_generation},
+                 )
+             except subprocess.TimeoutExpired:
+                 log("timeout after %ss: %s" % (self.timeout, " ".join(args)))
+@@ -192,7 +208,8 @@ class Bridge:
+                 return 502, b'{"error": "bridge unavailable"}'
+ 
+             if done.returncode == 0:
+-                self.store(key, done.stdout)
++                if not fresh:
++                    self.store(key, done.stdout, generation)
+                 return 200, done.stdout
+ 
+             # Something the caller named does not exist. That is their error,
+@@ -287,8 +304,8 @@ def curated(stdout):
+         payload = json.loads(stdout or b"")
+     except ValueError:
+         return False
+-    return isinstance(payload, dict) and set(payload) == {"error"} \
+-        and isinstance(payload["error"], str)
++    return isinstance(payload, dict) and set(payload) <= {"error", "code", "upstreamStatus", "quota", "retryAfterSeconds"} \
++        and isinstance(payload.get("error"), str)
+ 
+ 
+ class Handler(BaseHTTPRequestHandler):
+@@ -371,8 +388,7 @@ class Handler(BaseHTTPRequestHandler):
+         # configuration reads even on failure, and never replay it automatically.
+         if method == "POST":
+             bridge = self.server.console["bridge"]
+-            with bridge.lock:
+-                bridge.cache.clear()
++            bridge.invalidate(config=False)
+         self.send_any(status, body, with_body)
+ 
+     def config_request(self, route, query, with_body=True):
+@@ -399,30 +415,33 @@ class Handler(BaseHTTPRequestHandler):
+         # The route is settled before the body is looked at, so "no such
+         # document" and "that change is not a change" cannot answer alike.
+         parts = route.split("/")
++        is_batch = route == "config/batch/groups"
+         try:
+             doc_id = unquote(parts[2]) if len(parts) == 3 else ""
+         except UnicodeError:
+             doc_id = ""
+-        if not (len(parts) == 3 and parts[0] == "config"
++        if not is_batch and not (len(parts) == 3 and parts[0] == "config"
+                 and parts[1] in CONFIG_COLLECTIONS and DOC_ID_RE.match(doc_id)):
+             self.send_any(404, b'{"error":"not found"}', with_body)
+             return
+ 
+         try:
+             size = int(self.headers.get("Content-Length") or "0")
+-            if self.headers.get("Transfer-Encoding") or not 0 < size <= 2048:
++            if self.headers.get("Transfer-Encoding") or not 0 < size <= (64 * 1024 if is_batch else 2048):
+                 raise ValueError()
+             if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
+                 raise ValueError()
+             payload = json.loads(self.rfile.read(size))
+             if not isinstance(payload, dict):
+                 raise ValueError()
+-            if set(payload) - {"fields", "delete", "reason", "actor", "dryRun"}:
++            if set(payload) - ({"changes", "actor", "dryRun"} if is_batch else {"fields", "delete", "reason", "actor", "dryRun"}):
+                 raise ValueError()
+             # Exactly one operation: change named fields, or delete the document.
+             # Which collections may be deleted, and what a legal reason is, is
+             # console-write's call; this only refuses a request with no clear verb.
+-            if ("fields" in payload) == ("delete" in payload):
++            if is_batch and (not isinstance(payload.get("changes"), list) or not 1 <= len(payload["changes"]) <= 100):
++                raise ValueError()
++            if not is_batch and ("fields" in payload) == ("delete" in payload):
+                 raise ValueError()
+             if "fields" in payload and not isinstance(payload["fields"], dict):
+                 raise ValueError()
+@@ -432,17 +451,21 @@ class Handler(BaseHTTPRequestHandler):
+             self.send_any(400, b'{"error":"Invalid config change."}', True)
+             return
+ 
+-        request = {"collection": parts[1], "id": doc_id}
+-        for name in ("fields", "delete", "reason", "actor", "dryRun"):
++        request = {"collection": "groups"} if is_batch else {"collection": parts[1], "id": doc_id}
++        for name in ("fields", "delete", "reason", "actor", "dryRun", "changes"):
+             if name in payload:
+                 request[name] = payload[name]
+ 
++        bridge = self.server.console["bridge"]
++        if not request.get("dryRun"):
++            bridge.invalidate()
+         status, body = self.server.console["writes"].run(request)
+         # A change the caller can see means every cached read of it is wrong. An
+         # uncertain write may still have landed, so clear on failure too.
+-        bridge = self.server.console["bridge"]
+-        with bridge.lock:
+-            bridge.cache.clear()
++        bridge.invalidate(config=not request.get("dryRun"))
++        if (status == 200 and request["collection"] == "campaigns" and not request.get("dryRun")
++                and self.server.console.get("reconcileWake") is not None):
++            self.server.console["reconcileWake"].set()
+         self.send_any(status, body, with_body)
+ 
+     def campaign_create_request(self, split):
+@@ -467,10 +490,10 @@ class Handler(BaseHTTPRequestHandler):
+         except (ValueError, TypeError):
+             self.send_any(400, b'{"error":"Invalid campaign creation request."}', True)
+             return
+-        status, body = self.server.console["campaigns"].run(request)
+         bridge = self.server.console["bridge"]
+-        with bridge.lock:
+-            bridge.cache.clear()
++        bridge.invalidate()
++        status, body = self.server.console["campaigns"].run(request)
++        bridge.invalidate()
+         self.send_any(status, body, True)
+ 
+     def do_POST(self):
+@@ -551,15 +574,21 @@ def plan(route, query):
+     parts = route.split("/")
+     if parts[0] in DATA_ROUTES and len(parts) == 1:
+         args = [parts[0]]
+-    elif parts[0] == "preview" and len(parts) == 2:
++    elif parts[0] in ("preview", "captions", "campaign", "campaign-state", "campaign-groups") and len(parts) == 2:
+         if not SLUG_RE.match(parts[1]):
+             raise Refuse(404, "not found")
+-        args = ["preview", parts[1]]
++        args = [parts[0], parts[1]]
++    elif parts[0] in ("group", "groups-by-id") and len(parts) == 2:
++        jid = unquote(parts[1])
++        jids = jid.split(",") if parts[0] == "groups-by-id" else [jid]
++        if not 1 <= len(jids) <= 100 or any(not DOC_ID_RE.match(item) or not item.endswith("@g.us") for item in jids):
++            raise Refuse(404, "not found")
++        args = [parts[0], jid]
+     else:
+         raise Refuse(404, "not found")
+ 
+     fields = parse_qs(query, keep_blank_values=True)
+-    unknown = sorted(set(fields) - {"date"})
++    unknown = sorted(set(fields) - {"date", "fresh"})
+     if unknown:
+         raise Refuse(400, "unsupported query parameter: %s" % ", ".join(unknown))
+     dates = fields.get("date") or []
+@@ -569,6 +598,10 @@ def plan(route, query):
+         if not DATE_RE.match(dates[0]):
+             raise Refuse(400, "date wants YYYY-MM-DD")
+         args += ["--date", dates[0]]
++    if "fresh" in fields:
++        if fields["fresh"] != ["1"]:
++            raise Refuse(400, "fresh must be given once with value 1")
++        args += ["--fresh-config"]
+     return args
+ 
+ 
+@@ -626,22 +659,31 @@ def main():
+         log("warning: bridge not found at %s; requests will answer 502" % bridge_path)
+     # A durable Firestore desired schedule is retried after API/gateway restart.
+     stop_reconcile = threading.Event()
++    wake_reconcile = threading.Event()
++    server.console["reconcileWake"] = wake_reconcile
+     def reconcile_campaigns():
++        delay = 300
+         while not stop_reconcile.is_set():
++            wake_reconcile.clear()
+             if (os.environ.get(WRITE_KEY_VAR) or "").strip():
+-                status, _ = server.console["campaigns"].run({"reconcile": True})
+-                bridge = server.console["bridge"]
+-                with bridge.lock:
+-                    bridge.cache.clear()
+-                if status != 200:
++                status, body = server.console["campaigns"].run({"reconcile": True})
++                try:
++                    pending = json.loads(body).get("pending", 0)
++                except (ValueError, AttributeError):
++                    pending = 1
++                if status != 200 or pending:
+                     log("campaign schedule reconciliation is pending")
+-            stop_reconcile.wait(60)
++                    delay = min(delay * 2, 3600)
++                else:
++                    delay = 300
++            wake_reconcile.wait(delay)
+     threading.Thread(target=reconcile_campaigns, daemon=True).start()
+     log("listening on %s:%d, bridge %s" % (bind, port, bridge_path))
+     try:
+         server.serve_forever()
+     finally:
+         stop_reconcile.set()
++        wake_reconcile.set()
+         server.server_close()
+     return 0
+ 
+diff --git a/deploy/test_console_api.py b/deploy/test_console_api.py
+index 6662fe6..d26ce0c 100644
+--- a/deploy/test_console_api.py
++++ b/deploy/test_console_api.py
+@@ -341,6 +341,50 @@ class ConsoleApiTests(unittest.TestCase):
+ 
+     # -- unit level -------------------------------------------------------
+ 
++    def test_fresh_query_bypasses_response_cache_every_time(self):
++        base = self.serve()
++        self.fetch(base + "/groups")
++        for _ in range(2):
++            status, body, _ = self.fetch(base + "/groups?date=2026-11-09&fresh=1")
++            self.assertEqual(status, 200)
++            self.assertEqual(json.loads(body)["args"], ["groups", "--date", "2026-11-09", "--fresh-config"])
++        self.assertEqual(self.server.console["bridge"].runs, 3)
++        self.fetch(base + "/groups")
++        self.assertEqual(self.server.console["bridge"].runs, 3)
++        for query in ("fresh=0", "fresh=", "fresh=1&fresh=1"):
++            self.assertEqual(self.fetch(base + "/groups?" + query)[0], 400)
++
++    def test_an_older_inflight_read_cannot_repopulate_invalidated_response_cache(self):
++        bridge = API.Bridge(self.echo)
++        started, finish = threading.Event(), threading.Event()
++        def run(*args, **kw):
++            started.set()
++            self.assertTrue(finish.wait(5))
++            return type("Result", (), {"returncode": 0, "stdout": b"old"})()
++        with unittest.mock.patch.object(API.subprocess, "run", run):
++            reader = threading.Thread(target=bridge.run, args=(["groups"],))
++            reader.start()
++            self.assertTrue(started.wait(5))
++            bridge.invalidate()
++            finish.set()
++            reader.join(5)
++        self.assertEqual(bridge.cache, {})
++
++    def test_response_only_invalidation_preserves_config_generation(self):
++        bridge = API.Bridge(self.echo)
++        generation = bridge.config_generation
++        bridge.invalidate(config=False)
++        self.assertEqual(bridge.config_generation, generation)
++        bridge.invalidate()
++        self.assertNotEqual(bridge.config_generation, generation)
++
++    def test_structured_config_error_survives_the_bridge(self):
++        source = 'import json,sys\njson.dump({"error":"config unavailable","code":"config_rate_limited","upstreamStatus":429,"quota":"daily"},sys.stdout)\nsys.exit(1)'
++        base = self.serve(bridge=self.write("limited.py", source))
++        status, body, _ = self.fetch(base + "/groups?fresh=1")
++        self.assertEqual(status, 502)
++        self.assertEqual(json.loads(body)["code"], "config_rate_limited")
++
+     def test_curated_only_accepts_a_lone_string_error(self):
+         self.assertTrue(API.curated(b'{"error": "nope"}'))
+         for payload in (b"", b"not json", b"[]", b'{"error": 1}',
+diff --git a/deploy/test_console_write.py b/deploy/test_console_write.py
+index 79c35b0..26f964d 100644
+--- a/deploy/test_console_write.py
++++ b/deploy/test_console_write.py
+@@ -20,6 +20,7 @@ import io
+ import json
+ import os
+ import sys
++import tempfile
+ import unittest
+ import unittest.mock
+ from pathlib import Path
+@@ -153,12 +154,17 @@ class WriteEnvironment(unittest.TestCase):
+ 
+ 
+ class Payload(unittest.TestCase):
++    def setUp(self):
++        directory = tempfile.TemporaryDirectory()
++        self.addCleanup(directory.cleanup)
++        self.state_dir = directory.name
++
+     def run_main(self, raw=None, env=None, **patch):
+         out = io.StringIO()
+         with unittest.mock.patch.object(operator_writer, "write", **patch):
+             code = CW.main([], stdin=io.BytesIO(
+                 raw if raw is not None else json.dumps(REQUEST).encode()),
+-                stdout=out, env=env or {CW.WRITE_KEY_VAR: KEY})
++                stdout=out, env={"GENAIE_FIRESTORE_DIR": self.state_dir, **(env or {CW.WRITE_KEY_VAR: KEY})})
+         return code, json.loads(out.getvalue())
+ 
+     def test_an_applied_change_is_reported_with_a_status_the_api_accepts(self):
+@@ -194,6 +200,38 @@ class Payload(unittest.TestCase):
+         self.assertEqual(code, 1)
+         self.assertEqual(payload["status"], 409)
+ 
++    def test_rate_limit_metadata_and_cache_invalidation_survive_a_refusal(self):
++        code, payload = self.run_main(side_effect=operator_config.ConfigUnavailable(
++            "firestore.googleapis.com answered HTTP 429", upstreamStatus=429,
++            code="config_rate_limited", quota="daily", retryAfterSeconds=300))
++        self.assertEqual((code, payload["status"]), (1, 503))
++        self.assertEqual(payload["code"], "config_rate_limited")
++        self.assertEqual(payload["upstreamStatus"], 429)
++        self.assertEqual(payload["quota"], "daily")
++        self.assertEqual(payload["retryAfterSeconds"], 300)
++        self.assertTrue(os.path.exists(os.path.join(self.state_dir, "console-config-epoch.json")))
++
++    def test_a_tier_save_is_visible_immediately_despite_a_warm_display_cache(self):
++        import console_config
++        from test_operator_writer import WritableFirestore
++        from test_operator_config import JID_A
++        fake = WritableFirestore(page_size=300)
++        env = {"GENAIE_FIRESTORE_DIR": self.state_dir, "GCP_SERVICE_ACCOUNT_B64": creds_b64(),
++               CW.WRITE_KEY_VAR: KEY}
++        with unittest.mock.patch.object(operator_config.urllib.request, "urlopen", fake), \
++                unittest.mock.patch.object(operator_config, "node_signer", return_value="jwt"):
++            before = console_config.load(env)
++            tier = before["membership"]["groups"][JID_A].get("activity", "normal")
++            next_tier = "busy" if tier != "busy" else "quiet"
++            out = io.StringIO()
++            request = {"collection": "groups", "id": JID_A, "fields": {"activity": next_tier}}
++            code = CW.main([], stdin=io.BytesIO(json.dumps(request).encode()), stdout=out, env=env)
++            self.assertEqual(code, 0, out.getvalue())
++            after = console_config.load(env)
++        self.assertEqual(after["membership"]["groups"][JID_A]["activity"], next_tier)
++        self.assertEqual(len(fake.commits), 1)
++        self.assertEqual(len(fake.commits[0]["writes"]), 2)  # group and audit
++
+     def test_every_answer_carries_ok_and_status_that_agree(self):
+         # The API refuses to pass on an answer whose ok and status disagree.
+         for kwargs in ({"return_value": {"change": "unchanged", "fields": [],
+diff --git a/workspace/bin/console-campaign-create b/workspace/bin/console-campaign-create
+index 794dd26..fb9e6fe 100755
+--- a/workspace/bin/console-campaign-create
++++ b/workspace/bin/console-campaign-create
+@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+ import console_campaigns as campaigns
+ import operator_config
+ import operator_writer
++import console_config
+ 
+ 
+ def main():
+@@ -23,14 +24,15 @@ def main():
+         loader.exec_module(bridge)
+         store = campaigns.Store(bridge.write_env())
+         if data == {"reconcile": True}:
+-            campaigns.reconcile_all(store)
+-            result = {}
++            result = {"pending": campaigns.reconcile_all(store)}
+         else:
+-            result = campaigns.create(data, store)
++            with console_config.mutation():
++                result = campaigns.create(data, store)
+         print(json.dumps({"ok": True, "status": 200, **result}))
+         return 0
+     except (operator_writer.WriteRefused, operator_config.ConfigUnavailable, ValueError) as ex:
+-        print(json.dumps({"ok": False, "status": getattr(ex, "status", 503), "error": str(ex), "problems": []}))
++        print(json.dumps({"ok": False, "status": getattr(ex, "status", 503), "error": str(ex),
++                          "problems": [], **getattr(ex, "metadata", {})}))
+         return 1
+ 
+ 
+diff --git a/workspace/bin/console-read b/workspace/bin/console-read
+index af0edc7..37e32c1 100755
+--- a/workspace/bin/console-read
++++ b/workspace/bin/console-read
+@@ -26,6 +26,7 @@ Std-lib only.
+ 
+ import importlib.util
+ import io
++from functools import partial
+ import json
+ import os
+ import sys
+@@ -45,6 +46,7 @@ import config_shadow  # noqa: E402
+ import promo_config  # noqa: E402
+ import console_campaigns
+ import operator_config  # noqa: E402
++import console_config  # noqa: E402
+ import operator_writer  # noqa: E402
+ import group_discovery  # noqa: E402
+ import group_metrics  # noqa: E402
+@@ -59,7 +61,7 @@ MANIFEST_CANDIDATES = (
+     "/usr/local/lib/genaie/promo-crons.json",
+ )
+ 
+-COMMANDS = ("overview", "groups", "campaigns", "preview")
++COMMANDS = ("overview", "groups", "campaigns", "preview", "captions", "campaign", "campaign-state", "campaign-groups", "capabilities", "settings", "navigation", "group", "groups-by-id")
+ 
+ 
+ # Exit codes, so a caller can tell "you asked for something that is not here"
+@@ -72,6 +74,12 @@ class BridgeError(Exception):
+     """A condition the caller should see as a message, not a traceback."""
+ 
+ 
++class ConfigReadError(BridgeError):
++    def __init__(self, message, metadata):
++        super().__init__(message)
++        self.metadata = metadata
++
++
+ class NotFound(BridgeError):
+     """The caller named something that does not exist."""
+ 
+@@ -88,6 +96,8 @@ def parse_args(args):
+             if not rest:
+                 raise BridgeError("--date wants YYYY-MM-DD")
+             day = rest.pop(0)
++        elif token == "--fresh-config":
++            pass  # main supplies the strict loader; not a positional argument.
+         elif token.startswith("--"):
+             raise BridgeError("unknown option %r" % token)
+         elif command is None:
+@@ -98,8 +108,8 @@ def parse_args(args):
+             raise BridgeError("unexpected argument %r" % token)
+     if command not in COMMANDS:
+         raise BridgeError("command must be one of %s" % ", ".join(COMMANDS))
+-    if command == "preview" and not slug:
+-        raise BridgeError("preview needs a campaign slug")
++    if command in ("preview", "captions", "campaign", "campaign-state", "campaign-groups", "group", "groups-by-id") and not slug:
++        raise BridgeError("%s needs a campaign slug" % command)
+     return command, slug, day
+ 
+ 
+@@ -113,6 +123,11 @@ def parse_day(raw):
+ 
+ 
+ _RESOLVED = {}
++_FRESH_CONFIG = False
++_CAMPAIGN_SCOPE = None
++_INCLUDE_GROUPS = True
++_INCLUDE_CAMPAIGNS = True
++_GROUP_IDS = None
+ 
+ 
+ def resolved():
+@@ -127,9 +142,13 @@ def resolved():
+         notes = io.StringIO()
+         try:
+             _RESOLVED["config"] = promo_config.resolve(None, membership_path=MEMBERSHIP,
+-                                                       err=notes)
+-        except operator_config.ConfigUnavailable as exc:
+-            raise BridgeError("no operator config to read: %s" % exc) from exc
++                                                       err=notes, config_loader=partial(
++                                                       console_config.load, fresh=_FRESH_CONFIG,
++                                                       campaign=_CAMPAIGN_SCOPE, group_ids=_GROUP_IDS,
++                                                       include_groups=_INCLUDE_GROUPS, include_campaigns=_INCLUDE_CAMPAIGNS))
++        except (operator_config.ConfigUnavailable, operator_config.ConfigInvalid) as exc:
++            raise ConfigReadError("no operator config to read: %s" % exc,
++                                  getattr(exc, "metadata", {})) from exc
+     return _RESOLVED["config"]
+ 
+ 
+@@ -334,7 +353,10 @@ def asset_catalogue():
+     if "value" not in _CATALOGUE:
+         notes = io.StringIO()
+         try:
+-            _CATALOGUE["value"] = ad_assets.catalogue(log=lambda m: notes.write(m))
++            env = dict(os.environ)
++            if _CAMPAIGN_SCOPE:
++                env["GENAIE_AD_ASSETS_SCOPE"] = _CAMPAIGN_SCOPE
++            _CATALOGUE["value"] = ad_assets.catalogue(env, log=lambda m: notes.write(m))
+         except Exception as exc:  # the campaigns screen outranks its pictures
+             _CATALOGUE["value"] = {"campaigns": {}, "source": None,
+                                    "fetchedAt": None,
+@@ -359,13 +381,15 @@ def asset_entries(slug):
+             for entry in asset_catalogue()["campaigns"].get(slug, [])]
+ 
+ 
+-def campaign_records(day):
++def campaign_records(day, only_slug=None, include_assets=True):
+     m = membership()
+     declared = manifest()
+ 
+     records = []
+     for entry in declared.get("promos", []):
+         slug = entry["slug"]
++        if only_slug is not None and slug != only_slug:
++            continue
+         script = script_path(entry["script"])
+         captions = []
+         tracking = {}
+@@ -416,7 +440,7 @@ def campaign_records(day):
+                 "captions": captions,
+                 "tracking": tracking,
+                 "images": images,
+-                "assets": asset_entries(slug),
++                "assets": asset_entries(slug) if include_assets else [],
+                 "targetCount": len(all_jids),
+                 "weeklyCount": len(weekly_jids),
+                 "accounts": per_account,
+@@ -424,7 +448,7 @@ def campaign_records(day):
+                 "error": error,
+             }
+         )
+-    records.extend(console_campaigns.records(m, day, resolved().get("storeSwitches")))
++    records.extend(console_campaigns.records(m, day, resolved().get("storeSwitches"), only_slug=only_slug))
+     records.sort(key=lambda row: (row["hour"] if row["hour"] is not None else 99, row["minute"] or 0))
+     return records
+ 
+@@ -620,7 +644,7 @@ def overview(day):
+         status = entry.get("status", "active")
+         by_status[status] = by_status.get(status, 0) + 1
+ 
+-    campaigns = campaign_records(day)
++    campaigns = campaign_records(day, include_assets=False)
+     rows = group_rows(day)
+     planned = sum(len(row["allowedToday"]) for row in rows if row["status"] == "active")
+ 
+@@ -636,34 +660,136 @@ def overview(day):
+         "writes": write_capabilities(),
+         "configSource": config_source_status(),
+         "configShadow": config_shadow_status(),
+-        "adAssets": ad_assets_status(),
+         "campaigns": campaigns,
+     }
+ 
+ 
++def campaign_edit_state(slug, captions_only=False):
++    """Save-time checks need one campaign document, no targeting or cap data."""
++    declared = next((row for row in manifest().get("promos", []) if row["slug"] == slug), None)
++    doc = None
++    if promo_config.mode()[0] == promo_config.FIRESTORE:
++        import urllib.request
++        import time
++        try:
++            creds = operator_config.credentials()
++            if creds is None:
++                raise operator_config.ConfigUnavailable("no service account configured")
++            token = operator_config.access_token(creds,
++                operator_config.token_cache_path(operator_config.state_dir()),
++                opener=urllib.request.urlopen, signer=operator_config.node_signer,
++                now=time.time, sleep=time.sleep)
++            doc = operator_config.get_document(creds["project_id"], "campaigns", slug, token,
++                opener=urllib.request.urlopen, sleep=time.sleep)
++        except operator_config.ConfigUnavailable as exc:
++            raise ConfigReadError("campaign config unavailable: %s" % exc, exc.metadata) from exc
++        except ValueError as exc:
++            raise BridgeError("campaign config cannot be decoded") from exc
++        switch = (doc or {}).get("enabled", True)
++        store_on = switch if isinstance(switch, bool) else False
++    else:
++        store_on = store_enabled(declared) if declared else False
++    if declared is None and (not doc or doc.get("kind") != "console"):
++        if captions_only:
++            raise NotFound("unknown campaign %r" % slug)
++        return {"campaign": None}
++    cron_on = promo_enabled(declared) if declared else doc.get("scheduleStatus") == "ready"
++    enabled = store_on and cron_on
++    if not captions_only:
++        return {"campaign": {"slug": slug, "enabled": enabled, "storeEnabled": store_on, "cronEnabled": cron_on}}
++    try:
++        if doc is not None and "captions" in doc:
++            captions = operator_config.validate_captions(doc["captions"])
++        elif declared:
++            module = import_campaign(script_path(declared["script"]))
++            captions = [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))]
++        else:
++            raise BridgeError("campaign has no caption variants")
++    except operator_config.ConfigInvalid as exc:
++        raise BridgeError(str(exc)) from exc
++    return {"slug": slug, "enabled": enabled, "captions": captions, "tracking": {}, "groups": []}
++
++
++def navigation():
++    """Sidebar counts do not need group records, previews, captions or assets."""
++    def read():
++        if promo_config.mode()[0] != promo_config.FIRESTORE:
++            m = membership()
++            review = sum(1 for row in m["groups"].values() if promo_membership.status_of(row) != "active")
++            total = len(manifest().get("promos", [])) + len(console_campaigns.definitions(m))
++        else:
++            import urllib.request
++            import time
++            creds = operator_config.credentials()
++            if creds is None:
++                raise operator_config.ConfigUnavailable("no service account configured")
++            token = operator_config.access_token(creds,
++                operator_config.token_cache_path(operator_config.state_dir()),
++                opener=urllib.request.urlopen, signer=operator_config.node_signer,
++                now=time.time, sleep=time.sleep)
++            def count(collection, field, value):
++                return operator_config.count_documents(creds["project_id"], collection, token,
++                    where={"fieldFilter": {"field": {"fieldPath": field}, "op": "IN" if isinstance(value, list) else "EQUAL",
++                                           "value": operator_config.encode_value(value)}},
++                    opener=urllib.request.urlopen, sleep=time.sleep)
++            review = count("groups", "status", ["on-hold", "admin-only", "not-a-member"])
++            total = len(manifest().get("promos", [])) + count("campaigns", "kind", "console")
++        return {"campaignTotal": total, "groupsNeedingReview": review}
++    try:
++        return console_config.cached_summary("navigation", read)
++    except operator_config.ConfigUnavailable as exc:
++        raise ConfigReadError("sidebar counts unavailable: %s" % exc, exc.metadata) from exc
++
++
+ def main(argv):
++    global _FRESH_CONFIG, _CAMPAIGN_SCOPE, _INCLUDE_GROUPS, _GROUP_IDS, _INCLUDE_CAMPAIGNS
++    _FRESH_CONFIG = "--fresh-config" in argv
+     try:
+         command, slug, raw_day = parse_args(argv)
++        _CAMPAIGN_SCOPE = slug if command in ("preview", "campaign", "campaign-groups") else None
++        _INCLUDE_GROUPS = command not in ("settings", "captions")
++        _INCLUDE_CAMPAIGNS = command != "settings"
++        _GROUP_IDS = [slug] if command == "group" else slug.split(",") if command == "groups-by-id" else None
+         day = parse_day(raw_day)
+-        if command == "groups":
++        if command == "capabilities":
++            payload = {"writes": write_capabilities()}
++        elif command == "settings":
++            payload = {"capSettings": cap_settings(membership()), "writes": write_capabilities(),
++                       "accounts": accounts(membership())}
++        elif command == "navigation":
++            payload = navigation()
++        elif command == "campaign-state":
++            payload = campaign_edit_state(slug)
++        elif command == "captions":
++            payload = campaign_edit_state(slug, captions_only=True)
++        elif command in ("groups", "campaign-groups", "group", "groups-by-id"):
+             # A group keeps a switched-off campaign in its configured promos, so
+             # the screen needs the off list to say WHY one is not posting today.
+             # Without it a disabled campaign is indistinguishable from one the
+             # daily cap held back.
+             payload = {"date": day.isoformat(),
+                        "disabledPromos": sorted(disabled_promos(manifest(), day)),
+-                       "groups": group_rows(day),
+-                       **group_discovery.read(membership())}
++                       "groups": [row for row in group_rows(day)
++                                  if (_GROUP_IDS is None or row["jid"] in _GROUP_IDS)
++                                  and (_CAMPAIGN_SCOPE is None or _CAMPAIGN_SCOPE in row["promos"]
++                                       or _CAMPAIGN_SCOPE in row["weekly"])],
++                       **(group_discovery.read(membership()) if command in ("groups", "group") else {})}
++            if command == "group":
++                payload["discoveredGroups"] = [row for row in payload.get("discoveredGroups", []) if row["jid"] == slug]
+             group_metrics.attach(payload, membership())
+         elif command == "campaigns":
+             payload = {"date": day.isoformat(), "adAssets": ad_assets_status(),
+                        "campaigns": campaign_records(day)}
++        elif command == "campaign":
++            records = campaign_records(day, only_slug=slug)
++            payload = {"date": day.isoformat(), "adAssets": ad_assets_status(),
++                       "campaign": records[0] if records else None}
+         elif command == "preview":
+             payload = preview(slug, day)
+         else:
+             payload = overview(day)
+     except BridgeError as exc:
+-        json.dump({"error": str(exc)}, sys.stdout)
++        json.dump({"error": str(exc), **getattr(exc, "metadata", {})}, sys.stdout)
+         sys.stdout.write("\n")
+         return EXIT_NOT_FOUND if isinstance(exc, NotFound) else EXIT_ERROR
+ 
+diff --git a/workspace/bin/console-write b/workspace/bin/console-write
+index 7de0f01..8535417 100755
+--- a/workspace/bin/console-write
++++ b/workspace/bin/console-write
+@@ -42,6 +42,7 @@ The payload says which; a caller reads ``status``, not the exit code.
+ Std-lib only.
+ """
+ 
++import contextlib
+ import json
+ import os
+ import sys
+@@ -54,6 +55,7 @@ if LIB_DIR not in sys.path:
+ 
+ import operator_config  # noqa: E402
+ import operator_writer  # noqa: E402
++import console_config  # noqa: E402
+ 
+ WRITE_KEY_VAR = "GCP_SERVICE_ACCOUNT_WRITE_B64"
+ # A request is one small object; anything larger is a mistake or an attack.
+@@ -99,6 +101,12 @@ def parse_request(raw):
+         raise operator_writer.WriteRefused("request is not valid JSON: %s" % ex)
+     if not isinstance(request, dict):
+         raise operator_writer.WriteRefused("request must be a JSON object")
++    if "changes" in request:
++        if (set(request) - {"collection", "changes", "actor", "dryRun"}
++                or request.get("collection") != "groups"
++                or not isinstance(request.get("dryRun", False), bool)):
++            raise operator_writer.WriteRefused("invalid group batch request")
++        return request
+     missing = [name for name in REQUIRED if name not in request]
+     if missing:
+         raise operator_writer.WriteRefused("request is missing %s" % ", ".join(missing))
+@@ -140,16 +148,21 @@ def main(argv, stdin=None, stdout=None, env=None):
+     stdout = stdout or sys.stdout
+     try:
+         request = parse_request(stdin.read(MAX_REQUEST_BYTES + 1))
+-        if "delete" in request:
+-            result = operator_writer.delete(
+-                request["collection"], request["id"].strip(), request.get("actor"),
+-                env=write_env(env), reason=request.get("reason"),
+-                dry_run=bool(request.get("dryRun")))
+-        else:
+-            result = operator_writer.write(
+-                request["collection"], request["id"].strip(), request["fields"],
+-                request.get("actor"), env=write_env(env),
+-                dry_run=bool(request.get("dryRun")))
++        guard = contextlib.nullcontext() if request.get("dryRun") else console_config.mutation(env)
++        with guard:
++            if "changes" in request:
++                result = operator_writer.write_group_batch(request["changes"], request.get("actor"),
++                    env=write_env(env), dry_run=bool(request.get("dryRun")))
++            elif "delete" in request:
++                result = operator_writer.delete(
++                    request["collection"], request["id"].strip(), request.get("actor"),
++                    env=write_env(env), reason=request.get("reason"),
++                    dry_run=bool(request.get("dryRun")))
++            else:
++                result = operator_writer.write(
++                    request["collection"], request["id"].strip(), request["fields"],
++                    request.get("actor"), env=write_env(env),
++                    dry_run=bool(request.get("dryRun")))
+     except operator_writer.WriteRefused as ex:
+         payload = {"ok": False, "status": ex.status, "error": str(ex),
+                    "problems": ex.problems}
+@@ -157,7 +170,7 @@ def main(argv, stdin=None, stdout=None, env=None):
+         # A write must never be applied to a guess at the current state.
+         payload = {"ok": False, "status": 503,
+                    "error": "cannot read the current config, so nothing was "
+-                            "changed: %s" % ex, "problems": []}
++                            "changed: %s" % ex, "problems": [], **ex.metadata}
+     except operator_config.ConfigInvalid as ex:
+         payload = {"ok": False, "status": 409,
+                    "error": "the stored config is not readable: %s" % ex,
+diff --git a/workspace/lib/ad_assets.py b/workspace/lib/ad_assets.py
+index bed5b51..9414169 100644
+--- a/workspace/lib/ad_assets.py
++++ b/workspace/lib/ad_assets.py
+@@ -230,6 +230,12 @@ def public_url(entry, env=None):
+ 
+ 
+ def index_path(env=None):
++    env = os.environ if env is None else env
++    slug = env.get("GENAIE_AD_ASSETS_SCOPE")
++    if slug:
++        import hashlib
++        return os.path.join(operator_config.state_dir(env), "asset-scopes",
++                            hashlib.sha256(slug.encode()).hexdigest(), INDEX_FILE)
+     return os.path.join(operator_config.state_dir(env), INDEX_FILE)
+ 
+ 
+@@ -374,9 +380,17 @@ def index(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None)
+             creds, operator_config.token_cache_path(operator_config.state_dir(env)),
+             opener=opener or urllib.request.urlopen,
+             signer=signer or operator_config.node_signer, now=now, sleep=sleep)
+-        rows = operator_config.list_documents(
+-            creds["project_id"], COLLECTION, token,
+-            opener=opener or urllib.request.urlopen, sleep=sleep)
++        slug = env.get("GENAIE_AD_ASSETS_SCOPE")
++        if slug:
++            rows = operator_config.query_documents(
++                creds["project_id"], COLLECTION,
++                {"fieldFilter": {"field": {"fieldPath": "campaign"}, "op": "EQUAL",
++                                 "value": {"stringValue": slug}}}, token,
++                opener=opener or urllib.request.urlopen, sleep=sleep)
++        else:
++            rows = operator_config.list_documents(
++                creds["project_id"], COLLECTION, token,
++                opener=opener or urllib.request.urlopen, sleep=sleep)
+     except (operator_config.ConfigUnavailable, AssetsUnavailable) as ex:
+         log("index unreadable (%s); using the last-known-good snapshot" % ex)
+         return _from_snapshot(env, str(ex), now=now)
+@@ -403,6 +417,10 @@ def _from_snapshot(env, why, now=None):
+     now = now or time.time
+     path = index_path(env)
+     snapshot = operator_config._read_json(path)
++    if not isinstance(snapshot, dict) and (env or {}).get("GENAIE_AD_ASSETS_SCOPE"):
++        original = dict(env)
++        original.pop("GENAIE_AD_ASSETS_SCOPE", None)
++        snapshot = operator_config._read_json(index_path(original))
+     if not isinstance(snapshot, dict) or not isinstance(snapshot.get("campaigns"), dict):
+         raise AssetsUnavailable("the index is unreadable (%s) and there is no snapshot "
+                                 "at %s" % (why, path))
+@@ -416,6 +434,9 @@ def _from_snapshot(env, why, now=None):
+             "%.0f h limit" % (why, age / 3600.0, INDEX_MAX_AGE_SECONDS / 3600.0))
+     campaigns, quarantined = _from_json(snapshot["campaigns"],
+                                         snapshot.get("quarantined"))
++    if (env or {}).get("GENAIE_AD_ASSETS_SCOPE"):
++        slug = env["GENAIE_AD_ASSETS_SCOPE"]
++        campaigns = {slug: campaigns[slug]} if slug in campaigns else {}
+     return {"source": "snapshot", "fetchedAt": snapshot.get("fetchedAt"),
+             "degraded": why, "campaigns": _enabled_only(campaigns),
+             "quarantined": quarantined}
+@@ -782,7 +803,7 @@ def prune(index_, env=None, log=None):
+ def _entries_for(promo_name, env, deadline, log, inject):
+     """``(entries, index_or_None)`` for this campaign, or ``([], None)``."""
+     slug = promo_config.promo_key(promo_name)
+-    found = index(env, log=log, **inject)
++    found = index(dict(env, GENAIE_AD_ASSETS_SCOPE=slug), log=log, **inject)
+     entries = (found.get("campaigns") or {}).get(slug) or []
+     if not entries:
+         # Nothing indexed for this campaign is "not migrated yet", not an error:
+diff --git a/workspace/lib/console_campaigns.py b/workspace/lib/console_campaigns.py
+index e1295ff..d259981 100644
+--- a/workspace/lib/console_campaigns.py
++++ b/workspace/lib/console_campaigns.py
+@@ -172,7 +172,13 @@ class Store:
+         row = self.request("/%s/%s%s" % (collection, urllib.parse.quote(doc_id, safe=""), self.query()), missing=True)
+         return config.decode_fields(row.get("fields", {})) if row else None
+ 
+-    def list(self, collection):
++    def list(self, collection, where=None):
++        if where is not None:
++            body = {"structuredQuery": {"from": [{"collectionId": collection}], "where": where}}
++            if self.transaction:
++                body["transaction"] = self.transaction
++            return [(config.doc_id_of(row["document"]["name"]), row["document"].get("fields") or {})
++                    for row in self.request(":runQuery", body) if "document" in row]
+         page, rows = None, []
+         while True:
+             query = {"pageSize": 1000}
+@@ -225,7 +231,16 @@ def create(data, store, env=None, verify=verify_image, reconcile=None):
+             need(operation.get("digest") == digest, "creation request has changed")
+             store.rollback()
+             return finish(slug, store, reconcile)
+-        raw = {collection: store.list(collection) for collection in config.COLLECTIONS}
++        settings = store.get("settings", config.SETTINGS_DOC)
++        raw = {"settings": [] if settings is None else [(config.SETTINGS_DOC, config.encode_fields(settings))],
++               "lines": store.list("lines"), "campaigns": store.list("campaigns"), "groups": []}
++        for selection in data["groups"]:
++            try:
++                group = store.get("groups", selection["jid"])
++            except ValueError as exc:
++                raise writer.WriteRefused("a selected group cannot be read", status=409) from exc
++            if group is not None:
++                raw["groups"].append((selection["jid"], config.encode_fields(group)))
+         need(slug not in dict(raw["campaigns"]), "a campaign with this ID already exists; choose a different name")
+         declared = promo_config.read_manifest(env) or {}
+         need(not any(row.get("slug") == slug for row in declared.get("promos", [])), "campaign ID is already declared in the bot")
+@@ -347,19 +362,30 @@ def _reconcile_one(slug, store, call):
+ 
+ def mark_status(slug, store, status):
+     # A field mask avoids overwriting caption/switch edits during reconciliation.
+-    store.request(":commit", {"writes": [{"update": {"name": "%s/campaigns/%s" % (store.base, slug),
+-                   "fields": config.encode_fields({"scheduleStatus": status})}, "updateMask": {"fieldPaths": ["scheduleStatus"]},
+-                   "currentDocument": {"exists": True}}]})
++    import console_config
++    current = store.get("campaigns", slug)
++    if not current or current.get("scheduleStatus") == status:
++        return False
++    # Invalidate only when reconciliation actually writes, not every minute.
++    with console_config.mutation():
++        store.request(":commit", {"writes": [{"update": {"name": "%s/campaigns/%s" % (store.base, slug),
++                       "fields": config.encode_fields({"scheduleStatus": status})}, "updateMask": {"fieldPaths": ["scheduleStatus"]},
++                       "currentDocument": {"exists": True}}]})
++    return True
+ 
+ 
+ def reconcile_all(store):
+-    for slug, fields in store.list("campaigns"):
++    failures = 0
++    for slug, fields in store.list("campaigns", where={"fieldFilter": {
++            "field": {"fieldPath": "kind"}, "op": "EQUAL", "value": {"stringValue": "console"}}}):
+         if config.decode_fields(fields).get("kind") == "console":
+             try:
+                 reconcile_one(slug, store)
+             except Exception as ex:
++                failures += 1
+                 mark_status(slug, store, "pending")
+                 sys.stderr.write("[console-campaign] schedule pending for %s: %s\n" % (slug, type(ex).__name__))
++    return failures
+ 
+ 
+ def schedule_occurrence(campaign, day):
+@@ -387,9 +413,11 @@ def definitions(membership):
+     return {slug: data for slug, data in (membership.get("promos") or {}).items() if data.get("kind") == "console"}
+ 
+ 
+-def records(membership, day, switches=None):
++def records(membership, day, switches=None, only_slug=None):
+     result = []
+     for slug, campaign in definitions(membership).items():
++        if only_slug is not None and slug != only_slug:
++            continue
+         daily, weekly = promo_membership.groups_for_promo(membership, slug)
+         accounts = {}
+         for jid in list(daily) + list(weekly):
+diff --git a/workspace/lib/operator_config.py b/workspace/lib/operator_config.py
+index b2a2890..3185fd2 100644
+--- a/workspace/lib/operator_config.py
++++ b/workspace/lib/operator_config.py
+@@ -50,7 +50,10 @@ Std-lib only, Python 3.11+ (the container runs Debian bookworm's python3).
+ 
+ import base64
+ import datetime
++import email.utils
++import hashlib
+ import json
++import math
+ import os
+ import secrets
+ import subprocess
+@@ -102,6 +105,20 @@ DEFAULT_STATE_DIR = "/home/joseph/.openclaw"
+ class ConfigUnavailable(Exception):
+     """No usable config: Firestore unreachable or refusing, and no snapshot."""
+ 
++    def __init__(self, message, *, upstreamStatus=None, code=None, quota=None,
++                 retryAfterSeconds=None):
++        super().__init__(message)
++        self.metadata = {}
++        if isinstance(upstreamStatus, int) and 100 <= upstreamStatus <= 599:
++            self.metadata["upstreamStatus"] = upstreamStatus
++        if code == "config_rate_limited":
++            self.metadata["code"] = code
++        if quota in ("daily", "rate", "unknown"):
++            self.metadata["quota"] = quota
++        if (isinstance(retryAfterSeconds, (int, float))
++                and math.isfinite(retryAfterSeconds) and 0 <= retryAfterSeconds <= 86400):
++            self.metadata["retryAfterSeconds"] = retryAfterSeconds
++
+ 
+ class ConfigInvalid(Exception):
+     """Firestore answered, but a document every group depends on is malformed."""
+@@ -219,6 +236,53 @@ def access_token(creds, cache_path, *, opener, signer, now, sleep):
+ # HTTP
+ 
+ 
++def _failure_metadata(error, host):
++    """Extract only enums and numbers, never Google's free-form error text."""
++    metadata = {"upstreamStatus": error.code}
++    if host != "firestore.googleapis.com" or error.code != 429:
++        return metadata
++    metadata.update(code="config_rate_limited", quota="unknown")
++    delays = []
++    header = error.headers.get("Retry-After") if error.headers else None
++    if header:
++        try:
++            delays.append(float(header))
++        except ValueError:
++            try:
++                delays.append(email.utils.parsedate_to_datetime(header).timestamp() - time.time())
++            except (ValueError, TypeError, OverflowError):
++                pass
++    try:
++        payload = json.loads(error.read(8192))
++        body = payload.get("error", {}) if isinstance(payload, dict) else {}
++        details = body.get("details", []) if isinstance(body, dict) else []
++        for detail in details if isinstance(details, list) else []:
++            if not isinstance(detail, dict):
++                continue
++            if detail.get("@type") == "type.googleapis.com/google.rpc.ErrorInfo":
++                info = detail.get("metadata")
++                if isinstance(info, dict):
++                    limit = str(info.get("quota_limit", "")).lower()
++                    if "daily" in limit or "perday" in limit or "per_day" in limit:
++                        metadata["quota"] = "daily"
++                    elif metadata["quota"] != "daily" and any(unit in limit for unit in (
++                            "perminute", "persecond", "per_minute", "per_second")):
++                        metadata["quota"] = "rate"
++            if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
++                delay = detail.get("retryDelay")
++                if isinstance(delay, str) and delay.endswith("s"):
++                    try:
++                        delays.append(float(delay[:-1]))
++                    except ValueError:
++                        pass
++    except (ValueError, OSError):
++        pass
++    delays = [delay for delay in delays if math.isfinite(delay) and 0 <= delay <= 86400]
++    if delays:
++        metadata["retryAfterSeconds"] = max(delays)
++    return metadata
++
++
+ def _request(url, *, opener, sleep, data=None, headers=None, method=None,
+              missing_ok=False):
+     """JSON from ``url``, one retry on a transient failure. Raises
+@@ -232,15 +296,17 @@ def _request(url, *, opener, sleep, data=None, headers=None, method=None,
+             with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+                 return json.loads(response.read().decode("utf-8") or "{}")
+         except urllib.error.HTTPError as ex:
++            metadata = _failure_metadata(ex, host)
+             # An HTTPError holds the response; close it now rather than at GC.
+             ex.close()
+             if missing_ok and ex.code == 404:
+                 return None
+-            if ex.code in RETRYABLE_STATUS and attempt == 0:
+-                sleep(RETRY_BACKOFF_SECONDS)
++            if (ex.code in RETRYABLE_STATUS and attempt == 0
++                    and metadata.get("quota") != "daily"):
++                sleep(min(5, metadata.get("retryAfterSeconds", RETRY_BACKOFF_SECONDS)))
+                 continue
+             raise ConfigUnavailable("%s answered HTTP %d%s"
+-                                    % (host, ex.code, HTTP_HINTS.get(ex.code, "")))
++                                    % (host, ex.code, HTTP_HINTS.get(ex.code, "")), **metadata)
+         except (urllib.error.URLError, TimeoutError, OSError) as ex:
+             if attempt == 0:
+                 sleep(RETRY_BACKOFF_SECONDS)
+@@ -288,14 +354,68 @@ def list_documents(project, collection, token, *, opener, sleep):
+             return out
+ 
+ 
+-def get_document(project, collection, doc_id, token, *, opener, sleep):
++def get_document(project, collection, doc_id, token, *, opener, sleep, raw=False):
+     """One document's decoded fields, or ``None`` if it does not exist. The send
+     loop re-reads a group with this just before posting to it."""
+     reply = _request(documents_url(project, collection, doc_id), opener=opener,
+                      sleep=sleep, headers=_auth(token), missing_ok=True)
+     if reply is None:
+         return None
+-    return decode_fields(reply.get("fields") or {})
++    fields = reply.get("fields") or {}
++    return fields if raw else decode_fields(fields)
++
++
++def query_documents(project, collection, where, token, *, opener, sleep):
++    """Read matching documents on the server; never fall back to a collection scan.
++
++    runQuery returns a JSON array, including a readTime-only row for an empty
++    result. Firestore performs the filtering, so unrelated documents are not
++    downloaded or billed as document reads.
++    """
++    base = documents_url(project, collection).rsplit("/", 1)[0]
++    body = {"structuredQuery": {"from": [{"collectionId": collection}], "where": where}}
++    reply = _request(base + ":runQuery", data=json.dumps(body).encode(), method="POST",
++                     headers=dict(_auth(token), **{"Content-Type": "application/json"}),
++                     opener=opener, sleep=sleep)
++    if not isinstance(reply, list):
++        raise ConfigUnavailable("Firestore returned an invalid query response")
++    return [(doc_id_of(row["document"]["name"]), row["document"].get("fields") or {})
++            for row in reply if isinstance(row, dict) and "document" in row]
++
++
++def campaign_groups_filter(slug):
++    # The validator requires weekly and paused campaigns to be present in
++    # promos too. A single array index therefore covers every valid assignment,
++    # including weekly-only cadence and paused groups, without composite indexes.
++    return {"fieldFilter": {"field": {"fieldPath": "promos"}, "op": "ARRAY_CONTAINS",
++                            "value": {"stringValue": slug}}}
++
++
++def count_documents(project, collection, token, *, where=None, opener, sleep):
++    query = {"from": [{"collectionId": collection}]}
++    if where is not None:
++        query["where"] = where
++    body = {"structuredAggregationQuery": {"structuredQuery": query,
++            "aggregations": [{"alias": "total", "count": {}}]}}
++    base = documents_url(project, collection).rsplit("/", 1)[0]
++    reply = _request(base + ":runAggregationQuery", data=json.dumps(body).encode(), method="POST",
++                     headers=dict(_auth(token), **{"Content-Type": "application/json"}),
++                     opener=opener, sleep=sleep)
++    try:
++        return int(reply[0]["result"]["aggregateFields"]["total"]["integerValue"])
++    except (KeyError, TypeError, ValueError, IndexError) as ex:
++        raise ConfigUnavailable("Firestore returned an invalid count response") from ex
++
++
++def scope_directory(env=None, *, campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
++    directory = state_dir(env)
++    if campaign is None and group_ids is None and include_groups and include_campaigns:
++        return directory
++    creds = credentials(env) or {}
++    identity = [creds.get("project_id"), creds.get("client_email"), campaign,
++                sorted(set(group_ids)) if group_ids is not None else None, include_groups, include_campaigns]
++    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
++    return os.path.join(directory, "scopes", digest)
+ 
+ 
+ # --------------------------------------------------------------------------
+@@ -678,8 +798,9 @@ def _log(message):
+     sys.stderr.write("[operator-config] %s\n" % message)
+ 
+ 
+-def fetch(env=None, *, opener=None, signer=None, now=None, sleep=None):
+-    """Read all four collections live. Raises :class:`ConfigUnavailable` when
++def fetch(env=None, *, opener=None, signer=None, now=None, sleep=None,
++          campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
++    """Read shared config and only the requested groups live. Raises :class:`ConfigUnavailable` when
+     Firestore cannot be reached or refuses. Returns ``(project, raw)``."""
+     env = os.environ if env is None else env
+     opener = opener or urllib.request.urlopen
+@@ -692,13 +813,30 @@ def fetch(env=None, *, opener=None, signer=None, now=None, sleep=None):
+                                 "(GCP_SERVICE_ACCOUNT_B64 or GCP_SERVICE_ACCOUNT_FILE)")
+     token = access_token(creds, token_cache_path(state_dir(env)), opener=opener,
+                          signer=signer, now=now, sleep=sleep)
+-    raw = dict((collection, list_documents(creds["project_id"], collection, token,
+-                                           opener=opener, sleep=sleep))
+-               for collection in COLLECTIONS)
++    project = creds["project_id"]
++    settings = get_document(project, "settings", SETTINGS_DOC, token, opener=opener, sleep=sleep, raw=True)
++    raw = {"settings": [] if settings is None else [(SETTINGS_DOC, settings)]}
++    for collection in ("lines", "campaigns"):
++        raw[collection] = [] if collection == "campaigns" and not include_campaigns else list_documents(
++            project, collection, token, opener=opener, sleep=sleep)
++    if not include_groups:
++        raw["groups"] = []
++    elif group_ids is not None:
++        raw["groups"] = []
++        for jid in dict.fromkeys(group_ids):
++            fields = get_document(project, "groups", jid, token, opener=opener, sleep=sleep, raw=True)
++            if fields is not None:
++                raw["groups"].append((jid, fields))
++    elif campaign is not None:
++        raw["groups"] = query_documents(project, "groups", campaign_groups_filter(campaign),
++                                         token, opener=opener, sleep=sleep)
++    else:
++        raw["groups"] = list_documents(project, "groups", token, opener=opener, sleep=sleep)
+     return creds["project_id"], raw
+ 
+ 
+-def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None):
++def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None,
++         allow_snapshot=True, campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
+     """The operator config to act on, as a dict::
+ 
+         {"source": "firestore" | "snapshot",
+@@ -713,14 +851,20 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None):
+     env = os.environ if env is None else env
+     now = now or time.time
+     log = log or _log
+-    directory = state_dir(env)
++    scope = {"campaign": campaign, "group_ids": group_ids, "include_groups": include_groups, "include_campaigns": include_campaigns}
++    directory = scope_directory(env, **scope)
+     try:
+-        _, raw = fetch(env, opener=opener, signer=signer, now=now, sleep=sleep)
++        _, raw = fetch(env, opener=opener, signer=signer, now=now, sleep=sleep, **scope)
+         membership, enabled, undecodable = assemble(raw)
+         clean, report = quarantine(membership, undecodable)
+     except (ConfigUnavailable, ConfigInvalid) as ex:
++        if not allow_snapshot:
++            raise
+         log("Firestore unusable (%s); using the last-known-good snapshot" % ex)
+-        return _from_snapshot(directory, str(ex), now=now)
++        try:
++            return scope_snapshot(env, str(ex), now=now, **scope)
++        except ConfigUnavailable as fallback_error:
++            raise ConfigUnavailable(str(fallback_error), **getattr(ex, "metadata", {})) from ex
+ 
+     at = datetime.datetime.fromtimestamp(now(), datetime.timezone.utc)
+     stamp = at.strftime("%Y-%m-%dT%H:%M:%SZ")
+@@ -744,6 +888,35 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None):
+             "report": report, "fetchedAt": stamp, "degraded": None}
+ 
+ 
++def scope_snapshot(env, why, *, now=None, campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
++    directory = scope_directory(env, campaign=campaign, group_ids=group_ids, include_groups=include_groups, include_campaigns=include_campaigns)
++    try:
++        return _from_snapshot(directory, why, now=now)
++    except ConfigUnavailable as scoped_error:
++        if directory == state_dir(env):
++            raise
++        # A previous full read can seed a scope during an outage, but a scoped
++        # read must never replace the full snapshot or add unrelated groups.
++        try:
++            result = _from_snapshot(state_dir(env), why, now=now)
++        except ConfigUnavailable:
++            raise scoped_error
++        membership = dict(result["membership"])
++        groups = membership.get("groups") or {}
++        if not include_groups:
++            groups = {}
++        elif group_ids is not None:
++            groups = {jid: groups[jid] for jid in group_ids if jid in groups}
++        elif campaign is not None:
++            groups = {jid: entry for jid, entry in groups.items()
++                      if campaign in (entry.get("promos") or []) or campaign in (entry.get("weekly") or {})}
++        membership["groups"] = groups
++        if not include_campaigns:
++            membership["promos"] = {}
++            result = dict(result, enabled={})
++        return dict(result, membership=membership)
++
++
+ def _snapshot_age_seconds(snapshot, now):
+     """How old the snapshot is, or ``None`` when it does not say. A snapshot
+     written by :func:`load` always carries ``fetchedAt``."""
+diff --git a/workspace/lib/operator_writer.py b/workspace/lib/operator_writer.py
+index c11e539..bdb0066 100644
+--- a/workspace/lib/operator_writer.py
++++ b/workspace/lib/operator_writer.py
+@@ -400,8 +400,14 @@ def write(collection, doc_id, patch, actor, env=None, *, opener=None, signer=Non
+         except operator_config.ConfigInvalid as ex:
+             raise WriteRefused(str(ex)) from ex
+     now = now or time.time
+-    project, raw = operator_config.fetch(env, opener=opener, signer=signer,
+-                                         now=now, sleep=sleep)
++    fetch_args = {"opener": opener, "signer": signer, "now": now, "sleep": sleep}
++    # Changing one existing group cannot invalidate another group. Only its
++    # record and shared validation dependencies are needed. Creation still
++    # needs the existing ranks to append in the canonical sending order.
++    project, raw = operator_config.fetch(env, **fetch_args,
++                                         **({"group_ids": [doc_id]} if collection == "groups" else {}))
++    if collection == "groups" and not raw["groups"]:
++        project, raw = operator_config.fetch(env, **fetch_args)
+     fields, before, _, report = prepare(raw, collection, doc_id, patch)
+     warnings = list(report.get("warnings") or [])
+     result = {"collection": collection, "id": doc_id, "fields": [], "before": before,
+@@ -430,6 +436,70 @@ def write(collection, doc_id, patch, actor, env=None, *, opener=None, signer=Non
+     return result
+ 
+ 
++def write_group_batch(changes, actor, env=None, *, dry_run=False, store=None):
++    """Validate a bounded group edit against one live transactional snapshot.
++
++    Shared rules are read once. No writes are issued until every change passes;
++    changed groups and their audits fit in one atomic commit (at most 200 writes).
++    """
++    import re
++    if (not isinstance(changes, list) or not 1 <= len(changes) <= 100
++            or actor is not None and not isinstance(actor, str)):
++        raise WriteRefused("batch must name 1..100 group changes and a valid actor")
++    ids = []
++    for change in changes:
++        if (not isinstance(change, dict) or set(change) - {"id", "fields", "expected"}
++                or not isinstance(change.get("id"), str)
++                or not re.fullmatch(r"[0-9]+(?:-[0-9]+)?@g\.us", change["id"])
++                or not isinstance(change.get("fields"), dict)
++                or not isinstance(change.get("expected", {}), dict)
++                or set(change.get("expected", {})) - set(change["fields"])):
++            raise WriteRefused("invalid group batch change")
++        ids.append(change["id"])
++    if len(set(ids)) != len(ids):
++        raise WriteRefused("batch names a group more than once")
++    if store is None:
++        from console_campaigns import Store
++        store = Store(env)
++    store.begin()
++    try:
++        settings = store.get("settings", operator_config.SETTINGS_DOC)
++        raw = {"settings": [] if settings is None else [(operator_config.SETTINGS_DOC, operator_config.encode_fields(settings))],
++               "lines": store.list("lines"), "campaigns": store.list("campaigns"), "groups": []}
++        for jid in ids:
++            try:
++                fields = store.get("groups", jid)
++            except ValueError as exc:
++                raise WriteRefused("group %s cannot be read" % jid, status=409) from exc
++            if fields is None:
++                raise WriteRefused("group %s no longer exists" % jid, status=409)
++            raw["groups"].append((jid, operator_config.encode_fields(fields)))
++        docs = []
++        for change in changes:
++            jid = change["id"]
++            fields, before, _, _ = prepare(raw, "groups", jid, change["fields"])
++            for key, expected in change.get("expected", {}).items():
++                current = before.get(key)
++                if key in ("promos", "paused_promos"):
++                    current = current or []
++                elif key == "weekly":
++                    current = current or {}
++                if current != expected:
++                    raise WriteRefused("group %s changed since the draft was checked" % jid, status=409)
++            if before == fields:
++                continue
++            entry_id, entry = audit_document(actor, "groups", jid, before, fields)
++            docs.extend([("groups", jid, fields, True), (AUDIT_COLLECTION, entry_id, entry, False)])
++        if docs and not dry_run:
++            try:
++                store.commit(docs)
++            except operator_config.ConfigUnavailable as exc:
++                raise WriteRefused("The batch outcome is unknown. Reload before retrying; some or all changes may have been saved.", status=503) from exc
++        return {"done": ids, "changed": len(docs) // 2}
++    finally:
++        store.rollback()
++
++
+ def prepare_delete(raw, collection, doc_id):
+     """``(before, report)`` for a deletion that is safe to commit, or
+     :class:`WriteRefused`.
+@@ -479,7 +549,7 @@ def delete(collection, doc_id, actor, env=None, *, reason=None, opener=None,
+     env = os.environ if env is None else env
+     now = now or time.time
+     project, raw = operator_config.fetch(env, opener=opener, signer=signer,
+-                                         now=now, sleep=sleep)
++                                         now=now, sleep=sleep, group_ids=[doc_id])
+     before, report = prepare_delete(raw, collection, doc_id)
+     entry_id, entry = audit_document(actor, collection, doc_id, before, None,
+                                      now=now, reason=reason)
+diff --git a/workspace/lib/promo_config.py b/workspace/lib/promo_config.py
+index 15ac95e..6e4b279 100644
+--- a/workspace/lib/promo_config.py
++++ b/workspace/lib/promo_config.py
+@@ -145,7 +145,7 @@ def targets_doc_from_file(targets_file, err=None):
+ 
+ 
+ def resolve(promo, targets_file=None, membership_path=None, env=None, err=None,
+-            **inject):
++            config_loader=None, **inject):
+     """What this run acts on::
+ 
+         {"source": "file" | "firestore" | "snapshot",
+@@ -180,7 +180,10 @@ def resolve(promo, targets_file=None, membership_path=None, env=None, err=None,
+         note(warning)
+ 
+     if current == FIRESTORE:
+-        loaded = operator_config.load(env, log=note, **inject)
++        if config_loader is None and slug:
++            loaded = operator_config.load(env, log=note, campaign=slug, **inject)
++        else:
++            loaded = (config_loader or operator_config.load)(env, log=note, **inject)
+         membership = loaded["membership"]
+         # Two switches, and a campaign is on only if both are: the cron manifest
+         # decides whether the gateway has a cron registered at all, Firestore
+diff --git a/workspace/lib/test_operator_config.py b/workspace/lib/test_operator_config.py
+index 1342530..313089d 100644
+--- a/workspace/lib/test_operator_config.py
++++ b/workspace/lib/test_operator_config.py
+@@ -130,6 +130,33 @@ class FakeFirestore(object):
+                              "token_type": "Bearer"})
+         assert request.get_header("Authorization", "").startswith("Bearer tok-"), url
+         parts = urllib.parse.urlsplit(url)
++        if parts.path.endswith(("/documents:runQuery", "/documents:runAggregationQuery")):
++            body = json.loads(request.data)
++            query = body.get("structuredQuery") or body["structuredAggregationQuery"]["structuredQuery"]
++            collection = query["from"][0]["collectionId"]
++            def matches(fields, predicate):
++                if "compositeFilter" in predicate:
++                    rule = predicate["compositeFilter"]
++                    results = [matches(fields, child) for child in rule["filters"]]
++                    return any(results) if rule["op"] == "OR" else all(results)
++                rule = predicate.get("fieldFilter") or predicate["unaryFilter"]
++                value = oc.decode_fields(fields)
++                for segment in rule["field"]["fieldPath"].split("."):
++                    value = value.get(segment.strip("`")) if isinstance(value, dict) else None
++                if rule["op"] == "IS_NOT_NULL":
++                    return value is not None
++                expected = oc.decode_value(rule["value"])
++                if rule["op"] == "ARRAY_CONTAINS":
++                    return isinstance(value, list) and expected in value
++                if rule["op"] == "IN":
++                    return value in expected
++                return value == expected
++            rows = [(key, fields) for key, fields in sorted(self.store.get(collection, {}).items())
++                    if not query.get("where") or matches(fields, query["where"])]
++            if "structuredAggregationQuery" in body:
++                return Response([{"result": {"aggregateFields": {"total": {"integerValue": str(len(rows))}}}}])
++            return Response([{"document": {"name": "x/documents/%s/%s" % (collection, key), "fields": fields}}
++                             for key, fields in rows] or [{"readTime": "now"}])
+         tail = parts.path.split("/documents/", 1)[1].split("/")
+         collection = urllib.parse.unquote(tail[0])
+         docs = self.store.get(collection, {})
+@@ -493,6 +520,40 @@ class DocumentTest(Harness):
+                                           opener=self.firestore, sleep=lambda s: None))
+ 
+ 
++class FirestoreErrorsTest(unittest.TestCase):
++    def request_failure(self, body, headers=None):
++        calls = []
++        delays = []
++        def limited(request, **kw):
++            calls.append(request.full_url)
++            raise urllib.error.HTTPError(request.full_url, 429, "limited", headers or {}, io.BytesIO(body))
++        with self.assertRaises(oc.ConfigUnavailable) as caught:
++            oc._request("https://firestore.googleapis.com/v1/test", opener=limited, sleep=delays.append)
++        return caught.exception, calls, delays
++
++    def test_daily_quota_is_classified_without_retrying_or_leaking_response_text(self):
++        body = {"error": {"message": "CANARY-KEY-MATERIAL", "details": [
++            {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {
++                "quota_limit": "FreeTierReadUnitsPerDay", "consumer": "secret-project"}}]}}
++        error, calls, delays = self.request_failure(json.dumps(body).encode())
++        self.assertEqual(error.metadata, {"upstreamStatus": 429, "code": "config_rate_limited", "quota": "daily"})
++        self.assertEqual(len(calls), 1)
++        self.assertEqual(delays, [])
++        self.assertNotIn("CANARY", str(error))
++        self.assertNotIn("secret", json.dumps(error.metadata))
++
++    def test_retry_after_is_preserved_but_sleep_is_bounded(self):
++        error, calls, delays = self.request_failure(b"{}", {"Retry-After": "40"})
++        self.assertEqual(error.metadata["retryAfterSeconds"], 40)
++        self.assertEqual(len(calls), 2)
++        self.assertEqual(delays, [5])
++
++    def test_malformed_or_large_bodies_and_invalid_delays_remain_curated(self):
++        for body in (b"not JSON", b"[1]", b"x" * 20000):
++            error, _, _ = self.request_failure(body, {"Retry-After": "nan"})
++            self.assertEqual(error.metadata, {"upstreamStatus": 429, "code": "config_rate_limited", "quota": "unknown"})
++
++
+ class NodeSignerTest(unittest.TestCase):
+     """The real signer, end to end through its stdin path. Skipped only where no
+     node binary exists; CI and the image both have one."""
+diff --git a/workspace/lib/test_operator_writer.py b/workspace/lib/test_operator_writer.py
+index 56bee9c..4e0614f 100644
+--- a/workspace/lib/test_operator_writer.py
++++ b/workspace/lib/test_operator_writer.py
+@@ -303,6 +303,16 @@ class Refusals(Harness):
+             self.write("groups", JID_A, {"status": "on-hold"})
+         self.assertEqual(self.firestore.commits, [])
+ 
++    def test_a_config_read_429_writes_neither_the_group_nor_an_audit(self):
++        self.write("groups", JID_A, {"status": "on-hold"}, dry_run=True)
++        before = self.stored("groups", JID_A)
++        self.firestore.fail_next = [429, 429]
++        with self.assertRaises(oc.ConfigUnavailable) as caught:
++            self.write("groups", JID_A, {"activity": "busy"})
++        self.assertEqual(caught.exception.metadata["code"], "config_rate_limited")
++        self.assertEqual(self.stored("groups", JID_A), before)
++        self.assertEqual(self.firestore.commits, [])
++
+     def test_a_read_only_key_fails_at_the_commit_without_half_applying(self):
+         self.firestore.commit_status = 403
+         with self.assertRaises(oc.ConfigUnavailable) as caught:
+diff --git a/deploy/test_scoped_console_api.py b/deploy/test_scoped_console_api.py
+new file mode 100644
+index 0000000..7372173
+--- /dev/null
++++ b/deploy/test_scoped_console_api.py
+@@ -0,0 +1,48 @@
++"""New narrow read and atomic group-write routes retain the API's access gates."""
++import json
++import unittest
++import test_console_api as reads
++from test_console_write_api import Harness
++
++
++class ScopedReadAPI(unittest.TestCase):
++    setUp = reads.ConsoleApiTests.setUp
++    write = reads.ConsoleApiTests.write
++    serve = reads.ConsoleApiTests.serve
++    fetch = reads.ConsoleApiTests.fetch
++    def test_scoped_routes_forward_only_validated_arguments(self):
++        base = self.serve()
++        for route, args in [("/campaign/demo", ["campaign", "demo"]),
++                            ("/campaign-state/demo", ["campaign-state", "demo"]),
++                            ("/campaign-groups/demo", ["campaign-groups", "demo"]),
++                            ("/captions/demo", ["captions", "demo"]),
++                            ("/group/123%40g.us", ["group", "123@g.us"]),
++                            ("/groups-by-id/123%40g.us%2C456%40g.us", ["groups-by-id", "123@g.us,456@g.us"]),
++                            ("/capabilities", ["capabilities"]), ("/settings", ["settings"]),
++                            ("/navigation", ["navigation"])]:
++            code, body, _ = self.fetch(base + route)
++            self.assertEqual(code, 200, route)
++            self.assertEqual(json.loads(body)["args"], args)
++            self.assertEqual(self.fetch(base + route, token=None)[0], 401)
++        for route in ("/group/not-a-group", "/groups-by-id/123%40g.us%2Cbad", "/campaign/%2e%2e"):
++            self.assertEqual(self.fetch(base + route)[0], 404)
++
++
++class GroupBatchAPI(Harness):
++    def test_batch_is_authenticated_bounded_and_invalidates_reads(self):
++        base = self.serve()
++        payload = {"changes": [{"id": "123@g.us", "fields": {"note": "test"}}], "actor": "Operator"}
++        self.server.console["bridge"].cache["old"] = (999999999999, b"cached")
++        code, body = self.post(base, "/config/batch/groups", payload)
++        self.assertEqual(code, 200)
++        self.assertEqual(json.loads(body)["echo"], dict(payload, collection="groups"))
++        self.assertEqual(self.server.console["bridge"].cache, {})
++        self.assertEqual(self.post(base, "/config/batch/groups", payload, token=None)[0], 401)
++        for invalid in ({"changes": []}, {"changes": [{}] * 101}, {"changes": [], "delete": True}, b" " * 65537):
++            self.assertEqual(self.post(base, "/config/batch/groups", invalid)[0], 400)
++        self.set_key(None)
++        self.assertEqual(self.post(base, "/config/batch/groups", payload)[0], 503)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/workspace/lib/console_config.py b/workspace/lib/console_config.py
+new file mode 100644
+index 0000000..82f2f0f
+--- /dev/null
++++ b/workspace/lib/console_config.py
+@@ -0,0 +1,180 @@
++"""Five-minute display cache; never used by writers or campaign sends.
++
++All console-read processes on the volume share one cache and one flock. A
++generation from the API and a local invalidation marker fence older reads out
++after mutations, including writes whose acknowledgement was lost.
++"""
++
++import contextlib
++import fcntl
++import hashlib
++import json
++import os
++import secrets
++import time
++
++import operator_config as config
++
++TTL_SECONDS = 180
++FAILURE_TTL_SECONDS = 300
++CACHE_FILE = "console-config.json"
++EPOCH_FILE = "console-config-epoch.json"
++
++
++def invalidate(env=None):
++    """Fence in-flight readers without waiting for their network requests."""
++    directory = config.state_dir(env)
++    config._write_private_json(os.path.join(directory, EPOCH_FILE), secrets.token_hex(16))
++
++
++def _identity(env):
++    creds = config.credentials(env)
++    # Hash the credential context; no private key is persisted in this cache.
++    return hashlib.sha256(json.dumps(
++        [config.API_ROOT, creds, env.get("GENAIE_CONSOLE_CONFIG_GENERATION", "")],
++        sort_keys=True).encode()).hexdigest()
++
++
++def _epoch(directory):
++    return config._read_json(os.path.join(directory, EPOCH_FILE))
++
++
++def _cached(entry, identity, epoch, now):
++    if not isinstance(entry, dict) or entry.get("identity") != identity or entry.get("epoch") != epoch:
++        return None
++    checked = entry.get("checkedAt")
++    result = entry.get("result")
++    ttl = FAILURE_TTL_SECONDS if entry.get("error") or isinstance(result, dict) and result.get("degraded") else TTL_SECONDS
++    metadata = entry.get("metadata")
++    delay = metadata.get("retryAfterSeconds", 0) if isinstance(metadata, dict) else 0
++    if isinstance(delay, (int, float)) and 0 <= delay <= 86400:
++        ttl = max(ttl, delay)
++    if not isinstance(checked, (int, float)) or not 0 <= now() - checked < ttl:
++        return None
++    result = entry.get("result")
++    if not isinstance(result, dict):
++        if isinstance(entry.get("error"), str):
++            metadata = entry.get("metadata")
++            safe = {k: v for k, v in metadata.items() if k in (
++                "upstreamStatus", "code", "quota", "retryAfterSeconds")} if isinstance(metadata, dict) else {}
++            raise config.ConfigUnavailable(entry["error"], **safe)
++        return None
++    age = config._snapshot_age_seconds(result, now)
++    if age is None or not 0 <= age <= config.SNAPSHOT_MAX_AGE_SECONDS:
++        return None
++    if not isinstance(result.get("membership"), dict) or not isinstance(result.get("enabled"), dict):
++        return None
++    if result.get("source") not in ("firestore", "snapshot") or "degraded" not in result:
++        return None
++    if result["degraded"] is not None and not isinstance(result["degraded"], str):
++        return None
++    try:
++        clean, _ = config.quarantine(result["membership"])
++        _, problems = config.campaign_switches(result["enabled"])
++    except (config.ConfigInvalid, TypeError, ValueError):
++        return None
++    if clean != result["membership"] or problems:
++        return None
++    if not isinstance(result.get("report"), dict):
++        return None
++    return dict(result, source="snapshot")
++
++
++def load(env=None, *, fresh=False, now=None, log=None, campaign=None, group_ids=None,
++         include_groups=True, include_campaigns=True, **inject):
++    env = os.environ if env is None else env
++    now = now or time.time
++    log = log or config._log
++    scope = {"campaign": campaign, "group_ids": group_ids, "include_groups": include_groups, "include_campaigns": include_campaigns}
++    directory = config.scope_directory(env, **scope)
++    # Every scope watches the same mutation marker, including locally-run writes.
++    epoch_directory = config.state_dir(env)
++    path = os.path.join(directory, CACHE_FILE)
++    identity = _identity(env)
++    os.makedirs(directory, mode=0o700, exist_ok=True)
++    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
++    with os.fdopen(fd, "a") as lock:
++        fcntl.flock(lock, fcntl.LOCK_EX)
++        epoch = _epoch(epoch_directory)
++        if not fresh:
++            hit = _cached(config._read_json(path), identity, epoch, now)
++            if hit is not None:
++                return hit
++        entry = {"identity": identity, "epoch": epoch}
++        try:
++            result = config.load(env, now=now, log=log, allow_snapshot=not fresh, **scope, **inject)
++        except config.ConfigUnavailable as exc:
++            entry.update(error=str(exc), metadata=exc.metadata)
++            # A strict save read must fail, while background displays may
++            # continue using the validated snapshot during the cooldown.
++            try:
++                entry["result"] = config.scope_snapshot(env, str(exc), now=now, **scope)
++            except config.ConfigUnavailable:
++                pass
++            raise
++        else:
++            entry["result"] = result
++            return result
++        finally:
++            entry["checkedAt"] = now()
++            # Invalidation does not take the flock: a mutation must never wait
++            # for a slow read. A late old entry is also rejected on epoch lookup.
++            if _epoch(epoch_directory) == epoch:
++                try:
++                    config._write_private_json(path, entry)
++                except OSError:
++                    log("could not persist the console config cache")
++
++
++@contextlib.contextmanager
++def mutation(env=None):
++    """Invalidate local readers before and after any attempted mutation."""
++    def fence():
++        try:
++            invalidate(env)
++        except OSError:
++            config._log("could not invalidate the console config cache")
++    fence()
++    try:
++        yield
++    finally:
++        fence()
++
++
++def cached_summary(name, reader, env=None, *, now=None):
++    """Cache a small aggregate without loading membership just to obtain counts."""
++    env = os.environ if env is None else env
++    now = now or time.time
++    directory = config.state_dir(env)
++    identity = _identity(env)
++    digest = hashlib.sha256((name + identity).encode()).hexdigest()
++    path = os.path.join(directory, "summaries", digest + ".json")
++    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
++    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
++    with os.fdopen(fd, "a") as lock:
++        fcntl.flock(lock, fcntl.LOCK_EX)
++        epoch = _epoch(directory)
++        entry = config._read_json(path)
++        if isinstance(entry, dict) and entry.get("epoch") == epoch:
++            ttl = FAILURE_TTL_SECONDS if entry.get("error") else TTL_SECONDS
++            metadata = entry.get("metadata")
++            delay = metadata.get("retryAfterSeconds", 0) if isinstance(metadata, dict) else 0
++            if isinstance(delay, (int, float)) and 0 <= delay <= 86400:
++                ttl = max(ttl, delay)
++            checked = entry.get("checkedAt")
++            if isinstance(checked, (int, float)) and 0 <= now() - checked < ttl:
++                if entry.get("error"):
++                    raise config.ConfigUnavailable(entry["error"], **entry.get("metadata", {}))
++                if isinstance(entry.get("result"), dict):
++                    return entry["result"]
++        entry = {"epoch": epoch}
++        try:
++            entry["result"] = reader()
++            return entry["result"]
++        except config.ConfigUnavailable as exc:
++            entry.update(error=str(exc), metadata=exc.metadata)
++            raise
++        finally:
++            entry["checkedAt"] = now()
++            if _epoch(directory) == epoch:
++                config._write_private_json(path, entry)
+diff --git a/workspace/lib/test_console_config.py b/workspace/lib/test_console_config.py
+new file mode 100644
+index 0000000..7258fd1
+--- /dev/null
++++ b/workspace/lib/test_console_config.py
+@@ -0,0 +1,173 @@
++"""Display caching is process-shared, bounded, and bypassed before saves."""
++import io
++import json
++import multiprocessing
++import os
++import sys
++import time
++import unittest
++import urllib.error
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import console_config as cache
++import operator_config as config
++from test_operator_config import Harness, FakeFirestore, JID_A, creds_b64
++
++
++def process_read(env, count, results):
++    fake = FakeFirestore(page_size=300)
++    def opener(request, **kw):
++        with count.get_lock():
++            count.value += 1
++        time.sleep(0.02)
++        return fake(request, **kw)
++    try:
++        result = cache.load(env, opener=opener, signer=lambda *a: "jwt",
++                            now=lambda: 1_800_000_000.0, log=lambda *a: None)
++        results.put(result["membership"]["groups"][JID_A]["name"])
++    except Exception as exc:
++        results.put(str(exc))
++
++
++class ConsoleCacheTests(Harness):
++    def display(self, **kw):
++        return cache.load(self.env, opener=self.firestore, signer=self.signer,
++                          now=lambda: self.clock[0], sleep=lambda s: None,
++                          log=self.logs.append, **kw)
++
++    def path(self):
++        return os.path.join(config.state_dir(self.env), cache.CACHE_FILE)
++
++    def test_display_reuses_config_until_expiry_but_runtime_load_is_live(self):
++        first = self.display()
++        requests = len(self.firestore.requests)
++        self.firestore.store["groups"][JID_A]["name"] = config.encode_value("Changed")
++        self.assertEqual(self.display()["membership"], first["membership"])
++        self.assertEqual(len(self.firestore.requests), requests)
++        self.assertEqual(self.load()["membership"]["groups"][JID_A]["name"], "Changed")
++        self.clock[0] += 300
++        self.assertEqual(self.display()["membership"]["groups"][JID_A]["name"], "Changed")
++
++    def test_cold_concurrent_processes_and_a_restarted_process_share_one_read(self):
++        ctx = multiprocessing.get_context("fork")
++        count = ctx.Value("i", 0)
++        results = ctx.Queue()
++        processes = [ctx.Process(target=process_read, args=(self.env, count, results)) for _ in range(3)]
++        for process in processes:
++            process.start()
++        for process in processes:
++            process.join(10)
++            self.assertEqual(process.exitcode, 0)
++        self.assertEqual([results.get(timeout=1) for _ in processes], ["Alpha"] * 3)
++        self.assertEqual(count.value, 5)  # token, settings, lines, campaigns, groups
++        restarted = ctx.Process(target=process_read, args=(self.env, count, results))
++        restarted.start()
++        restarted.join(10)
++        self.assertEqual(restarted.exitcode, 0)
++        self.assertEqual(results.get(timeout=1), "Alpha")
++        self.assertEqual(count.value, 5)
++
++    def test_outage_cooldown_preserves_snapshot_timestamp_reason_and_age_limit(self):
++        first = self.display()
++        self.clock[0] += 300
++        self.firestore.down = True
++        failed = self.display()
++        requests = len(self.firestore.requests)
++        self.assertEqual(failed["source"], "snapshot")
++        self.assertEqual(failed["fetchedAt"], first["fetchedAt"])
++        self.assertIn("unreachable", failed["degraded"])
++        self.clock[0] += 60
++        self.assertEqual(self.display(), failed)
++        self.assertEqual(len(self.firestore.requests), requests)
++        self.clock[0] += config.SNAPSHOT_MAX_AGE_SECONDS
++        with self.assertRaises(config.ConfigUnavailable):
++            self.display()
++
++    def test_failure_without_snapshot_is_also_throttled_and_recovery_is_detected(self):
++        self.firestore.down = True
++        with self.assertRaises(config.ConfigUnavailable):
++            self.display()
++        requests = len(self.firestore.requests)
++        with self.assertRaises(config.ConfigUnavailable):
++            self.display()
++        self.assertEqual(len(self.firestore.requests), requests)
++        self.clock[0] += 300
++        self.firestore.down = False
++        self.assertEqual(self.display()["source"], "firestore")
++
++    def test_fresh_bypasses_success_and_failure_caches_and_refuses_snapshot(self):
++        self.display()
++        self.firestore.store["groups"][JID_A]["name"] = config.encode_value("New")
++        self.assertEqual(self.display(fresh=True)["membership"]["groups"][JID_A]["name"], "New")
++        self.firestore.down = True
++        with self.assertRaises(config.ConfigUnavailable):
++            self.display(fresh=True)
++        self.assertEqual(self.display()["source"], "snapshot")
++        self.firestore.down = False
++        self.assertEqual(self.display(fresh=True)["source"], "firestore")
++
++    def test_identity_changes_never_reuse_another_project_or_credentials(self):
++        self.display()
++        for override in ({"project_id": "other"}, {"client_email": "other@x"}, {"private_key_id": "other"}):
++            self.env["GCP_SERVICE_ACCOUNT_B64"] = creds_b64(**override)
++            before = len(self.firestore.requests)
++            self.display()
++            self.assertGreater(len(self.firestore.requests), before)
++
++    def test_local_and_api_invalidation_force_new_reads(self):
++        self.display()
++        for invalidate in (lambda: cache.invalidate(self.env),
++                           lambda: self.env.update(GENAIE_CONSOLE_CONFIG_GENERATION="new-generation")):
++            invalidate()
++            before = len(self.firestore.requests)
++            self.display()
++            self.assertGreater(len(self.firestore.requests), before)
++
++    def test_invalidation_during_read_does_not_publish_older_data(self):
++        fake = self.firestore
++        def opener(request, **kw):
++            response = fake(request, **kw)
++            if "/documents/groups?" in request.full_url:
++                cache.invalidate(self.env)
++            return response
++        cache.load(self.env, opener=opener, signer=self.signer, now=lambda: self.clock[0])
++        self.assertFalse(os.path.exists(self.path()))
++
++    def test_corrupt_cache_or_invalid_membership_is_refreshed(self):
++        self.display()
++        with open(self.path()) as stream:
++            entry = json.load(stream)
++        for body in ("not JSON", json.dumps(dict(entry, result=dict(entry["result"], membership={"version": 99})))):
++            with open(self.path(), "w") as stream:
++                stream.write(body)
++            before = len(self.firestore.requests)
++            self.assertEqual(self.display()["membership"]["groups"][JID_A]["name"], "Alpha")
++            self.assertGreater(len(self.firestore.requests), before)
++
++    def test_a_corrupt_cached_group_is_not_returned_without_quarantine(self):
++        self.display()
++        with open(self.path()) as stream:
++            entry = json.load(stream)
++        entry["result"]["membership"]["groups"][JID_A]["status"] = "invalid"
++        with open(self.path(), "w") as stream:
++            json.dump(entry, stream)
++        before = len(self.firestore.requests)
++        self.assertEqual(self.display()["membership"]["groups"][JID_A]["status"], "active")
++        self.assertGreater(len(self.firestore.requests), before)
++
++    def test_rate_limit_metadata_survives_cached_failure_without_a_snapshot(self):
++        def limited(request, **kw):
++            raise urllib.error.HTTPError(request.full_url, 429, "limited", {"Retry-After": "12"}, io.BytesIO(b"{}"))
++        self.firestore = limited
++        # The refusal must be from Firestore rather than OAuth.
++        from unittest.mock import patch
++        with patch.object(config, "access_token", return_value="tok"):
++            for _ in range(2):
++                with self.assertRaises(config.ConfigUnavailable) as caught:
++                    self.display()
++                self.assertEqual(caught.exception.metadata, {"upstreamStatus": 429, "code": "config_rate_limited",
++                                                            "quota": "unknown", "retryAfterSeconds": 12.0})
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/workspace/lib/test_scoped_reads.py b/workspace/lib/test_scoped_reads.py
+new file mode 100644
+index 0000000..61137b2
+--- /dev/null
++++ b/workspace/lib/test_scoped_reads.py
+@@ -0,0 +1,198 @@
++"""Behavior and request budgets for targeted Firestore operations (no network)."""
++import os
++import importlib.machinery
++import importlib.util
++import sys
++import unittest
++from pathlib import Path
++from unittest.mock import Mock, patch
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++import operator_config as config
++import console_config
++import operator_writer as writer
++import promo_caps
++import console_campaigns
++from test_operator_config import Harness, JID_A, JID_B, JID_C
++from test_console_campaigns import MemoryStore, ENV, payload
++
++
++class ScopedReads(Harness):
++    def scoped(self, **scope):
++        return self.load(**scope)
++
++    def test_campaign_queries_exclude_unrelated_groups_without_changing_caps(self):
++        for i in range(500):
++            self.firestore.store["groups"]["%s@g.us" % (1000000 + i)] = config.encode_fields({
++                "status": "active", "promos": ["cv"], "name": "Unrelated %s" % i})
++        full = self.load()
++        self.firestore.requests.clear()
++        result = self.scoped(campaign="genaie")
++        self.assertEqual(set(result["membership"]["groups"]), {JID_A, JID_B})
++        self.assertFalse(any("/documents/groups?" in url for url in self.firestore.requests))
++        self.assertTrue(any(url.endswith(":runQuery") for url in self.firestore.requests))
++        self.assertTrue(any("/settings/defaults" in url for url in self.firestore.requests))
++        ids = list(result["membership"]["groups"])
++        self.assertEqual(promo_caps.plan(full["membership"], ids, refs={}, history={}, disabled=[]),
++                         promo_caps.plan(result["membership"], ids, refs={}, history={}, disabled=[]))
++
++    def test_weekly_only_and_paused_groups_are_not_lost(self):
++        result = self.scoped(campaign="cv")
++        self.assertIn(JID_B, result["membership"]["groups"])
++        self.assertNotIn(JID_A, result["membership"]["groups"])
++        self.firestore.store["groups"][JID_B]["paused_promos"] = config.encode_value(["cv"])
++        self.assertIn(JID_B, self.scoped(campaign="cv")["membership"]["groups"])
++
++    def test_point_lookup_and_settings_never_scan_group_collection(self):
++        result = self.scoped(group_ids=[JID_A, JID_A, "999@g.us"])
++        self.assertEqual(list(result["membership"]["groups"]), [JID_A])
++        self.assertEqual(sum("/groups/" in url for url in self.firestore.requests), 2)
++        self.assertFalse(any("/documents/groups?" in url for url in self.firestore.requests))
++        self.firestore.requests.clear()
++        self.assertEqual(self.scoped(include_groups=False, include_campaigns=False)["membership"]["groups"], {})
++        self.assertFalse(any("/groups" in url or url.endswith(":runQuery") for url in self.firestore.requests))
++        self.assertFalse(any("/campaigns" in url for url in self.firestore.requests))
++
++    def test_scopes_never_replace_full_snapshots_and_fallback_is_bounded(self):
++        full = self.load()
++        path = config.snapshot_path(config.state_dir(self.env))
++        original = Path(path).read_text()
++        self.scoped(campaign="cv")
++        self.assertEqual(Path(path).read_text(), original)
++        self.firestore.down = True
++        # A different scope can reuse a full disk snapshot without any live scan.
++        result = self.scoped(group_ids=[JID_C])
++        self.assertEqual(list(result["membership"]["groups"]), [JID_C])
++        self.assertEqual(result["fetchedAt"], full["fetchedAt"])
++        self.clock[0] += config.SNAPSHOT_MAX_AGE_SECONDS + 1
++        with self.assertRaises(config.ConfigUnavailable):
++            self.scoped(group_ids=[JID_C])
++
++    def test_display_scopes_share_work_and_local_invalidations(self):
++        def display(**scope):
++            return console_config.load(self.env, opener=self.firestore, signer=self.signer,
++                now=lambda: self.clock[0], sleep=lambda s: None, log=self.logs.append, **scope)
++        display(campaign="genaie")
++        count = len(self.firestore.requests)
++        display(campaign="genaie")
++        self.assertEqual(len(self.firestore.requests), count)
++        other = display(campaign="cv")
++        self.assertNotIn(JID_A, other["membership"]["groups"])
++        console_config.invalidate(self.env)
++        before = len(self.firestore.requests)
++        display(campaign="genaie")
++        self.assertGreater(len(self.firestore.requests), before)
++
++    def test_aggregation_returns_counts_without_document_payloads(self):
++        count = config.count_documents("test", "groups", "tok-test", where={"fieldFilter": {
++            "field": {"fieldPath": "status"}, "op": "EQUAL", "value": {"stringValue": "on-hold"}}},
++            opener=self.firestore, sleep=lambda s: None)
++        self.assertEqual(count, 1)
++        self.assertEqual(len(self.firestore.requests), 1)
++        self.assertTrue(self.firestore.requests[0].endswith(":runAggregationQuery"))
++
++
++class GroupBatch(unittest.TestCase):
++    def setUp(self):
++        self.store = MemoryStore()
++        self.reads = []
++        original = self.store.get
++        self.store.get = lambda collection, key: (self.reads.append((collection, key)), original(collection, key))[1]
++        self.lists = []
++        listing = self.store.list
++        self.store.list = lambda collection: (self.lists.append(collection), listing(collection))[1]
++
++    def write(self, changes, **kw):
++        return writer.write_group_batch(changes, "Operator", store=self.store, **kw)
++
++    def test_batch_reads_only_selected_groups_and_commits_audits_together(self):
++        result = self.write([{"id": JID_A, "fields": {"note": "one"}}, {"id": JID_B, "fields": {"note": "two"}}])
++        self.assertEqual(result, {"done": [JID_A, JID_B], "changed": 2})
++        self.assertEqual(self.lists, ["lines", "campaigns"])
++        self.assertEqual(self.reads, [("settings", "defaults"), ("groups", JID_A), ("groups", JID_B)])
++        self.assertEqual(len(self.store.commits), 1)
++        self.assertEqual(len(self.store.commits[0]), 4)
++        self.assertEqual(sum(doc[0] == "audit" for doc in self.store.commits[0]), 2)
++
++    def test_validation_conflict_and_dry_run_never_commit(self):
++        bad = [{"id": JID_A, "fields": {"note": "valid"}}, {"id": JID_B, "fields": {"status": "bad"}}]
++        with self.assertRaises(writer.WriteRefused):
++            self.write(bad)
++        self.assertEqual(self.store.commits, [])
++        with self.assertRaises(writer.WriteRefused):
++            self.write([{"id": JID_A, "fields": {"promos": ["cv"]}, "expected": {"promos": ["cv"]}}])
++        self.assertEqual(self.store.commits, [])
++        self.write([{"id": JID_A, "fields": {"note": "check"}}], dry_run=True)
++        self.assertEqual(self.store.commits, [])
++
++    def test_noops_and_invalid_ids_have_no_writes(self):
++        result = self.write([{"id": JID_A, "fields": {"name": "Alpha"}}])
++        self.assertEqual(result["changed"], 0)
++        self.assertEqual(self.store.commits, [])
++        for changes in ([], [{"id": "bad", "fields": {}}], [{"id": JID_A, "fields": {}}] * 2):
++            with self.assertRaises(writer.WriteRefused):
++                self.write(changes)
++
++    def test_legacy_whatsapp_group_ids_remain_supported(self):
++        legacy = "263786627810-1599925488@g.us"
++        self.store.docs["groups"][legacy] = self.store.docs["groups"].pop(JID_A)
++        self.assertEqual(self.write([{"id": legacy, "fields": {"note": "legacy"}}])["changed"], 1)
++
++    def test_campaign_creation_reads_only_selected_groups(self):
++        console_campaigns.create(payload(), self.store, ENV, verify=lambda *_: None, reconcile=lambda *_: None)
++        self.assertEqual(self.lists, ["lines", "campaigns"])
++        self.assertEqual([key for collection, key in self.reads if collection == "groups"], [JID_A, JID_B])
++        self.assertEqual(len(self.store.commits), 1)
++
++    def test_lost_commit_acknowledgement_is_never_reported_as_nothing_saved(self):
++        self.store.fail_commit = True
++        with self.assertRaises(writer.WriteRefused) as caught:
++            self.write([{"id": JID_A, "fields": {"note": "changed"}}])
++        self.assertEqual(caught.exception.status, 503)
++        self.assertIn("outcome is unknown", str(caught.exception))
++
++
++class SchedulerReads(unittest.TestCase):
++    def test_store_filters_console_campaigns_in_firestore(self):
++        store = object.__new__(console_campaigns.Store)
++        store.transaction = None
++        store.request = Mock(return_value=[])
++        where = {"fieldFilter": {"field": {"fieldPath": "kind"}, "op": "EQUAL", "value": {"stringValue": "console"}}}
++        self.assertEqual(store.list("campaigns", where=where), [])
++        store.request.assert_called_once_with(":runQuery", {"structuredQuery": {
++            "from": [{"collectionId": "campaigns"}], "where": where}})
++
++    def test_repeated_pending_failures_do_not_rewrite_status(self):
++        store = MemoryStore()
++        store.docs["campaigns"]["demo"] = config.encode_fields({"kind": "console", "scheduleStatus": "pending"})
++        listing = store.list
++        store.list = Mock(side_effect=lambda collection, where=None: listing(collection))
++        store.request = Mock()
++        with patch.object(console_campaigns, "reconcile_one", side_effect=RuntimeError("offline")), patch("sys.stderr"):
++            self.assertEqual(console_campaigns.reconcile_all(store), 1)
++            self.assertEqual(console_campaigns.reconcile_all(store), 1)
++        store.request.assert_not_called()
++        self.assertEqual(store.list.call_args.kwargs["where"]["fieldFilter"]["value"], {"stringValue": "console"})
++
++
++class CampaignPreflightReads(unittest.TestCase):
++    def test_switch_and_caption_checks_read_only_one_campaign_document(self):
++        path = Path(__file__).resolve().parents[1] / "bin" / "console-read"
++        loader = importlib.machinery.SourceFileLoader("scoped_console_read", str(path))
++        spec = importlib.util.spec_from_loader(loader.name, loader)
++        bridge = importlib.util.module_from_spec(spec)
++        loader.exec_module(bridge)
++        with patch.object(bridge, "manifest", return_value={"promos": [{"slug": "demo", "enabled": True}]}), \
++             patch.object(bridge.promo_config, "mode", return_value=("firestore", None)), \
++             patch.object(config, "credentials", return_value={"project_id": "test"}), \
++             patch.object(config, "access_token", return_value="tok"), \
++             patch.object(config, "get_document", return_value={"enabled": False, "captions": ["Saved text"]}) as get, \
++             patch.object(bridge, "resolved", side_effect=AssertionError("full config read")):
++            self.assertFalse(bridge.campaign_edit_state("demo")["campaign"]["storeEnabled"])
++            self.assertEqual(bridge.campaign_edit_state("demo", captions_only=True)["captions"], ["Saved text"])
++            self.assertEqual(get.call_count, 2)
++            self.assertEqual(get.call_args.args, ("test", "campaigns", "demo", "tok"))
++
++
++if __name__ == "__main__":
++    unittest.main()

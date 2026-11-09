@@ -38,7 +38,7 @@ export default async function SchedulePage() {
   const nowMinutes = minutesOfDay(new Date());
 
   return (
-    <Shell>
+    <Shell overview={result.overview}>
       <PageHead
         title="Schedule"
         subtitle={`The campaign day in ${BOT_TIMEZONE}. Bars show each run's worst case, not its typical length.`}

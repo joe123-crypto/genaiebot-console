@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
-import { deleteGroup, getGroups, getOverview, groupAction, updateGroup } from "@/src/lib/bot-client";
+import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, updateGroup } from "@/src/lib/bot-client";
 import { emptyGroupDraft, planAssignmentWrites } from "@/src/lib/campaign-group-draft";
 import { canWrite } from "@/src/lib/write-capabilities";
 import {
@@ -38,7 +38,7 @@ function refresh() {
 
 /** The lines and tiers a field may name, from the bot's own read model. */
 async function vocabulary(): Promise<{ lines: string[]; tiers: string[] }> {
-  const overview = await getOverview();
+  const overview = await getConfiguration();
   return {
     lines: overview.accounts.map((line) => line.id),
     tiers: overview.capSettings ? Object.keys(overview.capSettings.bands) : TIERS_FALLBACK,
@@ -56,10 +56,10 @@ export async function addGroupCampaignAction(jid: string, slug: string): Promise
   }
 
   try {
-    const [{ groups }, overview] = await Promise.all([getGroups(undefined, { fresh: true }), getOverview()]);
-    const gate = canWrite(WRITES_ENABLED, overview.writes, "groups", "promos");
+    const [{ groups }, writes, campaign] = await Promise.all([getGroups(undefined, { fresh: true, jid }), getCapabilities(), getCampaignState(slug)]);
+    const gate = canWrite(WRITES_ENABLED, writes, "groups", "promos");
     if (!gate.allowed) return { ok: false, detail: gate.reason };
-    if (!overview.campaigns.some((campaign) => campaign.slug === slug)) {
+    if (!campaign) {
       return { ok: false, detail: "This campaign is no longer on record." };
     }
 
@@ -103,7 +103,7 @@ export async function updateGroupAction(
   }
 
   try {
-    const [{ groups }, words] = await Promise.all([getGroups(undefined, { fresh: true }), vocabulary()]);
+    const [{ groups }, words] = await Promise.all([getGroups(undefined, { fresh: true, jid }), vocabulary()]);
     const group = groups.find((entry) => entry.jid === jid);
     if (!group) return { ok: false, detail: "This group is no longer on record." };
 
@@ -243,7 +243,7 @@ export async function addDiscoveredGroupAction(jid: string): Promise<WriteOutcom
     return { ok: false, detail: "No valid group was named." };
   }
   try {
-    const { groups, discoveredGroups } = await getGroups(undefined, { fresh: true });
+    const { groups, discoveredGroups } = await getGroups(undefined, { fresh: true, jid });
     if (groups.some((entry: Group) => entry.jid === jid)) {
       return { ok: false, detail: "This group is already on record." };
     }
