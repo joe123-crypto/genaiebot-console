@@ -13,12 +13,13 @@ export * from "@/src/domains/campaign-filter";
 
 /** Deduped so the layout and the page it wraps share one read per request. */
 export const loadOverview = cache(async (): Promise<
-  { ok: true; overview: Overview } | { ok: false; detail: string }
+  { ok: true; overview: Overview } | { ok: false; detail: string; status?: number }
 > => {
   try {
     return { ok: true, overview: await getOverview() };
   } catch (error) {
-    if (error instanceof BotUnavailableError) return { ok: false, detail: error.detail };
+    if (error instanceof BotUnavailableError) return { ok: false, detail: error.detail,
+      ...(error.status === undefined ? {} : { status: error.status }) };
     throw error;
   }
 });

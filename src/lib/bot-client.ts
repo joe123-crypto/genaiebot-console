@@ -21,6 +21,7 @@ import type {
   WriteResult,
 } from "@/src/lib/types";
 import { canWrite } from "@/src/lib/write-capabilities";
+import { deduplicateRead, withReadSlot } from "@/src/lib/remote-read";
 
 const run = promisify(execFile);
 
@@ -33,10 +34,12 @@ const run = promisify(execFile);
 
 export class BotUnavailableError extends Error {
   readonly detail: string;
-  constructor(detail: string) {
+  readonly status?: number;
+  constructor(detail: string, status?: number) {
     super("Could not reach the bot's state.");
     this.name = "BotUnavailableError";
     this.detail = detail;
+    this.status = status;
   }
 }
 
@@ -189,16 +192,48 @@ async function readRemote<T>(route: string, params: URLSearchParams): Promise<T>
   const headers: Record<string, string> = { accept: "application/json" };
   if (BOT_API_TOKEN) headers.authorization = `Bearer ${BOT_API_TOKEN}`;
 
-  let response: Response;
-  try {
-    response = await fetch(url, { headers, cache: "no-store" });
-  } catch (error) {
-    throw new BotUnavailableError((error as Error).message);
-  }
-  if (!response.ok) {
-    throw new BotUnavailableError(`${route} returned ${response.status}`);
-  }
-  return (await response.json()) as T;
+  // The authentication context stays in server memory and prevents reuse of
+  // a result fetched with different credentials.
+  return deduplicateRead(JSON.stringify([url, BOT_API_TOKEN]), async () => {
+    for (let attempt = 0; ; attempt++) {
+      const result = await withReadSlot(async () => {
+        let response: Response;
+        try {
+          response = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(15_000) });
+        } catch {
+          throw new BotUnavailableError(`Could not reach ${route}. The connection failed or timed out.`);
+        }
+        if (response.ok) {
+          try {
+            return { ok: true as const, data: await response.json() as T };
+          } catch {
+            throw new BotUnavailableError(`${route} returned invalid JSON`, response.status);
+          }
+        }
+        let message = "";
+        try {
+          const body: unknown = await response.json();
+          if (body && typeof body === "object" && "error" in body &&
+              typeof body.error === "string" && !/[<>]/.test(body.error)) {
+            message = body.error.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 400);
+          }
+        } catch { /* Proxy HTML and other uncurated bodies are never displayed. */ }
+        const error = new BotUnavailableError(
+          `${route} returned ${response.status}${message ? `: ${message}` : ""}`, response.status,
+        );
+        if (response.status !== 503 || attempt >= 2) throw error;
+        const retryAfter = response.headers.get("retry-after");
+        const seconds = retryAfter === null ? NaN : Number(retryAfter);
+        const requested = Number.isFinite(seconds) ? seconds * 1000
+          : retryAfter ? Date.parse(retryAfter) - Date.now() : NaN;
+        return { ok: false as const, delay: Number.isFinite(requested)
+          ? Math.max(0, Math.min(5_000, requested)) : 1000 * (attempt + 1) };
+      });
+      if (result.ok) return result.data;
+      // Sleeping requests hold no slot, so other reads can make progress.
+      await new Promise((resolve) => setTimeout(resolve, result.delay));
+    }
+  });
 }
 
 /**

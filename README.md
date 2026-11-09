@@ -250,6 +250,27 @@ Each tab checks independently, using the same server-side adapters as page loads
 gateway credentials stay on the server. Existing bot errors are retried on the
 next check. Activity remains a placeholder.
 
+## Campaign read failures
+
+Campaign details, previews, group membership and write capabilities load
+independently. A failed read leaves the rest of the campaign page visible.
+Previously loaded sections stay on screen, marked out of date with the time
+they last loaded and a **Retry** button. When a section has never loaded, it
+shows an unavailable placeholder. Unsaved captions and browser group drafts
+survive failed refreshes; saves that need unavailable data stay disabled until
+recovery. Failed membership reads never remove draft additions. Retained data
+lives only in the mounted campaign view and is cleared when navigating to a
+different campaign or reloading the browser.
+
+The remote adapter limits reads to two simultaneous requests per console server
+process, including sidebar overview reads, and shares identical requests only
+while they are in flight. It retries HTTP 503 reads up to twice, respecting
+`Retry-After` with a maximum five-second delay (or one and two seconds when the
+header is absent or invalid). Each fetch has a fifteen-second timeout. This
+reduces collisions with the gateway's two-process bridge limit; independent
+console processes can still encounter a busy gateway. Writes are never retried
+automatically. Bot routes and payloads remain unchanged.
+
 ## WhatsApp account controls
 
 Set `BOT_API_BASE_URL` and `BOT_API_TOKEN` to the live console API, even when

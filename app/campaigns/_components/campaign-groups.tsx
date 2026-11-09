@@ -16,6 +16,10 @@ type Props = {
   liveGroups: CampaignGroupRow[];
   knownGroups: KnownCampaignGroup[];
   variantCount: number;
+  /** Failed reads are not evidence that a group disappeared. */
+  membershipAvailable?: boolean;
+  membershipLoaded?: boolean;
+  previewAvailable?: boolean;
   /** Absent while the console is read-only: the draft then stays a browser
    *  scratchpad, as it always was. Present, it decides whether Apply is armed. */
   gate?: WriteGate;
@@ -190,7 +194,8 @@ export function CampaignGroups(props: Props) {
   return <CampaignGroupEditor key={props.slug} {...props} />;
 }
 
-function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate }: Props) {
+function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate,
+  membershipAvailable = true, membershipLoaded = true, previewAvailable = true }: Props) {
   const id = useId();
   const key = groupDraftKey(slug);
   // Keep the observed storage value with its draft: even a pending effect from
@@ -205,6 +210,10 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
   const [confirming, setConfirming] = useState(false);
   const [applying, setApplying] = useState(false);
   const [failure, setFailure] = useState<ApplyFailure | null>(null);
+
+  useEffect(() => {
+    if (!gate?.allowed || !membershipAvailable || !previewAvailable) setConfirming(false);
+  }, [gate?.allowed, membershipAvailable, previewAvailable]);
 
   useEffect(() => {
     function load(external: boolean) {
@@ -250,7 +259,9 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
       readable = false;
       setStorageFailed(true);
     }
-    const result = reconcileGroupDraft(snapshot.draft, liveGroups, knownGroups);
+    const result = membershipAvailable && previewAvailable
+      ? reconcileGroupDraft(snapshot.draft, liveGroups, knownGroups)
+      : { draft: snapshot.draft, droppedAdditions: 0 };
     if (result.draft !== snapshot.draft) setSnapshot({ ...snapshot, draft: result.draft });
     if (result.droppedAdditions > 0) {
       setNotice(`${plural(result.droppedAdditions, "draft addition")} removed because the groups are no longer known or active.`);
@@ -270,16 +281,21 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
     } catch {
       setStorageFailed(true);
     }
-  }, [snapshot, key, liveGroups, knownGroups]);
+  }, [snapshot, key, liveGroups, knownGroups, membershipAvailable, previewAvailable]);
 
-  const current = draft ? reconcileGroupDraft(draft, liveGroups, knownGroups).draft : emptyGroupDraft();
+  const current = draft ? membershipAvailable && previewAvailable
+    ? reconcileGroupDraft(draft, liveGroups, knownGroups).draft : draft : emptyGroupDraft();
   const removed = new Set(current.removed);
   const knownById = new Map(knownGroups.map((group) => [group.jid, group]));
-  const rows: { group: CampaignGroupRow | KnownCampaignGroup; live: CampaignGroupRow | null }[] =
+  const liveIds = new Set(liveGroups.map((group) => group.jid));
+  const rows: { group: Pick<KnownCampaignGroup, "jid" | "name" | "account"> | CampaignGroupRow; live: CampaignGroupRow | null }[] =
     liveGroups.filter((group) => !removed.has(group.jid)).map((group) => ({ group, live: group }));
   for (const jid of current.added) {
+    // A fresh preview can include an addition applied elsewhere while a failed
+    // membership read prevents us from safely reconciling the stored draft.
+    if (liveIds.has(jid)) continue;
     const group = knownById.get(jid);
-    if (group) rows.push({ group, live: null });
+    rows.push({ group: group ?? { jid, name: null, account: "Unavailable" }, live: null });
   }
   const assigned = new Set(rows.map(({ group }) => group.jid));
   const available = knownGroups.filter((group) => group.status === "active" && !assigned.has(group.jid));
@@ -308,6 +324,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
 
   async function apply() {
     setConfirming(false);
+    if (!gate?.allowed || !membershipAvailable || !previewAvailable || applying) return;
     setApplying(true);
     setFailure(null);
     setNotice(null);
@@ -330,6 +347,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
   }
 
   function add(jids: string[]) {
+    if (!membershipLoaded) return;
     const liveIds = new Set(liveGroups.map((group) => group.jid));
     change({
       ...current,
@@ -351,7 +369,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
         <div className="campaign-group-actions">
           <button type="button" className="btn" disabled={busy || !hasGroupDraft(current)}
             onClick={() => change(emptyGroupDraft())}>Reset draft</button>
-          <button ref={addButton} type="button" className="btn campaign-group-add" disabled={busy} onClick={() => setOpen(true)}>
+          <button ref={addButton} type="button" className="btn campaign-group-add" disabled={busy || !membershipLoaded} onClick={() => setOpen(true)}>
             <Plus size={16} aria-hidden /> Add groups
           </button>
           {gate ? (
@@ -432,7 +450,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups, variantCount, gate
           </tbody>
         </table>
       </div>
-      {open ? <AddGroupsDialog groups={available} close={() => setOpen(false)} add={add} /> : null}
+      {open && membershipLoaded ? <AddGroupsDialog groups={available} close={() => setOpen(false)} add={add} /> : null}
       {removalRow ? <RemoveGroupDialog group={removalRow.group} close={() => setRemoveJid(null)}
         fallbackFocus={addButton} confirm={() => {
           const jid = removalRow.group.jid;

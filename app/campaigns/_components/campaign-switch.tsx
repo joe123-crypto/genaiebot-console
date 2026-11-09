@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Pause, Play } from "lucide-react";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import { setCampaignEnabledAction } from "@/app/campaigns/actions";
@@ -32,13 +32,17 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
   const [error, setError] = useState<{ detail: string; problems?: string[] } | null>(null);
   const [pending, startTransition] = useTransition();
 
+  useEffect(() => {
+    if (!gate.allowed) setTarget(null);
+  }, [gate.allowed]);
+
   function close() {
     setTarget(null);
     setError(null);
   }
 
   function confirm() {
-    if (target === null) return;
+    if (target === null || !gate.allowed || pending) return;
     startTransition(async () => {
       const outcome = await setCampaignEnabledAction(slug, target);
       if (outcome.ok) close();
