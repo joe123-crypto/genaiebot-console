@@ -6,6 +6,16 @@ export type GroupStatus = "active" | "on-hold" | "admin-only" | "not-a-member";
 export type ActivityTier = "busy" | "normal" | "quiet";
 export type GroupSource = "whatsapp" | "operator" | "git" | null;
 
+/** Observations only: these never drive targeting or advertising caps. */
+export type GroupMetrics = {
+  dailyMessageCount: number | null;
+  windowStart: string;
+  asOf: string;
+  coverage: "complete" | "partial" | "unavailable";
+  memberCount: number | null;
+  memberCountObservedAt: string | null;
+};
+
 export type Group = {
   jid: string;
   name: string | null;
@@ -23,6 +33,8 @@ export type Group = {
   cap: number | null;
   replyScore: number | null;
   allowedToday: string[];
+  /** Absent on bot versions before group telemetry. */
+  metrics?: GroupMetrics;
 };
 
 export type Tracking = {
@@ -191,6 +203,7 @@ export type DiscoveredGroup = {
   firstSeenAt: string;
   lastSeenAt: string;
   accounts: { accountId: string; firstSeenAt: string; lastSeenAt: string }[];
+  metrics?: GroupMetrics;
 };
 
 export type GroupDiscovery = {

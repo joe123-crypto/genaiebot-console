@@ -1,12 +1,13 @@
 "use client";
 
-import { useId, useRef } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
 import { STATUS_LABEL, StatusPill } from "@/app/_components/ui";
 import { DeleteGroup } from "@/app/groups/_components/delete-group";
 import { EditGroup } from "@/app/groups/_components/edit-group";
+import { DmcHeading, DmcValue, GroupDetails, MemberValue } from "@/app/groups/_components/group-metrics";
 import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
 import {
   DEFAULT_GROUP_FILTER,
@@ -69,10 +70,11 @@ export function GroupsTable({
   // while already here is applied, the sixty-second refresh is not.
   const [filter, setFilter] = useUrlFilter(initialFilter, groupFilterQuery, GROUP_FILTER_KEYS);
   const search = useRef<HTMLInputElement>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const off = new Set(disabledPromos);
   const visible = sortGroupsForTable(filterGroups(groups, filter));
-  const columns = writesEnabled ? 8 : 7;
+  const columns = writesEnabled ? 10 : 9;
   const unfiltered = isDefaultGroupFilter(filter);
 
   function set(key: keyof GroupFilter, value: string) {
@@ -169,7 +171,7 @@ export function GroupsTable({
       <div
         className="table-wrap"
         role="region"
-        aria-label="Groups, scroll horizontally for actions"
+        aria-label="Groups, scroll horizontally for counts and actions"
         tabIndex={0}
       >
         <table className="data">
@@ -179,9 +181,11 @@ export function GroupsTable({
               <th scope="col">Status</th>
               <th scope="col">Line</th>
               <th scope="col">Tier</th>
+              <DmcHeading />
+              <th scope="col">Members</th>
               <th scope="col">Cap today</th>
               <th scope="col">Campaigns</th>
-              <th scope="col">Note</th>
+              <th scope="col">More</th>
               {writesEnabled ? (
                 <th scope="col">
                   <span className="visually-hidden">Actions</span>
@@ -191,78 +195,97 @@ export function GroupsTable({
           </thead>
           <tbody>
             {visible.map((group) => (
-              <tr key={group.jid}>
-                <td>
-                  <div className="cell-strong">{groupLabel(group)}</div>
-                  <div className="cell-mono">{shortJid(group.jid)}</div>
-                </td>
-                <td>
-                  <StatusPill status={group.status} />
-                </td>
-                <td className="cell-muted">{group.account}</td>
-                <td className="cell-muted">{group.activity}</td>
-                <td>
-                  {group.cap === null ? (
-                    <span className="cell-muted">—</span>
-                  ) : (
-                    <>
-                      <span className="cell-strong">{group.cap}</span>
-                      {group.dailyCapOverride !== null ? (
-                        <span className="pill" style={{ marginLeft: 6 }}>fixed</span>
-                      ) : null}
-                    </>
-                  )}
-                </td>
-                <td>
-                  {group.promos.length === 0 ? (
-                    <span className="cell-muted">none</span>
-                  ) : (
-                    <div className="tag-row">
-                      {group.promos.map((promo) => {
-                        const isOff = off.has(promo);
-                        const isPaused = (group.pausedPromos ?? []).includes(promo);
-                        const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
-                        const weekly = group.weekly[promo];
-                        return (
-                          <span
-                            key={promo}
-                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}`}
-                            title={
-                              isOff
-                                ? "campaign is switched off — it posts nowhere"
-                                : isPaused
-                                  ? "paused for this group — still assigned, but nothing is sent"
-                                  : weekly
-                                    ? `only on ${weekly.join(", ")}`
-                                    : sendsToday
-                                      ? "posts today"
-                                      : "held back by today's cap"
-                            }
-                          >
-                            {campaignTitle(promo)}
-                            {weekly ? ` · ${weekly.join("/")}` : ""}
-                            {isPaused ? " · paused" : ""}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </td>
-                <td className="cell-note" title={group.note ?? undefined}>{group.note ?? ""}</td>
-                {writesEnabled ? (
-                  <td className="cell-actions">
-                    <EditGroup
-                      group={group}
-                      label={confirmLabel(group)}
-                      lines={editing.lines}
-                      tiers={editing.tiers}
-                      gate={editing.edit}
-                      editable={editing.editableFields}
-                    />
-                    <DeleteGroup jid={group.jid} label={confirmLabel(group)} gate={editing.delete} />
+              <Fragment key={group.jid}>
+                <tr>
+                  <td>
+                    <div className="cell-strong">{groupLabel(group)}</div>
+                    <div className="cell-mono">{shortJid(group.jid)}</div>
                   </td>
-                ) : null}
-              </tr>
+                  <td>
+                    <StatusPill status={group.status} />
+                  </td>
+                  <td className="cell-muted">{group.account}</td>
+                  <td className="cell-muted">{group.activity}</td>
+                  <td><DmcValue metrics={group.metrics} /></td>
+                  <td><MemberValue metrics={group.metrics} /></td>
+                  <td>
+                    {group.cap === null ? (
+                      <span className="cell-muted">—</span>
+                    ) : (
+                      <>
+                        <span className="cell-strong">{group.cap}</span>
+                        {group.dailyCapOverride !== null ? (
+                          <span className="pill" style={{ marginLeft: 6 }}>fixed</span>
+                        ) : null}
+                      </>
+                    )}
+                  </td>
+                  <td>
+                    {group.promos.length === 0 ? (
+                      <span className="cell-muted">none</span>
+                    ) : (
+                      <div className="tag-row">
+                        {group.promos.map((promo) => {
+                          const isOff = off.has(promo);
+                          const isPaused = (group.pausedPromos ?? []).includes(promo);
+                          const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
+                          const weekly = group.weekly[promo];
+                          return (
+                            <span
+                              key={promo}
+                              className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}`}
+                              title={
+                                isOff
+                                  ? "campaign is switched off — it posts nowhere"
+                                  : isPaused
+                                    ? "paused for this group — still assigned, but nothing is sent"
+                                    : weekly
+                                      ? `only on ${weekly.join(", ")}`
+                                      : sendsToday
+                                        ? "posts today"
+                                        : "held back by today's cap"
+                              }
+                            >
+                              {campaignTitle(promo)}
+                              {weekly ? ` · ${weekly.join("/")}` : ""}
+                              {isPaused ? " · paused" : ""}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    <button type="button" className="btn group-more"
+                      aria-label={`More about ${confirmLabel(group)}`}
+                      aria-expanded={expanded.has(group.jid)}
+                      aria-controls={`${id}-details-${group.jid}`}
+                      onClick={() => setExpanded((current) => {
+                        const next = new Set(current);
+                        if (next.has(group.jid)) next.delete(group.jid); else next.add(group.jid);
+                        return next;
+                      })}>
+                      More <span aria-hidden="true">{expanded.has(group.jid) ? "▴" : "▾"}</span>
+                    </button>
+                  </td>
+                  {writesEnabled ? (
+                    <td className="cell-actions">
+                      <EditGroup
+                        group={group}
+                        label={confirmLabel(group)}
+                        lines={editing.lines}
+                        tiers={editing.tiers}
+                        gate={editing.edit}
+                        editable={editing.editableFields}
+                      />
+                      <DeleteGroup jid={group.jid} label={confirmLabel(group)} gate={editing.delete} />
+                    </td>
+                  ) : null}
+                </tr>
+                <tr id={`${id}-details-${group.jid}`} hidden={!expanded.has(group.jid)} className="group-details-row">
+                  <td colSpan={columns}><GroupDetails jid={group.jid} note={group.note} metrics={group.metrics} /></td>
+                </tr>
+              </Fragment>
             ))}
             {visible.length === 0 ? (
               <tr>

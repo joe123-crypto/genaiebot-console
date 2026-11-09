@@ -69,7 +69,7 @@ npm run build
 | Screen | State |
 |---|---|
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
-| Groups | Live. One searchable, filterable table: caps, rotation, operator notes. |
+| Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
 | Campaigns | Live. Searchable and filterable; slot, reach, line split, ref prefix, copy. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are listed, not yet shown or editable. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
@@ -138,6 +138,23 @@ would make their groups unreachable from here. Every filter narrows the last.
 
 Rows needing a decision still sort first, so the flat table reads top to bottom
 in the order the three cards did.
+
+**Daily Message Count (DMC)** counts incoming messages over the last 24 hours,
+excluding bot posts and system events. **Members** shows the newest WhatsApp
+member-total observation. Both appear in configured and Unassigned group rows.
+Missing observations display `—`, while an observed zero displays `0`. DMC is
+marked **Partial** during the first 24 hours of collection or monitoring gaps;
+member counts older than two hours are marked **Stale**. These observations do
+not change the activity tier, caps, or campaign targeting.
+
+**More** expands a configured row to show its complete operator note, full ID,
+DMC window and coverage, and member observation time. It works in read-only
+mode and stays expanded across automatic refreshes. Note editing remains in
+the Edit dialog; edit and delete actions stay beside the row.
+
+Real observations need the companion bot collector and bridge update described
+in [integrations/README.md](integrations/README.md#group-activity-and-member-counts).
+Older bots continue working with unavailable metrics.
 
 **Filtering happens in the browser**, over the payload the page already holds.
 The read bridge takes no query parameter but `date` and returns every group

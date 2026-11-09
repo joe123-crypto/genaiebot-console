@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GroupsTable } from "@/app/groups/_components/groups-table";
 import { DEFAULT_GROUP_FILTER } from "@/src/domains/group-filter";
-import type { Group } from "@/src/lib/types";
+import type { Group, GroupMetrics } from "@/src/lib/types";
 
 function group(overrides: Partial<Group> & Pick<Group, "jid">): Group {
   return {
@@ -35,6 +35,12 @@ const props = {
   disabledPromos: [] as string[],
   writesEnabled: false,
   initialFilter: DEFAULT_GROUP_FILTER,
+};
+
+const metrics: GroupMetrics = {
+  dailyMessageCount: 1234, memberCount: 256, coverage: "complete",
+  windowStart: "2026-11-08T12:00:00.000Z", asOf: "2026-11-09T12:00:00.000Z",
+  memberCountObservedAt: "2026-11-09T11:00:00.000Z",
 };
 
 function mount(overrides: Partial<typeof props> = {}) {
@@ -90,6 +96,74 @@ describe("rendering", () => {
   it("renders already filtered when the server parsed a filter from the URL", () => {
     mount({ initialFilter: { ...DEFAULT_GROUP_FILTER, status: "on-hold" } });
     expect(names()).toEqual(["Held Back"]);
+  });
+});
+
+describe("group observations and More", () => {
+  it("shows DMC and members, distinguishing zero from unavailable and partial from complete", () => {
+    mount({ groups: [group({ jid: "1@g.us", name: "Busy", metrics }),
+      group({ jid: "2@g.us", name: "Quiet", metrics: { ...metrics, dailyMessageCount: 0, memberCount: 0, coverage: "partial" } }),
+      group({ jid: "3@g.us", name: "Old bot" })] });
+    expect(screen.getByRole("columnheader", { name: "Daily Message Count" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Members" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "Note" })).toBeNull();
+    const body = rows();
+    expect(within(body[0]).getByText("1,234")).toBeTruthy();
+    expect(within(body[0]).getByText("256")).toBeTruthy();
+    expect(within(body[1]).getAllByText("0")).toHaveLength(2);
+    expect(within(body[1]).getByText("Partial")).toBeTruthy();
+    expect(within(body[2]).getAllByText("—")).toHaveLength(2);
+    expect(within(body[2]).queryByText("Partial")).toBeNull();
+  });
+
+  it("expands the complete note and telemetry details in read-only mode, surviving refresh and filtering", () => {
+    const note = "A complete operator note\nwith a second line and no truncation.";
+    const entry = group({ jid: "1@g.us", name: "Market", note, metrics });
+    const view = mount({ groups: [entry] });
+    const button = screen.getByRole("button", { name: "More about Market" });
+    const detailId = button.getAttribute("aria-controls")!;
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById(detailId)?.hidden).toBe(true);
+    button.focus(); fireEvent.click(button);
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    const details = document.getElementById(detailId)!;
+    expect(details.hidden).toBe(false);
+    expect(details.textContent).toContain(note);
+    expect(within(details).getByText("1@g.us")).toBeTruthy();
+    expect(within(details).getByText(/Complete —/)).toBeTruthy();
+    expect(within(details).getByText(/2026-11-08 12:00:00 UTC to 2026-11-09 12:00:00 UTC/)).toBeTruthy();
+    expect(details.querySelector("td")?.colSpan).toBe(9);
+
+    type("market");
+    view.rerender(createElement(GroupsTable, { ...props, groups: [{ ...entry, metrics: { ...metrics, dailyMessageCount: 1250 } }], initialFilter: { ...DEFAULT_GROUP_FILTER } }));
+    expect(screen.getByRole("button", { name: "More about Market" }).getAttribute("aria-expanded")).toBe("true");
+    expect((searchBox() as HTMLInputElement).value).toBe("market");
+    expect(screen.getByText("1,250")).toBeTruthy();
+    type("absent"); type("market");
+    expect(screen.getByRole("button", { name: "More about Market" }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "More about Market" }));
+    expect(document.getElementById(detailId)?.hidden).toBe(true);
+  });
+
+  it("marks old member counts stale and explains partial or unavailable observations", () => {
+    mount({ groups: [group({ jid: "1@g.us", name: "Market", metrics: { ...metrics, coverage: "partial", memberCountObservedAt: "2026-11-09T08:00:00Z" } })] });
+    expect(screen.getByText("Stale")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "More about Market" }));
+    expect(screen.getByText(/Partial — initial collection/)).toBeTruthy();
+    cleanup();
+    mount({ groups: [group({ jid: "1@g.us", name: "Market" })] });
+    fireEvent.click(screen.getByRole("button", { name: "More about Market" }));
+    expect(screen.getByText("No note.")).toBeTruthy();
+    expect(screen.getByText(/Unavailable — no activity/)).toBeTruthy();
+  });
+
+  it("spans empty results across the correct columns with and without actions", () => {
+    for (const writesEnabled of [false, true]) {
+      mount({ groups: [], writesEnabled });
+      expect(screen.getByText("No groups on record.").closest("td")?.colSpan).toBe(writesEnabled ? 10 : 9);
+      cleanup();
+    }
   });
 });
 
