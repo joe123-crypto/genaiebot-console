@@ -170,3 +170,45 @@ After deploying both sides, verify `overview.writes.campaignCreation` reports
 all capabilities, create a campaign with Enabled off, inspect its pictures,
 caption preview, two-line group assignments and disabled gateway job, then
 explicitly enable it if desired. This change does not deploy or send test adverts.
+
+## Leaving a group and clearing its records
+
+The Groups screen's delete dialog can also take the bot's number out of the
+WhatsApp group and forget what the bot stored about it. Both need the companion
+`genaebot` change on branch `claude/group-leave-actions`.
+
+That change adds `deploy/railway/whatsapp-group-actions.mjs`, injected into the
+channel monitor by `whatsapp-lid-loader.mjs` beside the group inventory, which
+is the only place a live Baileys socket is in reach — the gateway exposes no RPC
+for leaving a group and a second process cannot borrow an account's socket. It
+also adds `workspace/bin/console-group-action`, `workspace/lib/group_cleanup.py`
+and the route:
+
+```
+POST /internal/console/groups/<urlencoded jid>/actions
+     {"leave": true, "clearRecords": true, "account": "ads", "actor": "operator name"}
+```
+
+behind the same bearer token as the config route. It needs **no Firestore write
+key**: neither action writes a document. The console therefore gates these
+controls on a new, separate capability rather than on `overview.writes`:
+
+```json
+"actions": { "leaveGroup": true, "clearRecords": true }
+```
+
+Absent on an older bot, which the console reads as "cannot" and shows the boxes
+disabled with the reason. `GENAIE_GROUP_ACTIONS=0` switches the surface off at
+both ends.
+
+A leave is queued at
+`$OPENCLAW_STATE_DIR/runtime/whatsapp-group-actions/<accountId>/requests/<uuid>.json`
+and answered in `results/`; the group ID never becomes a filename. A successful
+leave prunes the group from that account's discovery inventory, through the
+discovery module itself so the write is ordered against a scan in flight. An
+answer that does not arrive within the bridge's 25-second wait comes back as
+unconfirmed, and the request stays queued for a reconnecting account.
+
+Deploy the bot update first, then this console. Validate the bot with
+`./deploy/ci-check.sh` and the adapter-pinned integration tests; validate the
+console with `npm test`, `npm run typecheck` and `npm run build`.

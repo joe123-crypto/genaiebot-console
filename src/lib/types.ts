@@ -156,6 +156,15 @@ export type ConfigShadow = {
  * screen cannot offer an edit the bot is going to refuse. `fields` and `delete`
  * are its `EDITABLE` / `DELETABLE` verbatim.
  */
+/** What the bot will DO to a group, as opposed to change about it: take the
+ *  account's number out of the WhatsApp group, and forget what it stored about
+ *  it. Reported apart from WriteCapabilities because neither writes Firestore,
+ *  so neither depends on the write key. Absent from an older bot. */
+export type ActionCapabilities = {
+  leaveGroup: boolean;
+  clearRecords: boolean;
+};
+
 export type WriteCapabilities = {
   /** Whether the bot's console API holds a write key at all. */
   enabled: boolean;
@@ -189,6 +198,7 @@ export type Overview = {
   /** Absent from a bot older than the console's config writes. That is read as
    *  "this bot cannot be written to", never as "everything is writable". */
   writes?: WriteCapabilities;
+  actions?: ActionCapabilities;
   capSettings?: CapSettings;
   campaigns: Campaign[];
 };

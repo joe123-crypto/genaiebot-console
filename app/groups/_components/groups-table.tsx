@@ -34,6 +34,10 @@ export type GroupEditing = {
   /** The Edit dialog's fields the bot accepts; the rest show, disabled. */
   editableFields: string[];
   delete: WriteGate;
+  /** Taking the bot out of the WhatsApp group, and forgetting what it stored
+   *  about it. Neither writes config, so both are gated apart from `delete`. */
+  leave: WriteGate;
+  clearRecords: WriteGate;
   lines: string[];
   tiers: string[];
 };
@@ -44,6 +48,8 @@ const NO_EDITING: GroupEditing = {
   edit: { allowed: false, reason: READ_ONLY_REASON },
   editableFields: [],
   delete: { allowed: false, reason: READ_ONLY_REASON },
+  leave: { allowed: false, reason: READ_ONLY_REASON },
+  clearRecords: { allowed: false, reason: READ_ONLY_REASON },
   lines: [],
   tiers: [],
 };
@@ -284,7 +290,14 @@ export function GroupsTable({
                         gate={editing.edit}
                         editable={editing.editableFields}
                       />
-                      <DeleteGroup jid={group.jid} label={confirmLabel(group)} gate={editing.delete} />
+                      <DeleteGroup
+                        jid={group.jid}
+                        label={confirmLabel(group)}
+                        account={group.account}
+                        gate={editing.delete}
+                        leaveGate={editing.leave}
+                        clearGate={editing.clearRecords}
+                      />
                     </td>
                   ) : null}
                 </tr>

@@ -1,4 +1,4 @@
-import type { WriteCapabilities } from "@/src/lib/types";
+import type { ActionCapabilities, WriteCapabilities } from "@/src/lib/types";
 
 /**
  * Whether a control may change something, and if not, why -- in words a screen
@@ -84,6 +84,30 @@ export const CAMPAIGN_DELETE_NOT_BUILT =
  *  something true rather than arming itself against nothing. */
 export function campaignDeleteReason(gate: WriteGate) {
   return gate.allowed ? CAMPAIGN_DELETE_NOT_BUILT : gate.reason;
+}
+
+export const NO_ACTIONS_REASON =
+  "This bot cannot act on WhatsApp groups from the console yet. Deploy genaebot with console group actions to use this.";
+export const ACTIONS_OFF_REASON =
+  "Group actions are switched off on this bot.";
+
+/**
+ * Whether the bot will perform one of the group actions, and if not, why.
+ *
+ * Gated on `overview.actions` rather than `overview.writes`: leaving a WhatsApp
+ * group and clearing a group's local records write no Firestore document, so
+ * asking whether the bot holds a write key would hide a working control behind
+ * a credential it does not use. Absent means an older bot, read as "cannot".
+ */
+export function canAct(
+  consoleWrites: boolean,
+  actions: ActionCapabilities | undefined,
+  name: keyof ActionCapabilities,
+): WriteGate {
+  if (!consoleWrites) return { allowed: false, reason: READ_ONLY_REASON };
+  if (!actions) return { allowed: false, reason: NO_ACTIONS_REASON };
+  if (!actions[name]) return { allowed: false, reason: ACTIONS_OFF_REASON };
+  return { allowed: true };
 }
 
 export function canDelete(

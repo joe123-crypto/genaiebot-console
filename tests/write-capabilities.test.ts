@@ -81,3 +81,53 @@ describe("canDelete", () => {
     expect(canDelete(true, { ...LIVE, enabled: false }, "groups").allowed).toBe(false);
   });
 });
+
+/**
+ * Group actions are gated apart from writes on purpose.
+ *
+ * `writes.enabled` means precisely "the bot holds the Firestore write key".
+ * Leaving a WhatsApp group and clearing a group's stored records write no
+ * document, so asking that question about them would hide a working control
+ * behind a credential it never uses.
+ */
+describe("canAct", () => {
+  it("allows an action the bot offers", async () => {
+    const { canAct } = await import("@/src/lib/write-capabilities");
+    expect(canAct(true, { leaveGroup: true, clearRecords: true }, "leaveGroup"))
+      .toEqual({ allowed: true });
+  });
+
+  it("refuses while the console is read-only", async () => {
+    const { canAct, READ_ONLY_REASON } = await import("@/src/lib/write-capabilities");
+    expect(canAct(false, { leaveGroup: true, clearRecords: true }, "leaveGroup"))
+      .toEqual({ allowed: false, reason: READ_ONLY_REASON });
+  });
+
+  it("reads an older bot's silence as cannot, never as everything", async () => {
+    const { canAct, NO_ACTIONS_REASON } = await import("@/src/lib/write-capabilities");
+    expect(canAct(true, undefined, "leaveGroup"))
+      .toEqual({ allowed: false, reason: NO_ACTIONS_REASON });
+  });
+
+  it("says when the bot has the surface switched off", async () => {
+    const { canAct, ACTIONS_OFF_REASON } = await import("@/src/lib/write-capabilities");
+    expect(canAct(true, { leaveGroup: false, clearRecords: true }, "leaveGroup"))
+      .toEqual({ allowed: false, reason: ACTIONS_OFF_REASON });
+  });
+
+  it("judges each action on its own", async () => {
+    const { canAct } = await import("@/src/lib/write-capabilities");
+    const actions = { leaveGroup: false, clearRecords: true };
+    expect(canAct(true, actions, "clearRecords").allowed).toBe(true);
+    expect(canAct(true, actions, "leaveGroup").allowed).toBe(false);
+  });
+
+  it("does not depend on the write key", async () => {
+    const { canAct, canDelete } = await import("@/src/lib/write-capabilities");
+    const writes = { enabled: false, affectsProduction: true, fields: {}, delete: [] };
+    // The bot cannot write config, and can still act on the WhatsApp group.
+    expect(canDelete(true, writes, "groups").allowed).toBe(false);
+    expect(canAct(true, { leaveGroup: true, clearRecords: true }, "leaveGroup").allowed)
+      .toBe(true);
+  });
+});

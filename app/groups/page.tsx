@@ -3,7 +3,7 @@ import { BotError, PageHead } from "@/app/_components/ui";
 import { BotUnavailableError, getGroups } from "@/src/lib/bot-client";
 import { isAdvertising, loadOverview, parseGroupFilter } from "@/src/domains/console";
 import { GROUP_EDIT_FIELDS } from "@/src/domains/group-edit";
-import { canDelete, canWrite } from "@/src/lib/write-capabilities";
+import { canAct, canDelete, canWrite } from "@/src/lib/write-capabilities";
 import { plural } from "@/src/lib/format";
 import { WRITES_ENABLED } from "@/src/config";
 import { GroupsTable, type GroupEditing } from "@/app/groups/_components/groups-table";
@@ -21,6 +21,10 @@ function groupEditing(overview: Overview | undefined): GroupEditing {
     edit: canWrite(WRITES_ENABLED, writes, "groups"),
     editableFields: GROUP_EDIT_FIELDS.filter((field) => accepted.has(field)),
     delete: canDelete(WRITES_ENABLED, writes, "groups"),
+    // Gated on what the bot will DO, not on the write key: neither of these
+    // writes config, so a bot can take a delete and refuse them.
+    leave: canAct(WRITES_ENABLED, overview?.actions, "leaveGroup"),
+    clearRecords: canAct(WRITES_ENABLED, overview?.actions, "clearRecords"),
     lines: (overview?.accounts ?? []).map((line) => line.id),
     tiers: overview?.capSettings ? Object.keys(overview.capSettings.bands) : TIERS_FALLBACK,
   };
