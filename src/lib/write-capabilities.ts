@@ -59,6 +59,33 @@ export function canWrite(
   return gate;
 }
 
+/**
+ * Why a campaign's delete button is there and switched off.
+ *
+ * The bot's writer removes groups and nothing else. For a campaign declared in
+ * the manifest it says why: that campaign is a script, a cron and an installer
+ * run rather than a record, and deleting its Firestore document would not even
+ * take the row off the Campaigns table -- the row comes from the manifest, and
+ * the document only carries the operator's switch, so a delete that "worked"
+ * would hand the campaign back its default state. A campaign created from the
+ * console is a record, and could be removed one day; the bot still does not,
+ * and until it does this console must not pretend otherwise.
+ *
+ * The button is shown switched off rather than left out, the same way the
+ * campaign pictures' add and remove are, so the gap is named where an operator
+ * looks for it.
+ */
+export const CAMPAIGN_DELETE_NOT_BUILT =
+  "Campaigns cannot be deleted from here yet. Turn it off instead: it then posts nothing, and its groups, copy and pictures stay as they are.";
+
+/** Prefer the bot's own words. It reports, collection by collection, what its
+ *  writer will delete; when campaigns are not on that list the reason it gives
+ *  is the accurate one. If a bot ever does list them, the button still says
+ *  something true rather than arming itself against nothing. */
+export function campaignDeleteReason(gate: WriteGate) {
+  return gate.allowed ? CAMPAIGN_DELETE_NOT_BUILT : gate.reason;
+}
+
 export function canDelete(
   consoleWrites: boolean,
   writes: WriteCapabilities | undefined,

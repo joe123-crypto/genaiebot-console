@@ -4,8 +4,20 @@
     {
       "name": "console",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "console-writes",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "CONSOLE_WRITES=1 npm run dev -- -p 3100"
+      ],
+      "port": 3100
     }
   ]
 }
