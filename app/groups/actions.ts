@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
-import { deleteGroup, getGroups, getOverview, updateGroup } from "@/src/lib/bot-client";
+import { deleteGroup, getGroups, getOverview, groupAction, updateGroup } from "@/src/lib/bot-client";
 import { emptyGroupDraft, planAssignmentWrites } from "@/src/lib/campaign-group-draft";
 import { canWrite } from "@/src/lib/write-capabilities";
 import {
@@ -131,14 +131,48 @@ export async function updateGroupAction(
   return { ok: true };
 }
 
+/** What a delete was asked to do beyond removing the record. Both are off
+ *  unless the operator ticked them. */
+export type DeleteGroupOptions = {
+  reason?: string;
+  /** Take the bot's number out of the WhatsApp group. */
+  leave?: boolean;
+  /** Forget the per-campaign send history for the group. */
+  clearRecords?: boolean;
+  /** The line that is in the group. Read from the row before the delete,
+   *  because the record that carries it is gone by the time we leave. */
+  account?: string;
+};
+
 /**
- * Remove a group from the bot's records. The bot commits the whole record into
- * its audit trail in the same write, so it can be recreated from there; while
- * the bot is still in the WhatsApp group, discovery lists it again as unassigned.
+ * Remove a group from the bot's records, and optionally take the bot out of the
+ * WhatsApp group and forget what it stored about it.
+ *
+ * **The order is deliberate: record, then leave, then records.**
+ *
+ * Deleting the record is the step that can still be refused -- the bot
+ * re-validates the whole prospective config and will reject a delete that would
+ * break something. Leaving is the step that cannot be undone without a new
+ * invite. So the refusable one goes first: if the leave then fails, the group
+ * simply reappears under Unassigned, which is what a plain delete has always
+ * done. The other way round, a refused delete would leave the bot outside a
+ * group it is still configured to advertise to, and every later send into it
+ * would fail.
+ *
+ * A leave or a clear that does not come off therefore does not make the delete
+ * a failure. It comes back as a warning on a successful outcome, because the
+ * record really is gone and saying otherwise would invite a retry.
  */
-export async function deleteGroupAction(jid: string, reason?: string): Promise<WriteOutcome> {
+export async function deleteGroupAction(
+  jid: string,
+  options: DeleteGroupOptions | string = {},
+): Promise<WriteOutcome> {
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (!jid) return { ok: false, detail: "No group was named." };
+  // A bare reason is the shape this took before there was anything else to ask
+  // for; keeping it means an older caller cannot silently lose its reason.
+  const { reason, leave = false, clearRecords = false, account } =
+    typeof options === "string" ? { reason: options } as DeleteGroupOptions : options;
   const why = typeof reason === "string" ? reason.trim() : "";
   if (why.length > 500) return { ok: false, detail: "The reason must be 500 characters or fewer." };
 
@@ -147,8 +181,53 @@ export async function deleteGroupAction(jid: string, reason?: string): Promise<W
   } catch (error) {
     return failedWrite(error);
   }
+
+  const warnings: string[] = [];
+  if (leave || clearRecords) {
+    try {
+      const result = await groupAction(jid, {
+        leave, clearRecords, account, by: OPERATOR_NAME,
+      });
+      warnings.push(...groupActionWarnings(result, { leave, clearRecords }));
+    } catch (error) {
+      const outcome = failedWrite(error);
+      // The record is gone either way, so this is a warning on a success, not
+      // a failure that would have the operator delete it again.
+      warnings.push(outcome.ok
+        ? "The bot did not say what it did about the WhatsApp group."
+        : `${leave ? "The bot may still be in the WhatsApp group" : "The group's stored records may not have been cleared"}: ${outcome.detail}`);
+    }
+  }
+
   refresh();
-  return { ok: true };
+  return warnings.length > 0 ? { ok: true, warnings } : { ok: true };
+}
+
+/** The bot's answer, in words for the operator. Only what did NOT happen is
+ *  worth saying: the record is gone and the dialog is about to close. */
+function groupActionWarnings(
+  result: Awaited<ReturnType<typeof groupAction>>,
+  asked: { leave: boolean; clearRecords: boolean },
+): string[] {
+  const warnings: string[] = [];
+  if (asked.leave) {
+    const leave = result?.leave;
+    if (!leave?.requested) {
+      warnings.push("The bot did not act on the WhatsApp group.");
+    } else if (leave.ok === null || leave.ok === undefined) {
+      // Queued but unanswered. Not a failure, and not a success either.
+      warnings.push(
+        "Leaving the WhatsApp group was not confirmed. The request is queued, so check the group before asking again.");
+    } else if (!leave.ok) {
+      warnings.push(leave.error === "not_authorized"
+        ? "The bot could not leave the WhatsApp group: its account was not allowed to."
+        : "The bot could not leave the WhatsApp group, so its number is still in it.");
+    }
+  }
+  if (asked.clearRecords && !result?.cleared?.requested) {
+    warnings.push("The group's stored records were not cleared.");
+  }
+  return warnings;
 }
 
 /**

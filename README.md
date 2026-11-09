@@ -152,6 +152,47 @@ DMC window and coverage, and member observation time. It works in read-only
 mode and stays expanded across automatic refreshes. Note editing remains in
 the Edit dialog; edit and delete actions stay beside the row.
 
+### Deleting a group
+
+The trash button removes a group from the bot's records: it leaves every
+campaign, and the whole record goes into the bot's audit trail in the same
+write, so it can be recreated from there. Typing the group's name is the
+confirmation, because a group an operator cannot name is a row they have not
+read.
+
+On its own, that does not touch WhatsApp. The bot stays in the group, so it
+comes back on the same screen under **Unassigned**. Two tick boxes in the dialog
+finish the job, both off unless ticked:
+
+- **Also take the bot's number out of the WhatsApp group.** Issued from that
+  group's line only. Getting back in needs a new invite, and if another line is
+  also a member the group stays listed. A successful leave also drops the group
+  from that line's discovery inventory — without that it would reappear under
+  Unassigned whether or not the bot had left, because the inventory is never
+  pruned on its own.
+- **Also clear what the bot has stored for this group.** Forgets which day each
+  campaign last posted there. Replies already counted are kept: they are keyed
+  by a code derived from the group's ID, they are written by another part of the
+  bot, and they are evidence somebody answered an advert.
+
+**The record goes first, then the leave.** Removing the record is the step the
+bot can still refuse; leaving is the step that cannot be undone. Doing the
+refusable one first means a failed leave costs nothing more than the group
+reappearing under Unassigned, which is what a plain delete has always done. The
+other way round would leave the bot outside a group it was still configured to
+advertise to.
+
+So a leave that does not come off is **not** a failed delete. The record is
+gone, and the dialog stays open to say what did not happen rather than closing
+over it — the row is about to disappear and take that chance with it. A leave
+the bot has queued but not confirmed is reported as unconfirmed, not as a
+failure, so nobody retries something that already happened.
+
+Both boxes need the companion bot update described in
+[integrations/README.md](integrations/README.md#leaving-a-group-and-clearing-its-records).
+Against an older bot they show disabled with the bot's own reason, and the
+delete works exactly as before.
+
 Real observations need the companion bot collector and bridge update described
 in [integrations/README.md](integrations/README.md#group-activity-and-member-counts).
 Older bots continue working with unavailable metrics.

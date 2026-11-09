@@ -443,3 +443,94 @@ describe("updateCampaignCaptions", () => {
     expect(JSON.parse(spawned[0].stdin!)).toEqual({ collection: "campaigns", id: "cv", fields: { captions }, actor: "Joseph" });
   });
 });
+
+/**
+ * Group actions are a different route from the config writer, because they are
+ * a different kind of thing: they change WhatsApp and the volume, not the
+ * config document. The bot gates them on the gateway rather than on its write
+ * key, so these pin that the console asks at the right address and sends only
+ * what was ticked.
+ */
+describe("groupAction", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock("node:child_process");
+    vi.doUnmock("node:fs");
+  });
+
+  const REMOTE = {
+    BOT_WRITE_API_BASE_URL: "https://write.example/",
+    BOT_WRITE_TOKEN: "write-token",
+    WRITE_SOURCE: "remote",
+    WRITES_ENABLED: true,
+  };
+
+  function stubFetch(reply: { ok?: boolean; status?: number; body?: string }) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return {
+        ok: reply.ok ?? true,
+        status: reply.status ?? 200,
+        text: async () => reply.body ?? "{}",
+      } as Response;
+    });
+    return calls;
+  }
+
+  it("refuses while writes are switched off, before reaching anything", async () => {
+    const { groupAction, WritesDisabledError } = await loadWith("remote");
+    const calls = stubFetch({});
+    await expect(groupAction("1203@g.us", { leave: true, clearRecords: false, by: "Joseph" }))
+      .rejects.toBeInstanceOf(WritesDisabledError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("posts to the group action route, not the config one", async () => {
+    const { groupAction } = await loadWith("remote", REMOTE);
+    const result = { jid: "1203@g.us", account: "ads",
+                     leave: { requested: true, ok: true, already: false, error: null },
+                     cleared: { requested: true, campaigns: {}, checked: 1 } };
+    const calls = stubFetch({ body: JSON.stringify({ ok: true, status: 200, ...result }) });
+
+    await expect(groupAction("1203@g.us",
+      { leave: true, clearRecords: true, account: "ads", by: "Joseph" }))
+      .resolves.toMatchObject(result);
+
+    expect(calls[0].url).toBe(
+      "https://write.example/internal/console/groups/1203%40g.us/actions",
+    );
+    expect(calls[0].init.method).toBe("POST");
+    expect((calls[0].init.headers as Record<string, string>).authorization).toBe(
+      "Bearer write-token",
+    );
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(
+      { leave: true, clearRecords: true, account: "ads", actor: "Joseph" });
+  });
+
+  it("sends only what was ticked, so an untouched box asks for nothing", async () => {
+    const { groupAction } = await loadWith("remote", REMOTE);
+    const calls = stubFetch({ body: "{}" });
+    await groupAction("1203@g.us", { leave: false, clearRecords: true, by: "Joseph" });
+    expect(JSON.parse(String(calls[0].init.body)))
+      .toEqual({ clearRecords: true, actor: "Joseph" });
+  });
+
+  it("bounds the call, so an operator is never left waiting on a leave", async () => {
+    const { groupAction } = await loadWith("remote", REMOTE);
+    const calls = stubFetch({ body: "{}" });
+    await groupAction("1203@g.us", { leave: true, clearRecords: false, by: "Joseph" });
+    expect(calls[0].init.signal).toBeDefined();
+  });
+
+  it("keeps the bot's own words when it refuses", async () => {
+    const { groupAction, WriteRefusedError } = await loadWith("remote", REMOTE);
+    stubFetch({ ok: false, status: 400,
+                body: JSON.stringify({ ok: false, status: 400,
+                                       error: "jid must be a WhatsApp group id",
+                                       problems: [] }) });
+
+    await expect(groupAction("nope", { leave: true, clearRecords: false, by: "Joseph" }))
+      .rejects.toBeInstanceOf(WriteRefusedError);
+  });
+});

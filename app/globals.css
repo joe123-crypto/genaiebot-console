@@ -1112,3 +1112,37 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .campaign-create-advanced h3 { font-size: 14px; margin-top: 24px; }
 .campaign-create-restriction { border-bottom: 1px solid var(--border); padding: 14px 0; font-size: 13px; }
 @media (max-width: 600px) { .campaign-create-columns { grid-template-columns: 1fr; gap: 0; } }
+
+/* The optional halves of a delete: taking the bot out of the WhatsApp group,
+   and forgetting what it stored. Each is a claim about what will happen, so
+   the reason it cannot sits under the label rather than only in a tooltip. */
+.delete-group-extras {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 12px;
+  margin: 0 0 14px;
+}
+
+.delete-group-extras legend { padding: 0 4px; margin-bottom: 0; }
+
+.delete-group-extra {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.delete-group-extra + .delete-group-extra { margin-top: 10px; }
+.delete-group-extra input { margin-top: 2px; flex: none; }
+.delete-group-extra span { display: block; }
+.delete-group-extra:has(input:disabled) { cursor: not-allowed; opacity: 0.72; }
+
+.delete-group-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.modal-warning ul { margin: 0; padding-left: 18px; }
+.modal-warning li + li { margin-top: 4px; }

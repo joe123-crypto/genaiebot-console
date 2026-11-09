@@ -58,6 +58,15 @@ const BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-read");
 const WRITE_BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin", "console-write");
 
 /**
+ * Group actions go through a third bridge, `console-group-action`. It holds no
+ * Firestore credential at all: it queues a leave for the account's own channel
+ * monitor, which owns the only socket that can perform one, and edits the
+ * per-campaign state files on the volume.
+ */
+const ACTION_BRIDGE = path.join(GENAEBOT_CHECKOUT, "workspace", "bin",
+                                "console-group-action");
+
+/**
  * Why captions cannot be saved, or undefined when they can. The bot decides:
  * caption overrides need a companion bot update, and until it adds `captions` to
  * the writer's editable fields, `writes` says so and the editor stays a draft
@@ -474,6 +483,50 @@ export function deleteGroup(
     ...(reason ? { reason } : {}),
     ...(dryRun ? { dryRun } : {}),
   }, { by });
+}
+
+/**
+ * What the bot did when asked to act on a group.
+ *
+ * `leave.ok` is deliberately three-valued. `null` means the request reached the
+ * account's queue but no answer came back in time -- which is not failure: the
+ * leave may well have landed, and reporting it as failed would have an operator
+ * retry something that already happened.
+ */
+export type GroupActionResult = {
+  jid: string;
+  account: string;
+  leave: { requested: boolean; ok?: boolean | null; already?: boolean; error?: string | null };
+  cleared: { requested: boolean; campaigns?: Record<string, string[]>; checked?: number };
+};
+
+/**
+ * Take the account's number out of a WhatsApp group, forget what the bot stored
+ * about it, or both. At least one must be asked for.
+ *
+ * A separate route from `writeConfig` because neither of these writes Firestore:
+ * the bot gates them on the gateway rather than on its write key. It still goes
+ * to the write host with the write token, because it changes something.
+ */
+export async function groupAction(
+  jid: string,
+  { leave, clearRecords, account, by }: {
+    leave: boolean;
+    clearRecords: boolean;
+    account?: string;
+    by: string;
+  },
+): Promise<GroupActionResult> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  const body = {
+    ...(leave ? { leave: true } : {}),
+    ...(clearRecords ? { clearRecords: true } : {}),
+    ...(account ? { account } : {}),
+    actor: by,
+  };
+  const route = `groups/${encodeURIComponent(jid)}/actions`;
+  if (WRITE_SOURCE === "remote") return writeRemote<GroupActionResult>(route, body);
+  return runBridge<GroupActionResult>(ACTION_BRIDGE, [], { jid, ...body });
 }
 
 /** Uses the bot's validated, audited config writer, rather than a console copy. */
