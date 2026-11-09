@@ -109,6 +109,13 @@ public image origin, and its existing `GCP_SERVICE_ACCOUNT_WRITE_B64` supplied
 only to the console API. The new scripts are staged with `workspace/bin` and
 `workspace/lib`; there is no generated per-campaign code or manual installer.
 
+Deployment alone does not switch image storage. If overview reports
+`campaignCreation.create=true`, `scheduling=true`, and `images=false`, the bot
+update is present but its R2 image configuration is unavailable. Set the bot's
+`GENAIE_AD_ASSETS_SOURCE=r2` and `GENAIE_AD_ASSETS_BASE_URL` to the existing
+bucket's public HTTPS origin. These bot settings are separate from the console's
+four upload credentials below; both must be configured for creation.
+
 The authenticated `POST /internal/console/campaigns/create` route accepts the
 `NewCampaign` shape in `src/domains/campaign-create.ts`, plus server-assigned
 `actor`. `requestId` is stable across retries. Success reports `slug` and
