@@ -143,6 +143,7 @@ describe("updateGroupAction", () => {
     expect(await updateGroupAction(JID, { status: "on-hold", daily_cap: "2" },
                                    { status: "active", daily_cap: null })).toEqual({ ok: true });
     expect(updateGroup).toHaveBeenCalledWith(JID, { status: "on-hold", daily_cap: 2 }, { by: "Joseph" });
+    expect(getGroups).toHaveBeenCalledWith(undefined, { fresh: true });
     expect(revalidate.mock.calls).toEqual([["/groups"], ["/"]]);
   });
 
@@ -193,6 +194,18 @@ describe("updateGroupAction", () => {
     getGroups.mockResolvedValue({ groups: [] });
     const outcome = await updateGroupAction(JID, { status: "on-hold" }, { status: "active" });
     expect(outcome.ok || outcome.detail).toMatch(/no longer on record/);
+  });
+
+  it("does not attempt a write when the fresh config read is quota limited", async () => {
+    const { updateGroupAction } = await loadActions();
+    const { BotUnavailableError } = await import("@/src/lib/bot-client");
+    const failure = new BotUnavailableError("config unavailable");
+    Object.assign(failure, { metadata: { code: "config_rate_limited", upstreamStatus: 429 } });
+    getGroups.mockRejectedValueOnce(failure);
+    const outcome = await updateGroupAction(JID, { activity: "busy" }, { activity: "normal" });
+    expect(outcome).toMatchObject({ ok: false, code: "config_rate_limited", detail: expect.stringContaining("Nothing was saved") });
+    expect(updateGroup).not.toHaveBeenCalled();
+    expect(revalidate).not.toHaveBeenCalled();
   });
 });
 

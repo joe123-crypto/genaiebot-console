@@ -26,7 +26,22 @@ rather than here. That is deliberate: the bridge imports the bot's own
 `promo_membership`, `promo_caps` and `promo_broadcast` modules rather than
 reimplementing them, so a caption preview is the exact text the cron would send,
 with the same ref code, the same `wa.me` link and the same daily cap decision.
-It is read-only, never contacts the gateway, and never records a cap snapshot.
+It never changes operator config, contacts the gateway, or records a cap snapshot.
+The bot maintains private config display caches and outage snapshots on its volume.
+
+Console config displays share one five-minute cache across pages and tabs. Metrics
+and discovery retain their existing refresh schedules. Save preflight reads use
+`fresh=1` (`--fresh-config` locally) to bypass both backend caches and require live
+Firestore config; failed live reads never authorize a save from a snapshot. Deploy
+the companion bot support before this console version. Attempted config writes
+and campaign creation invalidate the display caches, so saved changes appear
+immediately. External edits may take five minutes to appear.
+
+Firestore quota refusals keep the group editor and its draft open, explain that
+nothing was saved, and allow a manual retry. Backend display reads wait five
+minutes between failed refreshes and retain the original snapshot timestamp and
+failure reason. Unknown write outcomes, including timeouts, still say the change
+may have happened. This does not increase Firestore quotas or change billing.
 
 Switching between them is environment only, so the same build runs locally and
 on Vercel:

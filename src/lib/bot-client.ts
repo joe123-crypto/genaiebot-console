@@ -23,6 +23,7 @@ import type {
 } from "@/src/lib/types";
 import { canWrite } from "@/src/lib/write-capabilities";
 import { deduplicateRead, withReadSlot } from "@/src/lib/remote-read";
+import { botErrorMetadata, type BotErrorMetadata } from "@/src/lib/bot-error-metadata";
 
 const run = promisify(execFile);
 
@@ -36,11 +37,13 @@ const run = promisify(execFile);
 export class BotUnavailableError extends Error {
   readonly detail: string;
   readonly status?: number;
-  constructor(detail: string, status?: number) {
+  readonly metadata: BotErrorMetadata;
+  constructor(detail: string, status?: number, metadata: BotErrorMetadata = {}) {
     super("Could not reach the bot's state.");
     this.name = "BotUnavailableError";
     this.detail = detail;
     this.status = status;
+    this.metadata = botErrorMetadata(metadata);
   }
 }
 
@@ -108,8 +111,8 @@ export function imageWritesUnavailableReason(): string {
 export class WriteRefusedError extends BotUnavailableError {
   readonly problems: string[];
   readonly status: number;
-  constructor(detail: string, problems: string[], status: number) {
-    super(detail);
+  constructor(detail: string, problems: string[], status: number, metadata: BotErrorMetadata = {}) {
+    super(detail, status, metadata);
     this.name = "WriteRefusedError";
     this.problems = problems;
     this.status = status;
@@ -129,7 +132,7 @@ function refusalFrom(text: string | undefined): WriteRefusedError | null {
       ? body.problems.filter((p): p is string => typeof p === "string")
       : [];
     return new WriteRefusedError(body.error, problems,
-      typeof body.status === "number" ? body.status : 400);
+      typeof body.status === "number" ? body.status : 400, botErrorMetadata(payload));
   } catch {
     return null;
   }
@@ -147,6 +150,12 @@ function reportedError(stdout: string | undefined) {
     return null;
   }
   return null;
+}
+
+function reportedUnavailable(stdout: string | undefined): BotUnavailableError | null {
+  const detail = reportedError(stdout);
+  if (!detail || !stdout) return null;
+  return new BotUnavailableError(detail, undefined, botErrorMetadata(JSON.parse(stdout)));
 }
 
 /**
@@ -180,7 +189,7 @@ async function runBridge<T>(bridge: string, args: string[], input?: unknown): Pr
     if (err.code === "ENOENT") {
       throw new BotUnavailableError("python3 is not on PATH");
     }
-    throw refusalFrom(err.stdout) ?? new BotUnavailableError(
+    throw refusalFrom(err.stdout) ?? reportedUnavailable(err.stdout) ?? new BotUnavailableError(
       reportedError(err.stdout) || err.stderr?.trim() || err.message,
     );
   }
@@ -225,17 +234,19 @@ async function readRemote<T>(route: string, params: URLSearchParams): Promise<T>
           }
         }
         let message = "";
+        let metadata: BotErrorMetadata = {};
         try {
           const body: unknown = await response.json();
+          metadata = botErrorMetadata(body);
           if (body && typeof body === "object" && "error" in body &&
               typeof body.error === "string" && !/[<>]/.test(body.error)) {
             message = body.error.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 400);
           }
         } catch { /* Proxy HTML and other uncurated bodies are never displayed. */ }
         const error = new BotUnavailableError(
-          `${route} returned ${response.status}${message ? `: ${message}` : ""}`, response.status,
+          `${route} returned ${response.status}${message ? `: ${message}` : ""}`, response.status, metadata,
         );
-        if (response.status !== 503 || attempt >= 2) throw error;
+        if (response.status !== 503 || metadata.code === "config_rate_limited" || attempt >= 2) throw error;
         const retryAfter = response.headers.get("retry-after");
         const seconds = retryAfter === null ? NaN : Number(retryAfter);
         const requested = Number.isFinite(seconds) ? seconds * 1000
@@ -309,42 +320,50 @@ function localArgs(command: string, date?: string, slug?: string) {
   return args;
 }
 
-async function read<T>(command: string, date?: string, slug?: string): Promise<T> {
+async function read<T>(command: string, date?: string, slug?: string, fresh = false): Promise<T> {
   const route = slug ? `${command}/${slug}` : command;
+  const params = query(date);
+  const args = localArgs(command, date, slug);
+  if (fresh) {
+    params.set("fresh", "1");
+    args.push("--fresh-config");
+  }
   const payload =
     BOT_SOURCE === "remote"
-      ? await readRemote<T>(route, query(date))
-      : await readLocal<T>(localArgs(command, date, slug));
+      ? await readRemote<T>(route, params)
+      : await readLocal<T>(args);
   // One gate for both adapters, so neither can serve a shape the other would
   // have been refused for.
   checkShape(route, payload);
   return payload;
 }
 
-export function getOverview(date?: string) {
-  return read<Overview>("overview", date);
+type ReadOptions = { fresh?: boolean };
+
+export function getOverview(date?: string, { fresh = false }: ReadOptions = {}) {
+  return read<Overview>("overview", date, undefined, fresh);
 }
 
 /** The whole payload, not just the rows. `disabledPromos` is what lets a screen
  *  say WHY a configured campaign is not posting today, instead of implying the
  *  daily cap held it back. */
-export async function getGroups(date?: string) {
-  return read<GroupsPayload>("groups", date);
+export async function getGroups(date?: string, { fresh = false }: ReadOptions = {}) {
+  return read<GroupsPayload>("groups", date, undefined, fresh);
 }
 
 /** The whole campaigns payload. `adAssets` says where the pictures are stored
  *  and whether the bot could read its index, which is one fact about the bot
  *  rather than one per campaign -- so it rides here and not on each record. */
-export async function getCampaignsPayload(date?: string) {
-  return read<{ date: string; adAssets?: AdAssets; campaigns: Campaign[] }>("campaigns", date);
+export async function getCampaignsPayload(date?: string, { fresh = false }: ReadOptions = {}) {
+  return read<{ date: string; adAssets?: AdAssets; campaigns: Campaign[] }>("campaigns", date, undefined, fresh);
 }
 
-export async function getCampaigns(date?: string) {
-  return (await getCampaignsPayload(date)).campaigns;
+export async function getCampaigns(date?: string, options: ReadOptions = {}) {
+  return (await getCampaignsPayload(date, options)).campaigns;
 }
 
-export function getCampaignPreview(slug: string, date?: string) {
-  return read<CampaignPreview>("preview", date, slug);
+export function getCampaignPreview(slug: string, date?: string, { fresh = false }: ReadOptions = {}) {
+  return read<CampaignPreview>("preview", date, slug, fresh);
 }
 
 /* ------------------------------------------------------------------ writes --

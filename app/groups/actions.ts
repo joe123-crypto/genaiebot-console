@@ -56,7 +56,7 @@ export async function addGroupCampaignAction(jid: string, slug: string): Promise
   }
 
   try {
-    const [{ groups }, overview] = await Promise.all([getGroups(), getOverview()]);
+    const [{ groups }, overview] = await Promise.all([getGroups(undefined, { fresh: true }), getOverview()]);
     const gate = canWrite(WRITES_ENABLED, overview.writes, "groups", "promos");
     if (!gate.allowed) return { ok: false, detail: gate.reason };
     if (!overview.campaigns.some((campaign) => campaign.slug === slug)) {
@@ -103,7 +103,7 @@ export async function updateGroupAction(
   }
 
   try {
-    const [{ groups }, words] = await Promise.all([getGroups(), vocabulary()]);
+    const [{ groups }, words] = await Promise.all([getGroups(undefined, { fresh: true }), vocabulary()]);
     const group = groups.find((entry) => entry.jid === jid);
     if (!group) return { ok: false, detail: "This group is no longer on record." };
 
@@ -243,7 +243,7 @@ export async function addDiscoveredGroupAction(jid: string): Promise<WriteOutcom
     return { ok: false, detail: "No valid group was named." };
   }
   try {
-    const { groups, discoveredGroups } = await getGroups();
+    const { groups, discoveredGroups } = await getGroups(undefined, { fresh: true });
     if (groups.some((entry: Group) => entry.jid === jid)) {
       return { ok: false, detail: "This group is already on record." };
     }
