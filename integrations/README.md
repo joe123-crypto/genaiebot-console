@@ -37,3 +37,49 @@ The console retains drafts across refreshes and failures and checks the current
 caption list before writing to detect stale edits. This check is not an atomic
 compare-and-swap; simultaneous operator saves still follow the existing config
 writer's last-write behavior.
+
+## Group activity and member counts
+
+The paired `genaebot` change adds `deploy/railway/whatsapp-group-activity.mjs`,
+socket lifecycle integration, member totals in the hourly group inventory, and
+`workspace/lib/group_metrics.py` in the console read bridge. The Docker image
+must include the new collector module alongside the existing discovery module.
+
+The existing Groups API gains optional `metrics` on each configured and
+discovered group:
+
+```json
+{
+  "dailyMessageCount": 120,
+  "windowStart": "2026-11-08T10:00:00.000Z",
+  "asOf": "2026-11-09T10:00:00.000Z",
+  "coverage": "partial",
+  "memberCount": 256,
+  "memberCountObservedAt": "2026-11-09T09:00:00.000Z"
+}
+```
+
+Counts and member observations can independently be `null`. Coverage is
+`complete`, `partial`, or `unavailable`. `asOf` is the live observation cutoff,
+even when the API's `date` requests a historical campaign plan. Member totals
+include every member WhatsApp reports, including bot accounts.
+
+The collector observes original incoming text/media on existing sockets before
+reply filters, deduplicates across accounts and reconnects, and excludes bot
+posts, protocol events, edits, reactions, and history synchronization. It keeps
+message IDs, group IDs, timestamps and hashed sender identities for 48 hours in
+`$OPENCLAW_STATE_DIR/runtime/whatsapp-activity.sqlite`; it stores no message
+content or member lists. A 30-second heartbeat records coverage. An unclean
+disconnect becomes detectable within 90 seconds. Collection/storage failures
+never reject into WhatsApp handling. The bridge opens the database read-only.
+
+Deploy the bot update **first**, then this console. Do not backfill history:
+initial counts are partial until a full rolling day has been observed. An older
+bot safely displays `—`. `GENAIE_GROUP_ACTIVITY=0` stops new activity collection;
+`GENAIE_GROUP_DISCOVERY=0` independently pauses metadata scans. Existing saved
+observations remain available with their coverage and timestamps.
+
+Validate the bot with its collector/discovery/health tests, pinned WhatsApp
+adapter compatibility test, `workspace/lib/test_group_metrics.py`,
+`workspace/lib/test_group_discovery.py`, and `deploy/test_console_read.py`.
+Validate the console with `npm test`, `npm run typecheck`, and `npm run build`.

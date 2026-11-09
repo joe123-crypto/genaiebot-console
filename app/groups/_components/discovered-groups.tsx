@@ -2,6 +2,7 @@ import { Empty } from "@/app/_components/ui";
 import { ADD_EXPLAINER, AddDiscoveredGroup } from "@/app/groups/_components/add-discovered-group";
 import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { DiscoveredGroup, GroupDiscovery } from "@/src/lib/types";
+import { DmcHeading, DmcValue, MemberValue } from "@/app/groups/_components/group-metrics";
 
 function observedAt(value: string) {
   const date = new Date(value);
@@ -42,12 +43,12 @@ export function DiscoveredGroups({ groups, discovery, addGate }: {
         </div>
       ) : null}
       {rows.length > 0 ? (
-        <div className="table-wrap">
+        <div className="table-wrap" role="region" aria-label="Unassigned groups, scroll horizontally for counts and actions" tabIndex={0}>
           {addGate ? <p className="card-note" style={{ padding: "0 20px 12px" }}>{ADD_EXPLAINER}</p> : null}
           <table className="data">
             <thead>
               <tr>
-                <th>Group</th><th>Joined accounts</th><th>Last seen</th>
+                <th scope="col">Group</th><th scope="col">Joined accounts</th><DmcHeading /><th scope="col">Members</th><th scope="col">Last seen</th>
                 {addGate ? <th><span className="visually-hidden">Actions</span></th> : null}
               </tr>
             </thead>
@@ -59,6 +60,8 @@ export function DiscoveredGroups({ groups, discovery, addGate }: {
                     <div className="cell-mono">{group.jid}</div>
                   </td>
                   <td className="cell-muted">{group.accounts.map((account) => account.accountId).join(", ")}</td>
+                  <td><DmcValue metrics={group.metrics} /></td>
+                  <td><MemberValue metrics={group.metrics} /></td>
                   <td className="cell-muted"><time dateTime={group.lastSeenAt}>{observedAt(group.lastSeenAt)}</time></td>
                   {addGate ? (
                     <td className="cell-actions">

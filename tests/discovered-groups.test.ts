@@ -13,6 +13,17 @@ const health = (status: GroupDiscovery["accounts"][number]["status"]): GroupDisc
     lastError: status === "error" ? "lookup_failed" : null }] });
 
 describe("automatic group discovery", () => {
+  it("includes DMC and member observations in unassigned rows", () => {
+    const html = renderToStaticMarkup(createElement(DiscoveredGroups, { groups: [{ ...group,
+      metrics: { dailyMessageCount: 0, coverage: "partial", memberCount: 120,
+        windowStart: stamp, asOf: "2026-11-09T06:00:00Z", memberCountObservedAt: stamp } }] }));
+    expect(html).toContain('aria-label="Daily Message Count"');
+    expect(html).toContain("Members");
+    expect(html).toContain("Partial");
+    expect(html).toContain("Stale");
+    expect(html).toContain(">120<");
+    expect(html).toContain(">0<");
+  });
   it("renders nothing for older backends without discovery fields", () => {
     expect(renderToStaticMarkup(createElement(DiscoveredGroups, {}))).toBe("");
   });
