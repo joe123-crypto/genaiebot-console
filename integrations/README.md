@@ -216,8 +216,8 @@ console with `npm test`, `npm run typecheck` and `npm run build`.
 ## Firestore scoped reads and group batches
 
 `genaebot-firestore-scoped-reads.patch` applies to genaebot
-`e5406adc5eb0aa8b2b7a800523b384ccd049c599`. It includes the console-only display
-cache and quota-error handling, targeted campaign/group/asset queries, sidebar
+`a06fbf5855a5317ebad3d38bad2795d5b81bd463`. It extends the existing console display
+cache and quota-error handling with targeted campaign/group/asset queries, sidebar
 aggregations, transactional group batches, and scheduler read/write reductions.
 It requires no Firestore data migration or new composite indexes; targeting uses
 the existing single-field array index on `groups.promos`.

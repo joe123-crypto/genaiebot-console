@@ -1,8 +1,8 @@
 diff --git a/README.md b/README.md
-index 2ca4b15..1137df8 100644
+index f3c6cc1..901dcb0 100644
 --- a/README.md
 +++ b/README.md
-@@ -1144,6 +1144,43 @@ railway ssh -- python3 /home/joseph/.openclaw/deploy/patch-openclaw-config.py --
+@@ -1148,6 +1148,43 @@ railway ssh -- python3 /home/joseph/.openclaw/deploy/patch-openclaw-config.py --
  The template remains the tracked source of truth for what the config *should* be;
  `openclaw.json` and its backup/pre-update variants are gitignored.
  
@@ -46,19 +46,20 @@ index 2ca4b15..1137df8 100644
  ## Operator Console API
  
  `deploy/railway/console-api.py` serves the operator console's read model over
+@@ -1274,7 +1311,7 @@ which production has read since the cutover (*Moving membership to Firestore*);
+ effect from each campaign's **next run** -- a run already sending keeps the
+ config it resolved when it started.
+ 
+-Console displays use `workspace/lib/console_config.py` to share a five-minute
++Console displays use `workspace/lib/console_config.py` to share a three-minute
+ config cache between read bridge processes. A volume lock shares each refresh;
+ cached data is scoped to the credential/project context and API generation.
+ After a failed refresh, background display reads wait five minutes before trying
 diff --git a/deploy/railway/console-api.py b/deploy/railway/console-api.py
-index cde913d..042d667 100755
+index 6d415b1..42b5fb7 100755
 --- a/deploy/railway/console-api.py
 +++ b/deploy/railway/console-api.py
-@@ -69,6 +69,7 @@ import hmac
- import json
- import os
- import re
-+import secrets
- import subprocess
- import sys
- import threading
-@@ -81,7 +82,7 @@ sys.path.insert(0, os.path.dirname(__file__))
+@@ -99,7 +99,7 @@ sys.path.insert(0, os.path.dirname(__file__))
  from console_accounts import AccountControls
  
  PREFIX = "/internal/console/"
@@ -67,97 +68,7 @@ index cde913d..042d667 100755
  SLUG_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,63}\Z")
  DATE_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
  
-@@ -139,6 +140,15 @@ class Bridge:
-         self.lock = threading.Lock()
-         self.cache = {}
-         self.runs = 0
-+        self.generation = secrets.token_hex(16)
-+        self.config_generation = self.generation
-+
-+    def invalidate(self, config=True):
-+        with self.lock:
-+            self.cache.clear()
-+            self.generation = secrets.token_hex(16)
-+            if config:
-+                self.config_generation = self.generation
- 
-     def cached(self, key):
-         now = time.monotonic()
-@@ -152,9 +162,11 @@ class Bridge:
-                 return None
-             return body
- 
--    def store(self, key, body):
-+    def store(self, key, body, generation=None):
-         now = time.monotonic()
-         with self.lock:
-+            if generation is not None and generation != self.generation:
-+                return
-             # Drop whatever expired before trimming, so a burst of distinct
-             # requests cannot evict live entries while dead ones sit there.
-             for stale in [k for k, (expires, _) in self.cache.items() if expires <= now]:
-@@ -166,7 +178,8 @@ class Bridge:
-     def run(self, args):
-         """Return (status, body). Never raises, and never leaks stderr."""
-         key = tuple(args)
--        body = self.cached(key)
-+        fresh = "--fresh-config" in args
-+        body = None if fresh else self.cached(key)
-         if body is not None:
-             return 200, body
- 
-@@ -174,15 +187,18 @@ class Bridge:
-             log("busy: refused %s" % " ".join(args))
-             return 503, b'{"error": "busy"}'
-         try:
--            body = self.cached(key)
-+            body = None if fresh else self.cached(key)
-             if body is not None:
-                 return 200, body
-             with self.lock:
-                 self.runs += 1
-+                generation = self.generation
-+                config_generation = self.config_generation
-             try:
-                 done = subprocess.run(
-                     [sys.executable, "-I", self.path] + list(args),
-                     capture_output=True, timeout=self.timeout,
-+                    env={**os.environ, "GENAIE_CONSOLE_CONFIG_GENERATION": config_generation},
-                 )
-             except subprocess.TimeoutExpired:
-                 log("timeout after %ss: %s" % (self.timeout, " ".join(args)))
-@@ -192,7 +208,8 @@ class Bridge:
-                 return 502, b'{"error": "bridge unavailable"}'
- 
-             if done.returncode == 0:
--                self.store(key, done.stdout)
-+                if not fresh:
-+                    self.store(key, done.stdout, generation)
-                 return 200, done.stdout
- 
-             # Something the caller named does not exist. That is their error,
-@@ -287,8 +304,8 @@ def curated(stdout):
-         payload = json.loads(stdout or b"")
-     except ValueError:
-         return False
--    return isinstance(payload, dict) and set(payload) == {"error"} \
--        and isinstance(payload["error"], str)
-+    return isinstance(payload, dict) and set(payload) <= {"error", "code", "upstreamStatus", "quota", "retryAfterSeconds"} \
-+        and isinstance(payload.get("error"), str)
- 
- 
- class Handler(BaseHTTPRequestHandler):
-@@ -371,8 +388,7 @@ class Handler(BaseHTTPRequestHandler):
-         # configuration reads even on failure, and never replay it automatically.
-         if method == "POST":
-             bridge = self.server.console["bridge"]
--            with bridge.lock:
--                bridge.cache.clear()
-+            bridge.invalidate(config=False)
-         self.send_any(status, body, with_body)
- 
-     def config_request(self, route, query, with_body=True):
-@@ -399,30 +415,33 @@ class Handler(BaseHTTPRequestHandler):
+@@ -446,30 +446,33 @@ class Handler(BaseHTTPRequestHandler):
          # The route is settled before the body is looked at, so "no such
          # document" and "that change is not a change" cannot answer alike.
          parts = route.split("/")
@@ -195,7 +106,7 @@ index cde913d..042d667 100755
                  raise ValueError()
              if "fields" in payload and not isinstance(payload["fields"], dict):
                  raise ValueError()
-@@ -432,17 +451,21 @@ class Handler(BaseHTTPRequestHandler):
+@@ -479,8 +482,8 @@ class Handler(BaseHTTPRequestHandler):
              self.send_any(400, b'{"error":"Invalid config change."}', True)
              return
  
@@ -206,37 +117,17 @@ index cde913d..042d667 100755
              if name in payload:
                  request[name] = payload[name]
  
-+        bridge = self.server.console["bridge"]
-+        if not request.get("dryRun"):
-+            bridge.invalidate()
-         status, body = self.server.console["writes"].run(request)
+@@ -491,6 +494,9 @@ class Handler(BaseHTTPRequestHandler):
          # A change the caller can see means every cached read of it is wrong. An
          # uncertain write may still have landed, so clear on failure too.
--        bridge = self.server.console["bridge"]
--        with bridge.lock:
--            bridge.cache.clear()
-+        bridge.invalidate(config=not request.get("dryRun"))
+         bridge.invalidate(config=not request.get("dryRun"))
 +        if (status == 200 and request["collection"] == "campaigns" and not request.get("dryRun")
 +                and self.server.console.get("reconcileWake") is not None):
 +            self.server.console["reconcileWake"].set()
          self.send_any(status, body, with_body)
  
      def campaign_create_request(self, split):
-@@ -467,10 +490,10 @@ class Handler(BaseHTTPRequestHandler):
-         except (ValueError, TypeError):
-             self.send_any(400, b'{"error":"Invalid campaign creation request."}', True)
-             return
--        status, body = self.server.console["campaigns"].run(request)
-         bridge = self.server.console["bridge"]
--        with bridge.lock:
--            bridge.cache.clear()
-+        bridge.invalidate()
-+        status, body = self.server.console["campaigns"].run(request)
-+        bridge.invalidate()
-         self.send_any(status, body, True)
- 
-     def do_POST(self):
-@@ -551,15 +574,21 @@ def plan(route, query):
+@@ -670,10 +676,16 @@ def plan(route, query):
      parts = route.split("/")
      if parts[0] in DATA_ROUTES and len(parts) == 1:
          args = [parts[0]]
@@ -255,24 +146,7 @@ index cde913d..042d667 100755
      else:
          raise Refuse(404, "not found")
  
-     fields = parse_qs(query, keep_blank_values=True)
--    unknown = sorted(set(fields) - {"date"})
-+    unknown = sorted(set(fields) - {"date", "fresh"})
-     if unknown:
-         raise Refuse(400, "unsupported query parameter: %s" % ", ".join(unknown))
-     dates = fields.get("date") or []
-@@ -569,6 +598,10 @@ def plan(route, query):
-         if not DATE_RE.match(dates[0]):
-             raise Refuse(400, "date wants YYYY-MM-DD")
-         args += ["--date", dates[0]]
-+    if "fresh" in fields:
-+        if fields["fresh"] != ["1"]:
-+            raise Refuse(400, "fresh must be given once with value 1")
-+        args += ["--fresh-config"]
-     return args
- 
- 
-@@ -626,22 +659,31 @@ def main():
+@@ -755,21 +767,31 @@ def main():
          log("warning: bridge not found at %s; requests will answer 502" % bridge_path)
      # A durable Firestore desired schedule is retried after API/gateway restart.
      stop_reconcile = threading.Event()
@@ -285,8 +159,7 @@ index cde913d..042d667 100755
              if (os.environ.get(WRITE_KEY_VAR) or "").strip():
 -                status, _ = server.console["campaigns"].run({"reconcile": True})
 -                bridge = server.console["bridge"]
--                with bridge.lock:
--                    bridge.cache.clear()
+-                bridge.invalidate(config=False)
 -                if status != 200:
 +                status, body = server.console["campaigns"].run({"reconcile": True})
 +                try:
@@ -310,144 +183,65 @@ index cde913d..042d667 100755
          server.server_close()
      return 0
  
-diff --git a/deploy/test_console_api.py b/deploy/test_console_api.py
-index 6662fe6..d26ce0c 100644
---- a/deploy/test_console_api.py
-+++ b/deploy/test_console_api.py
-@@ -341,6 +341,50 @@ class ConsoleApiTests(unittest.TestCase):
- 
-     # -- unit level -------------------------------------------------------
- 
-+    def test_fresh_query_bypasses_response_cache_every_time(self):
+diff --git a/deploy/test_scoped_console_api.py b/deploy/test_scoped_console_api.py
+new file mode 100644
+index 0000000..7372173
+--- /dev/null
++++ b/deploy/test_scoped_console_api.py
+@@ -0,0 +1,48 @@
++"""New narrow read and atomic group-write routes retain the API's access gates."""
++import json
++import unittest
++import test_console_api as reads
++from test_console_write_api import Harness
++
++
++class ScopedReadAPI(unittest.TestCase):
++    setUp = reads.ConsoleApiTests.setUp
++    write = reads.ConsoleApiTests.write
++    serve = reads.ConsoleApiTests.serve
++    fetch = reads.ConsoleApiTests.fetch
++    def test_scoped_routes_forward_only_validated_arguments(self):
 +        base = self.serve()
-+        self.fetch(base + "/groups")
-+        for _ in range(2):
-+            status, body, _ = self.fetch(base + "/groups?date=2026-11-09&fresh=1")
-+            self.assertEqual(status, 200)
-+            self.assertEqual(json.loads(body)["args"], ["groups", "--date", "2026-11-09", "--fresh-config"])
-+        self.assertEqual(self.server.console["bridge"].runs, 3)
-+        self.fetch(base + "/groups")
-+        self.assertEqual(self.server.console["bridge"].runs, 3)
-+        for query in ("fresh=0", "fresh=", "fresh=1&fresh=1"):
-+            self.assertEqual(self.fetch(base + "/groups?" + query)[0], 400)
++        for route, args in [("/campaign/demo", ["campaign", "demo"]),
++                            ("/campaign-state/demo", ["campaign-state", "demo"]),
++                            ("/campaign-groups/demo", ["campaign-groups", "demo"]),
++                            ("/captions/demo", ["captions", "demo"]),
++                            ("/group/123%40g.us", ["group", "123@g.us"]),
++                            ("/groups-by-id/123%40g.us%2C456%40g.us", ["groups-by-id", "123@g.us,456@g.us"]),
++                            ("/capabilities", ["capabilities"]), ("/settings", ["settings"]),
++                            ("/navigation", ["navigation"])]:
++            code, body, _ = self.fetch(base + route)
++            self.assertEqual(code, 200, route)
++            self.assertEqual(json.loads(body)["args"], args)
++            self.assertEqual(self.fetch(base + route, token=None)[0], 401)
++        for route in ("/group/not-a-group", "/groups-by-id/123%40g.us%2Cbad", "/campaign/%2e%2e"):
++            self.assertEqual(self.fetch(base + route)[0], 404)
 +
-+    def test_an_older_inflight_read_cannot_repopulate_invalidated_response_cache(self):
-+        bridge = API.Bridge(self.echo)
-+        started, finish = threading.Event(), threading.Event()
-+        def run(*args, **kw):
-+            started.set()
-+            self.assertTrue(finish.wait(5))
-+            return type("Result", (), {"returncode": 0, "stdout": b"old"})()
-+        with unittest.mock.patch.object(API.subprocess, "run", run):
-+            reader = threading.Thread(target=bridge.run, args=(["groups"],))
-+            reader.start()
-+            self.assertTrue(started.wait(5))
-+            bridge.invalidate()
-+            finish.set()
-+            reader.join(5)
-+        self.assertEqual(bridge.cache, {})
 +
-+    def test_response_only_invalidation_preserves_config_generation(self):
-+        bridge = API.Bridge(self.echo)
-+        generation = bridge.config_generation
-+        bridge.invalidate(config=False)
-+        self.assertEqual(bridge.config_generation, generation)
-+        bridge.invalidate()
-+        self.assertNotEqual(bridge.config_generation, generation)
++class GroupBatchAPI(Harness):
++    def test_batch_is_authenticated_bounded_and_invalidates_reads(self):
++        base = self.serve()
++        payload = {"changes": [{"id": "123@g.us", "fields": {"note": "test"}}], "actor": "Operator"}
++        self.server.console["bridge"].cache["old"] = (999999999999, b"cached")
++        code, body = self.post(base, "/config/batch/groups", payload)
++        self.assertEqual(code, 200)
++        self.assertEqual(json.loads(body)["echo"], dict(payload, collection="groups"))
++        self.assertEqual(self.server.console["bridge"].cache, {})
++        self.assertEqual(self.post(base, "/config/batch/groups", payload, token=None)[0], 401)
++        for invalid in ({"changes": []}, {"changes": [{}] * 101}, {"changes": [], "delete": True}, b" " * 65537):
++            self.assertEqual(self.post(base, "/config/batch/groups", invalid)[0], 400)
++        self.set_key(None)
++        self.assertEqual(self.post(base, "/config/batch/groups", payload)[0], 503)
 +
-+    def test_structured_config_error_survives_the_bridge(self):
-+        source = 'import json,sys\njson.dump({"error":"config unavailable","code":"config_rate_limited","upstreamStatus":429,"quota":"daily"},sys.stdout)\nsys.exit(1)'
-+        base = self.serve(bridge=self.write("limited.py", source))
-+        status, body, _ = self.fetch(base + "/groups?fresh=1")
-+        self.assertEqual(status, 502)
-+        self.assertEqual(json.loads(body)["code"], "config_rate_limited")
 +
-     def test_curated_only_accepts_a_lone_string_error(self):
-         self.assertTrue(API.curated(b'{"error": "nope"}'))
-         for payload in (b"", b"not json", b"[]", b'{"error": 1}',
-diff --git a/deploy/test_console_write.py b/deploy/test_console_write.py
-index 79c35b0..26f964d 100644
---- a/deploy/test_console_write.py
-+++ b/deploy/test_console_write.py
-@@ -20,6 +20,7 @@ import io
- import json
- import os
- import sys
-+import tempfile
- import unittest
- import unittest.mock
- from pathlib import Path
-@@ -153,12 +154,17 @@ class WriteEnvironment(unittest.TestCase):
- 
- 
- class Payload(unittest.TestCase):
-+    def setUp(self):
-+        directory = tempfile.TemporaryDirectory()
-+        self.addCleanup(directory.cleanup)
-+        self.state_dir = directory.name
-+
-     def run_main(self, raw=None, env=None, **patch):
-         out = io.StringIO()
-         with unittest.mock.patch.object(operator_writer, "write", **patch):
-             code = CW.main([], stdin=io.BytesIO(
-                 raw if raw is not None else json.dumps(REQUEST).encode()),
--                stdout=out, env=env or {CW.WRITE_KEY_VAR: KEY})
-+                stdout=out, env={"GENAIE_FIRESTORE_DIR": self.state_dir, **(env or {CW.WRITE_KEY_VAR: KEY})})
-         return code, json.loads(out.getvalue())
- 
-     def test_an_applied_change_is_reported_with_a_status_the_api_accepts(self):
-@@ -194,6 +200,38 @@ class Payload(unittest.TestCase):
-         self.assertEqual(code, 1)
-         self.assertEqual(payload["status"], 409)
- 
-+    def test_rate_limit_metadata_and_cache_invalidation_survive_a_refusal(self):
-+        code, payload = self.run_main(side_effect=operator_config.ConfigUnavailable(
-+            "firestore.googleapis.com answered HTTP 429", upstreamStatus=429,
-+            code="config_rate_limited", quota="daily", retryAfterSeconds=300))
-+        self.assertEqual((code, payload["status"]), (1, 503))
-+        self.assertEqual(payload["code"], "config_rate_limited")
-+        self.assertEqual(payload["upstreamStatus"], 429)
-+        self.assertEqual(payload["quota"], "daily")
-+        self.assertEqual(payload["retryAfterSeconds"], 300)
-+        self.assertTrue(os.path.exists(os.path.join(self.state_dir, "console-config-epoch.json")))
-+
-+    def test_a_tier_save_is_visible_immediately_despite_a_warm_display_cache(self):
-+        import console_config
-+        from test_operator_writer import WritableFirestore
-+        from test_operator_config import JID_A
-+        fake = WritableFirestore(page_size=300)
-+        env = {"GENAIE_FIRESTORE_DIR": self.state_dir, "GCP_SERVICE_ACCOUNT_B64": creds_b64(),
-+               CW.WRITE_KEY_VAR: KEY}
-+        with unittest.mock.patch.object(operator_config.urllib.request, "urlopen", fake), \
-+                unittest.mock.patch.object(operator_config, "node_signer", return_value="jwt"):
-+            before = console_config.load(env)
-+            tier = before["membership"]["groups"][JID_A].get("activity", "normal")
-+            next_tier = "busy" if tier != "busy" else "quiet"
-+            out = io.StringIO()
-+            request = {"collection": "groups", "id": JID_A, "fields": {"activity": next_tier}}
-+            code = CW.main([], stdin=io.BytesIO(json.dumps(request).encode()), stdout=out, env=env)
-+            self.assertEqual(code, 0, out.getvalue())
-+            after = console_config.load(env)
-+        self.assertEqual(after["membership"]["groups"][JID_A]["activity"], next_tier)
-+        self.assertEqual(len(fake.commits), 1)
-+        self.assertEqual(len(fake.commits[0]["writes"]), 2)  # group and audit
-+
-     def test_every_answer_carries_ok_and_status_that_agree(self):
-         # The API refuses to pass on an answer whose ok and status disagree.
-         for kwargs in ({"return_value": {"change": "unchanged", "fields": [],
++if __name__ == "__main__":
++    unittest.main()
 diff --git a/workspace/bin/console-campaign-create b/workspace/bin/console-campaign-create
-index 794dd26..fb9e6fe 100755
+index ea820ce..fb9e6fe 100755
 --- a/workspace/bin/console-campaign-create
 +++ b/workspace/bin/console-campaign-create
-@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
- import console_campaigns as campaigns
- import operator_config
- import operator_writer
-+import console_config
- 
- 
- def main():
-@@ -23,14 +24,15 @@ def main():
+@@ -24,8 +24,7 @@ def main():
          loader.exec_module(bridge)
          store = campaigns.Store(bridge.write_env())
          if data == {"reconcile": True}:
@@ -455,39 +249,13 @@ index 794dd26..fb9e6fe 100755
 -            result = {}
 +            result = {"pending": campaigns.reconcile_all(store)}
          else:
--            result = campaigns.create(data, store)
-+            with console_config.mutation():
-+                result = campaigns.create(data, store)
-         print(json.dumps({"ok": True, "status": 200, **result}))
-         return 0
-     except (operator_writer.WriteRefused, operator_config.ConfigUnavailable, ValueError) as ex:
--        print(json.dumps({"ok": False, "status": getattr(ex, "status", 503), "error": str(ex), "problems": []}))
-+        print(json.dumps({"ok": False, "status": getattr(ex, "status", 503), "error": str(ex),
-+                          "problems": [], **getattr(ex, "metadata", {})}))
-         return 1
- 
- 
+             with console_config.mutation():
+                 result = campaigns.create(data, store)
 diff --git a/workspace/bin/console-read b/workspace/bin/console-read
-index af0edc7..37e32c1 100755
+index 76285a6..1c2bde1 100755
 --- a/workspace/bin/console-read
 +++ b/workspace/bin/console-read
-@@ -26,6 +26,7 @@ Std-lib only.
- 
- import importlib.util
- import io
-+from functools import partial
- import json
- import os
- import sys
-@@ -45,6 +46,7 @@ import config_shadow  # noqa: E402
- import promo_config  # noqa: E402
- import console_campaigns
- import operator_config  # noqa: E402
-+import console_config  # noqa: E402
- import operator_writer  # noqa: E402
- import group_discovery  # noqa: E402
- import group_metrics  # noqa: E402
-@@ -59,7 +61,7 @@ MANIFEST_CANDIDATES = (
+@@ -64,7 +64,7 @@ MANIFEST_CANDIDATES = (
      "/usr/local/lib/genaie/promo-crons.json",
  )
  
@@ -496,29 +264,7 @@ index af0edc7..37e32c1 100755
  
  
  # Exit codes, so a caller can tell "you asked for something that is not here"
-@@ -72,6 +74,12 @@ class BridgeError(Exception):
-     """A condition the caller should see as a message, not a traceback."""
- 
- 
-+class ConfigReadError(BridgeError):
-+    def __init__(self, message, metadata):
-+        super().__init__(message)
-+        self.metadata = metadata
-+
-+
- class NotFound(BridgeError):
-     """The caller named something that does not exist."""
- 
-@@ -88,6 +96,8 @@ def parse_args(args):
-             if not rest:
-                 raise BridgeError("--date wants YYYY-MM-DD")
-             day = rest.pop(0)
-+        elif token == "--fresh-config":
-+            pass  # main supplies the strict loader; not a positional argument.
-         elif token.startswith("--"):
-             raise BridgeError("unknown option %r" % token)
-         elif command is None:
-@@ -98,8 +108,8 @@ def parse_args(args):
+@@ -111,8 +111,8 @@ def parse_args(args):
              raise BridgeError("unexpected argument %r" % token)
      if command not in COMMANDS:
          raise BridgeError("command must be one of %s" % ", ".join(COMMANDS))
@@ -529,11 +275,10 @@ index af0edc7..37e32c1 100755
      return command, slug, day
  
  
-@@ -113,6 +123,11 @@ def parse_day(raw):
- 
+@@ -127,6 +127,10 @@ def parse_day(raw):
  
  _RESOLVED = {}
-+_FRESH_CONFIG = False
+ _FRESH_CONFIG = False
 +_CAMPAIGN_SCOPE = None
 +_INCLUDE_GROUPS = True
 +_INCLUDE_CAMPAIGNS = True
@@ -541,24 +286,18 @@ index af0edc7..37e32c1 100755
  
  
  def resolved():
-@@ -127,9 +142,13 @@ def resolved():
-         notes = io.StringIO()
+@@ -142,7 +146,9 @@ def resolved():
          try:
              _RESOLVED["config"] = promo_config.resolve(None, membership_path=MEMBERSHIP,
--                                                       err=notes)
--        except operator_config.ConfigUnavailable as exc:
--            raise BridgeError("no operator config to read: %s" % exc) from exc
-+                                                       err=notes, config_loader=partial(
+                                                        err=notes, config_loader=partial(
+-                                                       console_config.load, fresh=_FRESH_CONFIG))
 +                                                       console_config.load, fresh=_FRESH_CONFIG,
 +                                                       campaign=_CAMPAIGN_SCOPE, group_ids=_GROUP_IDS,
 +                                                       include_groups=_INCLUDE_GROUPS, include_campaigns=_INCLUDE_CAMPAIGNS))
-+        except (operator_config.ConfigUnavailable, operator_config.ConfigInvalid) as exc:
-+            raise ConfigReadError("no operator config to read: %s" % exc,
-+                                  getattr(exc, "metadata", {})) from exc
-     return _RESOLVED["config"]
- 
- 
-@@ -334,7 +353,10 @@ def asset_catalogue():
+         except (operator_config.ConfigUnavailable, operator_config.ConfigInvalid) as exc:
+             raise ConfigReadError("no operator config to read: %s" % exc,
+                                   getattr(exc, "metadata", {})) from exc
+@@ -350,7 +356,10 @@ def asset_catalogue():
      if "value" not in _CATALOGUE:
          notes = io.StringIO()
          try:
@@ -570,7 +309,7 @@ index af0edc7..37e32c1 100755
          except Exception as exc:  # the campaigns screen outranks its pictures
              _CATALOGUE["value"] = {"campaigns": {}, "source": None,
                                     "fetchedAt": None,
-@@ -359,13 +381,15 @@ def asset_entries(slug):
+@@ -375,13 +384,15 @@ def asset_entries(slug):
              for entry in asset_catalogue()["campaigns"].get(slug, [])]
  
  
@@ -587,7 +326,7 @@ index af0edc7..37e32c1 100755
          script = script_path(entry["script"])
          captions = []
          tracking = {}
-@@ -416,7 +440,7 @@ def campaign_records(day):
+@@ -432,7 +443,7 @@ def campaign_records(day):
                  "captions": captions,
                  "tracking": tracking,
                  "images": images,
@@ -596,7 +335,7 @@ index af0edc7..37e32c1 100755
                  "targetCount": len(all_jids),
                  "weeklyCount": len(weekly_jids),
                  "accounts": per_account,
-@@ -424,7 +448,7 @@ def campaign_records(day):
+@@ -440,7 +451,7 @@ def campaign_records(day):
                  "error": error,
              }
          )
@@ -605,7 +344,7 @@ index af0edc7..37e32c1 100755
      records.sort(key=lambda row: (row["hour"] if row["hour"] is not None else 99, row["minute"] or 0))
      return records
  
-@@ -620,7 +644,7 @@ def overview(day):
+@@ -658,7 +669,7 @@ def overview(day):
          status = entry.get("status", "active")
          by_status[status] = by_status.get(status, 0) + 1
  
@@ -614,8 +353,8 @@ index af0edc7..37e32c1 100755
      rows = group_rows(day)
      planned = sum(len(row["allowedToday"]) for row in rows if row["status"] == "active")
  
-@@ -636,34 +660,136 @@ def overview(day):
-         "writes": write_capabilities(),
+@@ -675,30 +686,130 @@ def overview(day):
+         "actions": action_capabilities(),
          "configSource": config_source_status(),
          "configShadow": config_shadow_status(),
 -        "adAssets": ad_assets_status(),
@@ -701,8 +440,9 @@ index af0edc7..37e32c1 100755
 +
 +
  def main(argv):
+-    global _FRESH_CONFIG
 +    global _FRESH_CONFIG, _CAMPAIGN_SCOPE, _INCLUDE_GROUPS, _GROUP_IDS, _INCLUDE_CAMPAIGNS
-+    _FRESH_CONFIG = "--fresh-config" in argv
+     _FRESH_CONFIG = "--fresh-config" in argv
      try:
          command, slug, raw_day = parse_args(argv)
 +        _CAMPAIGN_SCOPE = slug if command in ("preview", "campaign", "campaign-groups") else None
@@ -749,34 +489,11 @@ index af0edc7..37e32c1 100755
          elif command == "preview":
              payload = preview(slug, day)
          else:
-             payload = overview(day)
-     except BridgeError as exc:
--        json.dump({"error": str(exc)}, sys.stdout)
-+        json.dump({"error": str(exc), **getattr(exc, "metadata", {})}, sys.stdout)
-         sys.stdout.write("\n")
-         return EXIT_NOT_FOUND if isinstance(exc, NotFound) else EXIT_ERROR
- 
 diff --git a/workspace/bin/console-write b/workspace/bin/console-write
-index 7de0f01..8535417 100755
+index 78761d6..8535417 100755
 --- a/workspace/bin/console-write
 +++ b/workspace/bin/console-write
-@@ -42,6 +42,7 @@ The payload says which; a caller reads ``status``, not the exit code.
- Std-lib only.
- """
- 
-+import contextlib
- import json
- import os
- import sys
-@@ -54,6 +55,7 @@ if LIB_DIR not in sys.path:
- 
- import operator_config  # noqa: E402
- import operator_writer  # noqa: E402
-+import console_config  # noqa: E402
- 
- WRITE_KEY_VAR = "GCP_SERVICE_ACCOUNT_WRITE_B64"
- # A request is one small object; anything larger is a mistake or an attack.
-@@ -99,6 +101,12 @@ def parse_request(raw):
+@@ -101,6 +101,12 @@ def parse_request(raw):
          raise operator_writer.WriteRefused("request is not valid JSON: %s" % ex)
      if not isinstance(request, dict):
          raise operator_writer.WriteRefused("request must be a JSON object")
@@ -789,47 +506,18 @@ index 7de0f01..8535417 100755
      missing = [name for name in REQUIRED if name not in request]
      if missing:
          raise operator_writer.WriteRefused("request is missing %s" % ", ".join(missing))
-@@ -140,16 +148,21 @@ def main(argv, stdin=None, stdout=None, env=None):
-     stdout = stdout or sys.stdout
-     try:
+@@ -144,7 +150,10 @@ def main(argv, stdin=None, stdout=None, env=None):
          request = parse_request(stdin.read(MAX_REQUEST_BYTES + 1))
--        if "delete" in request:
--            result = operator_writer.delete(
--                request["collection"], request["id"].strip(), request.get("actor"),
--                env=write_env(env), reason=request.get("reason"),
--                dry_run=bool(request.get("dryRun")))
--        else:
--            result = operator_writer.write(
--                request["collection"], request["id"].strip(), request["fields"],
--                request.get("actor"), env=write_env(env),
--                dry_run=bool(request.get("dryRun")))
-+        guard = contextlib.nullcontext() if request.get("dryRun") else console_config.mutation(env)
-+        with guard:
+         guard = contextlib.nullcontext() if request.get("dryRun") else console_config.mutation(env)
+         with guard:
+-            if "delete" in request:
 +            if "changes" in request:
 +                result = operator_writer.write_group_batch(request["changes"], request.get("actor"),
 +                    env=write_env(env), dry_run=bool(request.get("dryRun")))
 +            elif "delete" in request:
-+                result = operator_writer.delete(
-+                    request["collection"], request["id"].strip(), request.get("actor"),
-+                    env=write_env(env), reason=request.get("reason"),
-+                    dry_run=bool(request.get("dryRun")))
-+            else:
-+                result = operator_writer.write(
-+                    request["collection"], request["id"].strip(), request["fields"],
-+                    request.get("actor"), env=write_env(env),
-+                    dry_run=bool(request.get("dryRun")))
-     except operator_writer.WriteRefused as ex:
-         payload = {"ok": False, "status": ex.status, "error": str(ex),
-                    "problems": ex.problems}
-@@ -157,7 +170,7 @@ def main(argv, stdin=None, stdout=None, env=None):
-         # A write must never be applied to a guess at the current state.
-         payload = {"ok": False, "status": 503,
-                    "error": "cannot read the current config, so nothing was "
--                            "changed: %s" % ex, "problems": []}
-+                            "changed: %s" % ex, "problems": [], **ex.metadata}
-     except operator_config.ConfigInvalid as ex:
-         payload = {"ok": False, "status": 409,
-                    "error": "the stored config is not readable: %s" % ex,
+                 result = operator_writer.delete(
+                     request["collection"], request["id"].strip(), request.get("actor"),
+                     env=write_env(env), reason=request.get("reason"),
 diff --git a/workspace/lib/ad_assets.py b/workspace/lib/ad_assets.py
 index bed5b51..9414169 100644
 --- a/workspace/lib/ad_assets.py
@@ -899,7 +587,7 @@ index bed5b51..9414169 100644
      if not entries:
          # Nothing indexed for this campaign is "not migrated yet", not an error:
 diff --git a/workspace/lib/console_campaigns.py b/workspace/lib/console_campaigns.py
-index e1295ff..d259981 100644
+index 5d9cd9d..d259981 100644
 --- a/workspace/lib/console_campaigns.py
 +++ b/workspace/lib/console_campaigns.py
 @@ -172,7 +172,13 @@ class Store:
@@ -935,22 +623,18 @@ index e1295ff..d259981 100644
          need(slug not in dict(raw["campaigns"]), "a campaign with this ID already exists; choose a different name")
          declared = promo_config.read_manifest(env) or {}
          need(not any(row.get("slug") == slug for row in declared.get("promos", [])), "campaign ID is already declared in the bot")
-@@ -347,19 +362,30 @@ def _reconcile_one(slug, store, call):
- 
+@@ -348,21 +363,29 @@ def _reconcile_one(slug, store, call):
  def mark_status(slug, store, status):
      # A field mask avoids overwriting caption/switch edits during reconciliation.
--    store.request(":commit", {"writes": [{"update": {"name": "%s/campaigns/%s" % (store.base, slug),
--                   "fields": config.encode_fields({"scheduleStatus": status})}, "updateMask": {"fieldPaths": ["scheduleStatus"]},
--                   "currentDocument": {"exists": True}}]})
-+    import console_config
+     import console_config
 +    current = store.get("campaigns", slug)
 +    if not current or current.get("scheduleStatus") == status:
 +        return False
-+    # Invalidate only when reconciliation actually writes, not every minute.
-+    with console_config.mutation():
-+        store.request(":commit", {"writes": [{"update": {"name": "%s/campaigns/%s" % (store.base, slug),
-+                       "fields": config.encode_fields({"scheduleStatus": status})}, "updateMask": {"fieldPaths": ["scheduleStatus"]},
-+                       "currentDocument": {"exists": True}}]})
+     # Invalidate only when reconciliation actually writes, not every minute.
+     with console_config.mutation():
+         store.request(":commit", {"writes": [{"update": {"name": "%s/campaigns/%s" % (store.base, slug),
+                        "fields": config.encode_fields({"scheduleStatus": status})}, "updateMask": {"fieldPaths": ["scheduleStatus"]},
+                        "currentDocument": {"exists": True}}]})
 +    return True
  
  
@@ -970,7 +654,7 @@ index e1295ff..d259981 100644
  
  
  def schedule_occurrence(campaign, day):
-@@ -387,9 +413,11 @@ def definitions(membership):
+@@ -390,9 +413,11 @@ def definitions(membership):
      return {slug: data for slug, data in (membership.get("promos") or {}).items() if data.get("kind") == "console"}
  
  
@@ -983,118 +667,157 @@ index e1295ff..d259981 100644
          daily, weekly = promo_membership.groups_for_promo(membership, slug)
          accounts = {}
          for jid in list(daily) + list(weekly):
+diff --git a/workspace/lib/console_config.py b/workspace/lib/console_config.py
+index 1404a70..c17c575 100644
+--- a/workspace/lib/console_config.py
++++ b/workspace/lib/console_config.py
+@@ -1,4 +1,4 @@
+-"""Five-minute display cache; never used by writers or campaign sends.
++"""Bounded display cache; never used by writers or campaign sends.
+ 
+ All console-read processes on the volume share one cache and one flock. A
+ generation from the API and a local invalidation marker fence older reads out
+@@ -15,7 +15,8 @@ import time
+ 
+ import operator_config as config
+ 
+-TTL_SECONDS = 300
++TTL_SECONDS = 180
++FAILURE_TTL_SECONDS = 300
+ CACHE_FILE = "console-config.json"
+ EPOCH_FILE = "console-config-epoch.json"
+ 
+@@ -42,7 +43,13 @@ def _cached(entry, identity, epoch, now):
+     if not isinstance(entry, dict) or entry.get("identity") != identity or entry.get("epoch") != epoch:
+         return None
+     checked = entry.get("checkedAt")
+-    if not isinstance(checked, (int, float)) or not 0 <= now() - checked < TTL_SECONDS:
++    result = entry.get("result")
++    ttl = FAILURE_TTL_SECONDS if entry.get("error") or isinstance(result, dict) and result.get("degraded") else TTL_SECONDS
++    metadata = entry.get("metadata")
++    delay = metadata.get("retryAfterSeconds", 0) if isinstance(metadata, dict) else 0
++    if isinstance(delay, (int, float)) and 0 <= delay <= 86400:
++        ttl = max(ttl, delay)
++    if not isinstance(checked, (int, float)) or not 0 <= now() - checked < ttl:
+         return None
+     result = entry.get("result")
+     if not isinstance(result, dict):
+@@ -73,37 +80,41 @@ def _cached(entry, identity, epoch, now):
+     return dict(result, source="snapshot")
+ 
+ 
+-def load(env=None, *, fresh=False, now=None, log=None, **inject):
++def load(env=None, *, fresh=False, now=None, log=None, campaign=None, group_ids=None,
++         include_groups=True, include_campaigns=True, **inject):
+     env = os.environ if env is None else env
+     now = now or time.time
+     log = log or config._log
+-    directory = config.state_dir(env)
+-    path = os.path.join(directory, CACHE_FILE)
++    scope = {"campaign": campaign, "group_ids": group_ids, "include_groups": include_groups, "include_campaigns": include_campaigns}
+     try:
+         identity = _identity(env)
+     except config.ConfigUnavailable:
+         # An unreadable credential cannot identify a display-cache entry.
+-        # Let the normal loader validate the outage snapshot instead; strict
+-        # save reads still require a successful live read and must fail here.
+-        return config.load(env, now=now, log=log, allow_snapshot=not fresh, **inject)
++        # The normal loader still validates and filters outage snapshots;
++        # strict save reads must require a successful live read.
++        return config.load(env, now=now, log=log, allow_snapshot=not fresh, **scope, **inject)
++    directory = config.scope_directory(env, **scope)
++    # Every scope watches the same mutation marker, including locally-run writes.
++    epoch_directory = config.state_dir(env)
++    path = os.path.join(directory, CACHE_FILE)
+     os.makedirs(directory, mode=0o700, exist_ok=True)
+     fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+     with os.fdopen(fd, "a") as lock:
+         fcntl.flock(lock, fcntl.LOCK_EX)
+-        epoch = _epoch(directory)
++        epoch = _epoch(epoch_directory)
+         if not fresh:
+             hit = _cached(config._read_json(path), identity, epoch, now)
+             if hit is not None:
+                 return hit
+         entry = {"identity": identity, "epoch": epoch}
+         try:
+-            result = config.load(env, now=now, log=log, allow_snapshot=not fresh, **inject)
++            result = config.load(env, now=now, log=log, allow_snapshot=not fresh, **scope, **inject)
+         except config.ConfigUnavailable as exc:
+             entry.update(error=str(exc), metadata=exc.metadata)
+             # A strict save read must fail, while background displays may
+             # continue using the validated snapshot during the cooldown.
+             try:
+-                entry["result"] = config._from_snapshot(directory, str(exc), now=now)
++                entry["result"] = config.scope_snapshot(env, str(exc), now=now, **scope)
+             except config.ConfigUnavailable:
+                 pass
+             raise
+@@ -114,7 +125,7 @@ def load(env=None, *, fresh=False, now=None, log=None, **inject):
+             entry["checkedAt"] = now()
+             # Invalidation does not take the flock: a mutation must never wait
+             # for a slow read. A late old entry is also rejected on epoch lookup.
+-            if _epoch(directory) == epoch:
++            if _epoch(epoch_directory) == epoch:
+                 try:
+                     config._write_private_json(path, entry)
+                 except OSError:
+@@ -134,3 +145,42 @@ def mutation(env=None):
+         yield
+     finally:
+         fence()
++
++
++def cached_summary(name, reader, env=None, *, now=None):
++    """Cache a small aggregate without loading membership just to obtain counts."""
++    env = os.environ if env is None else env
++    now = now or time.time
++    directory = config.state_dir(env)
++    identity = _identity(env)
++    digest = hashlib.sha256((name + identity).encode()).hexdigest()
++    path = os.path.join(directory, "summaries", digest + ".json")
++    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
++    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
++    with os.fdopen(fd, "a") as lock:
++        fcntl.flock(lock, fcntl.LOCK_EX)
++        epoch = _epoch(directory)
++        entry = config._read_json(path)
++        if isinstance(entry, dict) and entry.get("epoch") == epoch:
++            ttl = FAILURE_TTL_SECONDS if entry.get("error") else TTL_SECONDS
++            metadata = entry.get("metadata")
++            delay = metadata.get("retryAfterSeconds", 0) if isinstance(metadata, dict) else 0
++            if isinstance(delay, (int, float)) and 0 <= delay <= 86400:
++                ttl = max(ttl, delay)
++            checked = entry.get("checkedAt")
++            if isinstance(checked, (int, float)) and 0 <= now() - checked < ttl:
++                if entry.get("error"):
++                    raise config.ConfigUnavailable(entry["error"], **entry.get("metadata", {}))
++                if isinstance(entry.get("result"), dict):
++                    return entry["result"]
++        entry = {"epoch": epoch}
++        try:
++            entry["result"] = reader()
++            return entry["result"]
++        except config.ConfigUnavailable as exc:
++            entry.update(error=str(exc), metadata=exc.metadata)
++            raise
++        finally:
++            entry["checkedAt"] = now()
++            if _epoch(directory) == epoch:
++                config._write_private_json(path, entry)
 diff --git a/workspace/lib/operator_config.py b/workspace/lib/operator_config.py
-index b2a2890..3185fd2 100644
+index 343aab3..5c93284 100644
 --- a/workspace/lib/operator_config.py
 +++ b/workspace/lib/operator_config.py
-@@ -50,7 +50,10 @@ Std-lib only, Python 3.11+ (the container runs Debian bookworm's python3).
- 
+@@ -51,6 +51,7 @@ Std-lib only, Python 3.11+ (the container runs Debian bookworm's python3).
  import base64
  import datetime
-+import email.utils
+ import email.utils
 +import hashlib
  import json
-+import math
+ import math
  import os
- import secrets
- import subprocess
-@@ -102,6 +105,20 @@ DEFAULT_STATE_DIR = "/home/joseph/.openclaw"
- class ConfigUnavailable(Exception):
-     """No usable config: Firestore unreachable or refusing, and no snapshot."""
- 
-+    def __init__(self, message, *, upstreamStatus=None, code=None, quota=None,
-+                 retryAfterSeconds=None):
-+        super().__init__(message)
-+        self.metadata = {}
-+        if isinstance(upstreamStatus, int) and 100 <= upstreamStatus <= 599:
-+            self.metadata["upstreamStatus"] = upstreamStatus
-+        if code == "config_rate_limited":
-+            self.metadata["code"] = code
-+        if quota in ("daily", "rate", "unknown"):
-+            self.metadata["quota"] = quota
-+        if (isinstance(retryAfterSeconds, (int, float))
-+                and math.isfinite(retryAfterSeconds) and 0 <= retryAfterSeconds <= 86400):
-+            self.metadata["retryAfterSeconds"] = retryAfterSeconds
-+
- 
- class ConfigInvalid(Exception):
-     """Firestore answered, but a document every group depends on is malformed."""
-@@ -219,6 +236,53 @@ def access_token(creds, cache_path, *, opener, signer, now, sleep):
- # HTTP
- 
- 
-+def _failure_metadata(error, host):
-+    """Extract only enums and numbers, never Google's free-form error text."""
-+    metadata = {"upstreamStatus": error.code}
-+    if host != "firestore.googleapis.com" or error.code != 429:
-+        return metadata
-+    metadata.update(code="config_rate_limited", quota="unknown")
-+    delays = []
-+    header = error.headers.get("Retry-After") if error.headers else None
-+    if header:
-+        try:
-+            delays.append(float(header))
-+        except ValueError:
-+            try:
-+                delays.append(email.utils.parsedate_to_datetime(header).timestamp() - time.time())
-+            except (ValueError, TypeError, OverflowError):
-+                pass
-+    try:
-+        payload = json.loads(error.read(8192))
-+        body = payload.get("error", {}) if isinstance(payload, dict) else {}
-+        details = body.get("details", []) if isinstance(body, dict) else []
-+        for detail in details if isinstance(details, list) else []:
-+            if not isinstance(detail, dict):
-+                continue
-+            if detail.get("@type") == "type.googleapis.com/google.rpc.ErrorInfo":
-+                info = detail.get("metadata")
-+                if isinstance(info, dict):
-+                    limit = str(info.get("quota_limit", "")).lower()
-+                    if "daily" in limit or "perday" in limit or "per_day" in limit:
-+                        metadata["quota"] = "daily"
-+                    elif metadata["quota"] != "daily" and any(unit in limit for unit in (
-+                            "perminute", "persecond", "per_minute", "per_second")):
-+                        metadata["quota"] = "rate"
-+            if detail.get("@type") == "type.googleapis.com/google.rpc.RetryInfo":
-+                delay = detail.get("retryDelay")
-+                if isinstance(delay, str) and delay.endswith("s"):
-+                    try:
-+                        delays.append(float(delay[:-1]))
-+                    except ValueError:
-+                        pass
-+    except (ValueError, OSError):
-+        pass
-+    delays = [delay for delay in delays if math.isfinite(delay) and 0 <= delay <= 86400]
-+    if delays:
-+        metadata["retryAfterSeconds"] = max(delays)
-+    return metadata
-+
-+
- def _request(url, *, opener, sleep, data=None, headers=None, method=None,
-              missing_ok=False):
-     """JSON from ``url``, one retry on a transient failure. Raises
-@@ -232,15 +296,17 @@ def _request(url, *, opener, sleep, data=None, headers=None, method=None,
-             with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-                 return json.loads(response.read().decode("utf-8") or "{}")
-         except urllib.error.HTTPError as ex:
-+            metadata = _failure_metadata(ex, host)
-             # An HTTPError holds the response; close it now rather than at GC.
-             ex.close()
-             if missing_ok and ex.code == 404:
-                 return None
--            if ex.code in RETRYABLE_STATUS and attempt == 0:
--                sleep(RETRY_BACKOFF_SECONDS)
-+            if (ex.code in RETRYABLE_STATUS and attempt == 0
-+                    and metadata.get("quota") != "daily"):
-+                sleep(min(5, metadata.get("retryAfterSeconds", RETRY_BACKOFF_SECONDS)))
-                 continue
-             raise ConfigUnavailable("%s answered HTTP %d%s"
--                                    % (host, ex.code, HTTP_HINTS.get(ex.code, "")))
-+                                    % (host, ex.code, HTTP_HINTS.get(ex.code, "")), **metadata)
-         except (urllib.error.URLError, TimeoutError, OSError) as ex:
-             if attempt == 0:
-                 sleep(RETRY_BACKOFF_SECONDS)
-@@ -288,14 +354,68 @@ def list_documents(project, collection, token, *, opener, sleep):
+@@ -353,14 +354,68 @@ def list_documents(project, collection, token, *, opener, sleep):
              return out
  
  
@@ -1165,7 +888,7 @@ index b2a2890..3185fd2 100644
  
  
  # --------------------------------------------------------------------------
-@@ -678,8 +798,9 @@ def _log(message):
+@@ -743,8 +798,9 @@ def _log(message):
      sys.stderr.write("[operator-config] %s\n" % message)
  
  
@@ -1177,7 +900,7 @@ index b2a2890..3185fd2 100644
      Firestore cannot be reached or refuses. Returns ``(project, raw)``."""
      env = os.environ if env is None else env
      opener = opener or urllib.request.urlopen
-@@ -692,13 +813,30 @@ def fetch(env=None, *, opener=None, signer=None, now=None, sleep=None):
+@@ -757,14 +813,30 @@ def fetch(env=None, *, opener=None, signer=None, now=None, sleep=None):
                                  "(GCP_SERVICE_ACCOUNT_B64 or GCP_SERVICE_ACCOUNT_FILE)")
      token = access_token(creds, token_cache_path(state_dir(env)), opener=opener,
                           signer=signer, now=now, sleep=sleep)
@@ -1206,67 +929,75 @@ index b2a2890..3185fd2 100644
      return creds["project_id"], raw
  
  
--def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None):
-+def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None,
+ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None,
+-         allow_snapshot=True):
 +         allow_snapshot=True, campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
      """The operator config to act on, as a dict::
  
          {"source": "firestore" | "snapshot",
-@@ -713,14 +851,20 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None):
+@@ -779,9 +851,10 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None,
      env = os.environ if env is None else env
      now = now or time.time
      log = log or _log
 -    directory = state_dir(env)
 +    scope = {"campaign": campaign, "group_ids": group_ids, "include_groups": include_groups, "include_campaigns": include_campaigns}
-+    directory = scope_directory(env, **scope)
      try:
 -        _, raw = fetch(env, opener=opener, signer=signer, now=now, sleep=sleep)
++        directory = scope_directory(env, **scope)
 +        _, raw = fetch(env, opener=opener, signer=signer, now=now, sleep=sleep, **scope)
          membership, enabled, undecodable = assemble(raw)
          clean, report = quarantine(membership, undecodable)
      except (ConfigUnavailable, ConfigInvalid) as ex:
-+        if not allow_snapshot:
-+            raise
+@@ -789,7 +862,7 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None,
+             raise
          log("Firestore unusable (%s); using the last-known-good snapshot" % ex)
--        return _from_snapshot(directory, str(ex), now=now)
-+        try:
+         try:
+-            return _from_snapshot(directory, str(ex), now=now)
 +            return scope_snapshot(env, str(ex), now=now, **scope)
-+        except ConfigUnavailable as fallback_error:
-+            raise ConfigUnavailable(str(fallback_error), **getattr(ex, "metadata", {})) from ex
+         except ConfigUnavailable as fallback_error:
+             raise ConfigUnavailable(str(fallback_error), **getattr(ex, "metadata", {})) from ex
  
-     at = datetime.datetime.fromtimestamp(now(), datetime.timezone.utc)
-     stamp = at.strftime("%Y-%m-%dT%H:%M:%SZ")
-@@ -744,6 +888,35 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None):
+@@ -815,6 +888,45 @@ def load(env=None, *, opener=None, signer=None, now=None, sleep=None, log=None,
              "report": report, "fetchedAt": stamp, "degraded": None}
  
  
 +def scope_snapshot(env, why, *, now=None, campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
-+    directory = scope_directory(env, campaign=campaign, group_ids=group_ids, include_groups=include_groups, include_campaigns=include_campaigns)
++    scoped_error = None
 +    try:
-+        return _from_snapshot(directory, why, now=now)
-+    except ConfigUnavailable as scoped_error:
-+        if directory == state_dir(env):
-+            raise
-+        # A previous full read can seed a scope during an outage, but a scoped
-+        # read must never replace the full snapshot or add unrelated groups.
++        directory = scope_directory(env, campaign=campaign, group_ids=group_ids, include_groups=include_groups, include_campaigns=include_campaigns)
++    except ConfigUnavailable:
++        # Without a credential identity only the full validated snapshot can
++        # supply a fallback. Filter it below before returning a scoped result.
++        directory = None
++    if directory is not None:
 +        try:
-+            result = _from_snapshot(state_dir(env), why, now=now)
-+        except ConfigUnavailable:
++            return _from_snapshot(directory, why, now=now)
++        except ConfigUnavailable as exc:
++            if directory == state_dir(env):
++                raise
++            scoped_error = exc
++    # A previous full read can seed a scope during an outage, but a scoped
++    # read must never replace the full snapshot or add unrelated groups.
++    try:
++        result = _from_snapshot(state_dir(env), why, now=now)
++    except ConfigUnavailable:
++        if scoped_error is not None:
 +            raise scoped_error
-+        membership = dict(result["membership"])
-+        groups = membership.get("groups") or {}
-+        if not include_groups:
-+            groups = {}
-+        elif group_ids is not None:
-+            groups = {jid: groups[jid] for jid in group_ids if jid in groups}
-+        elif campaign is not None:
-+            groups = {jid: entry for jid, entry in groups.items()
-+                      if campaign in (entry.get("promos") or []) or campaign in (entry.get("weekly") or {})}
-+        membership["groups"] = groups
-+        if not include_campaigns:
-+            membership["promos"] = {}
-+            result = dict(result, enabled={})
-+        return dict(result, membership=membership)
++        raise
++    membership = dict(result["membership"])
++    groups = membership.get("groups") or {}
++    if not include_groups:
++        groups = {}
++    elif group_ids is not None:
++        groups = {jid: groups[jid] for jid in group_ids if jid in groups}
++    elif campaign is not None:
++        groups = {jid: entry for jid, entry in groups.items()
++                  if campaign in (entry.get("promos") or []) or campaign in (entry.get("weekly") or {})}
++    membership["groups"] = groups
++    if not include_campaigns:
++        membership["promos"] = {}
++        result = dict(result, enabled={})
++    return dict(result, membership=membership)
 +
 +
  def _snapshot_age_seconds(snapshot, now):
@@ -1374,23 +1105,14 @@ index c11e539..bdb0066 100644
      entry_id, entry = audit_document(actor, collection, doc_id, before, None,
                                       now=now, reason=reason)
 diff --git a/workspace/lib/promo_config.py b/workspace/lib/promo_config.py
-index 15ac95e..6e4b279 100644
+index 3e8ad3d..6e4b279 100644
 --- a/workspace/lib/promo_config.py
 +++ b/workspace/lib/promo_config.py
-@@ -145,7 +145,7 @@ def targets_doc_from_file(targets_file, err=None):
- 
- 
- def resolve(promo, targets_file=None, membership_path=None, env=None, err=None,
--            **inject):
-+            config_loader=None, **inject):
-     """What this run acts on::
- 
-         {"source": "file" | "firestore" | "snapshot",
 @@ -180,7 +180,10 @@ def resolve(promo, targets_file=None, membership_path=None, env=None, err=None,
          note(warning)
  
      if current == FIRESTORE:
--        loaded = operator_config.load(env, log=note, **inject)
+-        loaded = (config_loader or operator_config.load)(env, log=note, **inject)
 +        if config_loader is None and slug:
 +            loaded = operator_config.load(env, log=note, campaign=slug, **inject)
 +        else:
@@ -1398,8 +1120,31 @@ index 15ac95e..6e4b279 100644
          membership = loaded["membership"]
          # Two switches, and a campaign is on only if both are: the cron manifest
          # decides whether the gateway has a cron registered at all, Firestore
+diff --git a/workspace/lib/test_console_config.py b/workspace/lib/test_console_config.py
+index 5700795..be347ee 100644
+--- a/workspace/lib/test_console_config.py
++++ b/workspace/lib/test_console_config.py
+@@ -146,6 +146,18 @@ class ConsoleCacheTests(Harness):
+         with self.assertRaisesRegex(config.ConfigUnavailable, "past the"):
+             self.display()
+ 
++    def test_credential_failure_filters_full_snapshot_for_scoped_displays(self):
++        first = self.display()
++        self.env["GCP_SERVICE_ACCOUNT_B64"] = "malformed*credential"
++        result = self.display(group_ids=[JID_A])
++        self.assertEqual(list(result["membership"]["groups"]), [JID_A])
++        self.assertEqual(result["fetchedAt"], first["fetchedAt"])
++        settings = self.display(include_groups=False, include_campaigns=False)
++        self.assertEqual(settings["membership"]["groups"], {})
++        self.assertEqual(settings["membership"]["promos"], {})
++        with self.assertRaises(config.ConfigUnavailable):
++            self.display(group_ids=[JID_A], fresh=True)
++
+     def test_credential_identity_failure_without_a_snapshot_still_fails_closed(self):
+         self.env["GCP_SERVICE_ACCOUNT_B64"] = "malformed*credential"
+         with self.assertRaisesRegex(config.ConfigUnavailable, "no snapshot"):
 diff --git a/workspace/lib/test_operator_config.py b/workspace/lib/test_operator_config.py
-index 1342530..313089d 100644
+index 767fd4f..313089d 100644
 --- a/workspace/lib/test_operator_config.py
 +++ b/workspace/lib/test_operator_config.py
 @@ -130,6 +130,33 @@ class FakeFirestore(object):
@@ -1436,487 +1181,6 @@ index 1342530..313089d 100644
          tail = parts.path.split("/documents/", 1)[1].split("/")
          collection = urllib.parse.unquote(tail[0])
          docs = self.store.get(collection, {})
-@@ -493,6 +520,40 @@ class DocumentTest(Harness):
-                                           opener=self.firestore, sleep=lambda s: None))
- 
- 
-+class FirestoreErrorsTest(unittest.TestCase):
-+    def request_failure(self, body, headers=None):
-+        calls = []
-+        delays = []
-+        def limited(request, **kw):
-+            calls.append(request.full_url)
-+            raise urllib.error.HTTPError(request.full_url, 429, "limited", headers or {}, io.BytesIO(body))
-+        with self.assertRaises(oc.ConfigUnavailable) as caught:
-+            oc._request("https://firestore.googleapis.com/v1/test", opener=limited, sleep=delays.append)
-+        return caught.exception, calls, delays
-+
-+    def test_daily_quota_is_classified_without_retrying_or_leaking_response_text(self):
-+        body = {"error": {"message": "CANARY-KEY-MATERIAL", "details": [
-+            {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {
-+                "quota_limit": "FreeTierReadUnitsPerDay", "consumer": "secret-project"}}]}}
-+        error, calls, delays = self.request_failure(json.dumps(body).encode())
-+        self.assertEqual(error.metadata, {"upstreamStatus": 429, "code": "config_rate_limited", "quota": "daily"})
-+        self.assertEqual(len(calls), 1)
-+        self.assertEqual(delays, [])
-+        self.assertNotIn("CANARY", str(error))
-+        self.assertNotIn("secret", json.dumps(error.metadata))
-+
-+    def test_retry_after_is_preserved_but_sleep_is_bounded(self):
-+        error, calls, delays = self.request_failure(b"{}", {"Retry-After": "40"})
-+        self.assertEqual(error.metadata["retryAfterSeconds"], 40)
-+        self.assertEqual(len(calls), 2)
-+        self.assertEqual(delays, [5])
-+
-+    def test_malformed_or_large_bodies_and_invalid_delays_remain_curated(self):
-+        for body in (b"not JSON", b"[1]", b"x" * 20000):
-+            error, _, _ = self.request_failure(body, {"Retry-After": "nan"})
-+            self.assertEqual(error.metadata, {"upstreamStatus": 429, "code": "config_rate_limited", "quota": "unknown"})
-+
-+
- class NodeSignerTest(unittest.TestCase):
-     """The real signer, end to end through its stdin path. Skipped only where no
-     node binary exists; CI and the image both have one."""
-diff --git a/workspace/lib/test_operator_writer.py b/workspace/lib/test_operator_writer.py
-index 56bee9c..4e0614f 100644
---- a/workspace/lib/test_operator_writer.py
-+++ b/workspace/lib/test_operator_writer.py
-@@ -303,6 +303,16 @@ class Refusals(Harness):
-             self.write("groups", JID_A, {"status": "on-hold"})
-         self.assertEqual(self.firestore.commits, [])
- 
-+    def test_a_config_read_429_writes_neither_the_group_nor_an_audit(self):
-+        self.write("groups", JID_A, {"status": "on-hold"}, dry_run=True)
-+        before = self.stored("groups", JID_A)
-+        self.firestore.fail_next = [429, 429]
-+        with self.assertRaises(oc.ConfigUnavailable) as caught:
-+            self.write("groups", JID_A, {"activity": "busy"})
-+        self.assertEqual(caught.exception.metadata["code"], "config_rate_limited")
-+        self.assertEqual(self.stored("groups", JID_A), before)
-+        self.assertEqual(self.firestore.commits, [])
-+
-     def test_a_read_only_key_fails_at_the_commit_without_half_applying(self):
-         self.firestore.commit_status = 403
-         with self.assertRaises(oc.ConfigUnavailable) as caught:
-diff --git a/deploy/test_scoped_console_api.py b/deploy/test_scoped_console_api.py
-new file mode 100644
-index 0000000..7372173
---- /dev/null
-+++ b/deploy/test_scoped_console_api.py
-@@ -0,0 +1,48 @@
-+"""New narrow read and atomic group-write routes retain the API's access gates."""
-+import json
-+import unittest
-+import test_console_api as reads
-+from test_console_write_api import Harness
-+
-+
-+class ScopedReadAPI(unittest.TestCase):
-+    setUp = reads.ConsoleApiTests.setUp
-+    write = reads.ConsoleApiTests.write
-+    serve = reads.ConsoleApiTests.serve
-+    fetch = reads.ConsoleApiTests.fetch
-+    def test_scoped_routes_forward_only_validated_arguments(self):
-+        base = self.serve()
-+        for route, args in [("/campaign/demo", ["campaign", "demo"]),
-+                            ("/campaign-state/demo", ["campaign-state", "demo"]),
-+                            ("/campaign-groups/demo", ["campaign-groups", "demo"]),
-+                            ("/captions/demo", ["captions", "demo"]),
-+                            ("/group/123%40g.us", ["group", "123@g.us"]),
-+                            ("/groups-by-id/123%40g.us%2C456%40g.us", ["groups-by-id", "123@g.us,456@g.us"]),
-+                            ("/capabilities", ["capabilities"]), ("/settings", ["settings"]),
-+                            ("/navigation", ["navigation"])]:
-+            code, body, _ = self.fetch(base + route)
-+            self.assertEqual(code, 200, route)
-+            self.assertEqual(json.loads(body)["args"], args)
-+            self.assertEqual(self.fetch(base + route, token=None)[0], 401)
-+        for route in ("/group/not-a-group", "/groups-by-id/123%40g.us%2Cbad", "/campaign/%2e%2e"):
-+            self.assertEqual(self.fetch(base + route)[0], 404)
-+
-+
-+class GroupBatchAPI(Harness):
-+    def test_batch_is_authenticated_bounded_and_invalidates_reads(self):
-+        base = self.serve()
-+        payload = {"changes": [{"id": "123@g.us", "fields": {"note": "test"}}], "actor": "Operator"}
-+        self.server.console["bridge"].cache["old"] = (999999999999, b"cached")
-+        code, body = self.post(base, "/config/batch/groups", payload)
-+        self.assertEqual(code, 200)
-+        self.assertEqual(json.loads(body)["echo"], dict(payload, collection="groups"))
-+        self.assertEqual(self.server.console["bridge"].cache, {})
-+        self.assertEqual(self.post(base, "/config/batch/groups", payload, token=None)[0], 401)
-+        for invalid in ({"changes": []}, {"changes": [{}] * 101}, {"changes": [], "delete": True}, b" " * 65537):
-+            self.assertEqual(self.post(base, "/config/batch/groups", invalid)[0], 400)
-+        self.set_key(None)
-+        self.assertEqual(self.post(base, "/config/batch/groups", payload)[0], 503)
-+
-+
-+if __name__ == "__main__":
-+    unittest.main()
-diff --git a/workspace/lib/console_config.py b/workspace/lib/console_config.py
-new file mode 100644
-index 0000000..82f2f0f
---- /dev/null
-+++ b/workspace/lib/console_config.py
-@@ -0,0 +1,180 @@
-+"""Five-minute display cache; never used by writers or campaign sends.
-+
-+All console-read processes on the volume share one cache and one flock. A
-+generation from the API and a local invalidation marker fence older reads out
-+after mutations, including writes whose acknowledgement was lost.
-+"""
-+
-+import contextlib
-+import fcntl
-+import hashlib
-+import json
-+import os
-+import secrets
-+import time
-+
-+import operator_config as config
-+
-+TTL_SECONDS = 180
-+FAILURE_TTL_SECONDS = 300
-+CACHE_FILE = "console-config.json"
-+EPOCH_FILE = "console-config-epoch.json"
-+
-+
-+def invalidate(env=None):
-+    """Fence in-flight readers without waiting for their network requests."""
-+    directory = config.state_dir(env)
-+    config._write_private_json(os.path.join(directory, EPOCH_FILE), secrets.token_hex(16))
-+
-+
-+def _identity(env):
-+    creds = config.credentials(env)
-+    # Hash the credential context; no private key is persisted in this cache.
-+    return hashlib.sha256(json.dumps(
-+        [config.API_ROOT, creds, env.get("GENAIE_CONSOLE_CONFIG_GENERATION", "")],
-+        sort_keys=True).encode()).hexdigest()
-+
-+
-+def _epoch(directory):
-+    return config._read_json(os.path.join(directory, EPOCH_FILE))
-+
-+
-+def _cached(entry, identity, epoch, now):
-+    if not isinstance(entry, dict) or entry.get("identity") != identity or entry.get("epoch") != epoch:
-+        return None
-+    checked = entry.get("checkedAt")
-+    result = entry.get("result")
-+    ttl = FAILURE_TTL_SECONDS if entry.get("error") or isinstance(result, dict) and result.get("degraded") else TTL_SECONDS
-+    metadata = entry.get("metadata")
-+    delay = metadata.get("retryAfterSeconds", 0) if isinstance(metadata, dict) else 0
-+    if isinstance(delay, (int, float)) and 0 <= delay <= 86400:
-+        ttl = max(ttl, delay)
-+    if not isinstance(checked, (int, float)) or not 0 <= now() - checked < ttl:
-+        return None
-+    result = entry.get("result")
-+    if not isinstance(result, dict):
-+        if isinstance(entry.get("error"), str):
-+            metadata = entry.get("metadata")
-+            safe = {k: v for k, v in metadata.items() if k in (
-+                "upstreamStatus", "code", "quota", "retryAfterSeconds")} if isinstance(metadata, dict) else {}
-+            raise config.ConfigUnavailable(entry["error"], **safe)
-+        return None
-+    age = config._snapshot_age_seconds(result, now)
-+    if age is None or not 0 <= age <= config.SNAPSHOT_MAX_AGE_SECONDS:
-+        return None
-+    if not isinstance(result.get("membership"), dict) or not isinstance(result.get("enabled"), dict):
-+        return None
-+    if result.get("source") not in ("firestore", "snapshot") or "degraded" not in result:
-+        return None
-+    if result["degraded"] is not None and not isinstance(result["degraded"], str):
-+        return None
-+    try:
-+        clean, _ = config.quarantine(result["membership"])
-+        _, problems = config.campaign_switches(result["enabled"])
-+    except (config.ConfigInvalid, TypeError, ValueError):
-+        return None
-+    if clean != result["membership"] or problems:
-+        return None
-+    if not isinstance(result.get("report"), dict):
-+        return None
-+    return dict(result, source="snapshot")
-+
-+
-+def load(env=None, *, fresh=False, now=None, log=None, campaign=None, group_ids=None,
-+         include_groups=True, include_campaigns=True, **inject):
-+    env = os.environ if env is None else env
-+    now = now or time.time
-+    log = log or config._log
-+    scope = {"campaign": campaign, "group_ids": group_ids, "include_groups": include_groups, "include_campaigns": include_campaigns}
-+    directory = config.scope_directory(env, **scope)
-+    # Every scope watches the same mutation marker, including locally-run writes.
-+    epoch_directory = config.state_dir(env)
-+    path = os.path.join(directory, CACHE_FILE)
-+    identity = _identity(env)
-+    os.makedirs(directory, mode=0o700, exist_ok=True)
-+    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
-+    with os.fdopen(fd, "a") as lock:
-+        fcntl.flock(lock, fcntl.LOCK_EX)
-+        epoch = _epoch(epoch_directory)
-+        if not fresh:
-+            hit = _cached(config._read_json(path), identity, epoch, now)
-+            if hit is not None:
-+                return hit
-+        entry = {"identity": identity, "epoch": epoch}
-+        try:
-+            result = config.load(env, now=now, log=log, allow_snapshot=not fresh, **scope, **inject)
-+        except config.ConfigUnavailable as exc:
-+            entry.update(error=str(exc), metadata=exc.metadata)
-+            # A strict save read must fail, while background displays may
-+            # continue using the validated snapshot during the cooldown.
-+            try:
-+                entry["result"] = config.scope_snapshot(env, str(exc), now=now, **scope)
-+            except config.ConfigUnavailable:
-+                pass
-+            raise
-+        else:
-+            entry["result"] = result
-+            return result
-+        finally:
-+            entry["checkedAt"] = now()
-+            # Invalidation does not take the flock: a mutation must never wait
-+            # for a slow read. A late old entry is also rejected on epoch lookup.
-+            if _epoch(epoch_directory) == epoch:
-+                try:
-+                    config._write_private_json(path, entry)
-+                except OSError:
-+                    log("could not persist the console config cache")
-+
-+
-+@contextlib.contextmanager
-+def mutation(env=None):
-+    """Invalidate local readers before and after any attempted mutation."""
-+    def fence():
-+        try:
-+            invalidate(env)
-+        except OSError:
-+            config._log("could not invalidate the console config cache")
-+    fence()
-+    try:
-+        yield
-+    finally:
-+        fence()
-+
-+
-+def cached_summary(name, reader, env=None, *, now=None):
-+    """Cache a small aggregate without loading membership just to obtain counts."""
-+    env = os.environ if env is None else env
-+    now = now or time.time
-+    directory = config.state_dir(env)
-+    identity = _identity(env)
-+    digest = hashlib.sha256((name + identity).encode()).hexdigest()
-+    path = os.path.join(directory, "summaries", digest + ".json")
-+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-+    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
-+    with os.fdopen(fd, "a") as lock:
-+        fcntl.flock(lock, fcntl.LOCK_EX)
-+        epoch = _epoch(directory)
-+        entry = config._read_json(path)
-+        if isinstance(entry, dict) and entry.get("epoch") == epoch:
-+            ttl = FAILURE_TTL_SECONDS if entry.get("error") else TTL_SECONDS
-+            metadata = entry.get("metadata")
-+            delay = metadata.get("retryAfterSeconds", 0) if isinstance(metadata, dict) else 0
-+            if isinstance(delay, (int, float)) and 0 <= delay <= 86400:
-+                ttl = max(ttl, delay)
-+            checked = entry.get("checkedAt")
-+            if isinstance(checked, (int, float)) and 0 <= now() - checked < ttl:
-+                if entry.get("error"):
-+                    raise config.ConfigUnavailable(entry["error"], **entry.get("metadata", {}))
-+                if isinstance(entry.get("result"), dict):
-+                    return entry["result"]
-+        entry = {"epoch": epoch}
-+        try:
-+            entry["result"] = reader()
-+            return entry["result"]
-+        except config.ConfigUnavailable as exc:
-+            entry.update(error=str(exc), metadata=exc.metadata)
-+            raise
-+        finally:
-+            entry["checkedAt"] = now()
-+            if _epoch(directory) == epoch:
-+                config._write_private_json(path, entry)
-diff --git a/workspace/lib/test_console_config.py b/workspace/lib/test_console_config.py
-new file mode 100644
-index 0000000..7258fd1
---- /dev/null
-+++ b/workspace/lib/test_console_config.py
-@@ -0,0 +1,173 @@
-+"""Display caching is process-shared, bounded, and bypassed before saves."""
-+import io
-+import json
-+import multiprocessing
-+import os
-+import sys
-+import time
-+import unittest
-+import urllib.error
-+
-+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-+import console_config as cache
-+import operator_config as config
-+from test_operator_config import Harness, FakeFirestore, JID_A, creds_b64
-+
-+
-+def process_read(env, count, results):
-+    fake = FakeFirestore(page_size=300)
-+    def opener(request, **kw):
-+        with count.get_lock():
-+            count.value += 1
-+        time.sleep(0.02)
-+        return fake(request, **kw)
-+    try:
-+        result = cache.load(env, opener=opener, signer=lambda *a: "jwt",
-+                            now=lambda: 1_800_000_000.0, log=lambda *a: None)
-+        results.put(result["membership"]["groups"][JID_A]["name"])
-+    except Exception as exc:
-+        results.put(str(exc))
-+
-+
-+class ConsoleCacheTests(Harness):
-+    def display(self, **kw):
-+        return cache.load(self.env, opener=self.firestore, signer=self.signer,
-+                          now=lambda: self.clock[0], sleep=lambda s: None,
-+                          log=self.logs.append, **kw)
-+
-+    def path(self):
-+        return os.path.join(config.state_dir(self.env), cache.CACHE_FILE)
-+
-+    def test_display_reuses_config_until_expiry_but_runtime_load_is_live(self):
-+        first = self.display()
-+        requests = len(self.firestore.requests)
-+        self.firestore.store["groups"][JID_A]["name"] = config.encode_value("Changed")
-+        self.assertEqual(self.display()["membership"], first["membership"])
-+        self.assertEqual(len(self.firestore.requests), requests)
-+        self.assertEqual(self.load()["membership"]["groups"][JID_A]["name"], "Changed")
-+        self.clock[0] += 300
-+        self.assertEqual(self.display()["membership"]["groups"][JID_A]["name"], "Changed")
-+
-+    def test_cold_concurrent_processes_and_a_restarted_process_share_one_read(self):
-+        ctx = multiprocessing.get_context("fork")
-+        count = ctx.Value("i", 0)
-+        results = ctx.Queue()
-+        processes = [ctx.Process(target=process_read, args=(self.env, count, results)) for _ in range(3)]
-+        for process in processes:
-+            process.start()
-+        for process in processes:
-+            process.join(10)
-+            self.assertEqual(process.exitcode, 0)
-+        self.assertEqual([results.get(timeout=1) for _ in processes], ["Alpha"] * 3)
-+        self.assertEqual(count.value, 5)  # token, settings, lines, campaigns, groups
-+        restarted = ctx.Process(target=process_read, args=(self.env, count, results))
-+        restarted.start()
-+        restarted.join(10)
-+        self.assertEqual(restarted.exitcode, 0)
-+        self.assertEqual(results.get(timeout=1), "Alpha")
-+        self.assertEqual(count.value, 5)
-+
-+    def test_outage_cooldown_preserves_snapshot_timestamp_reason_and_age_limit(self):
-+        first = self.display()
-+        self.clock[0] += 300
-+        self.firestore.down = True
-+        failed = self.display()
-+        requests = len(self.firestore.requests)
-+        self.assertEqual(failed["source"], "snapshot")
-+        self.assertEqual(failed["fetchedAt"], first["fetchedAt"])
-+        self.assertIn("unreachable", failed["degraded"])
-+        self.clock[0] += 60
-+        self.assertEqual(self.display(), failed)
-+        self.assertEqual(len(self.firestore.requests), requests)
-+        self.clock[0] += config.SNAPSHOT_MAX_AGE_SECONDS
-+        with self.assertRaises(config.ConfigUnavailable):
-+            self.display()
-+
-+    def test_failure_without_snapshot_is_also_throttled_and_recovery_is_detected(self):
-+        self.firestore.down = True
-+        with self.assertRaises(config.ConfigUnavailable):
-+            self.display()
-+        requests = len(self.firestore.requests)
-+        with self.assertRaises(config.ConfigUnavailable):
-+            self.display()
-+        self.assertEqual(len(self.firestore.requests), requests)
-+        self.clock[0] += 300
-+        self.firestore.down = False
-+        self.assertEqual(self.display()["source"], "firestore")
-+
-+    def test_fresh_bypasses_success_and_failure_caches_and_refuses_snapshot(self):
-+        self.display()
-+        self.firestore.store["groups"][JID_A]["name"] = config.encode_value("New")
-+        self.assertEqual(self.display(fresh=True)["membership"]["groups"][JID_A]["name"], "New")
-+        self.firestore.down = True
-+        with self.assertRaises(config.ConfigUnavailable):
-+            self.display(fresh=True)
-+        self.assertEqual(self.display()["source"], "snapshot")
-+        self.firestore.down = False
-+        self.assertEqual(self.display(fresh=True)["source"], "firestore")
-+
-+    def test_identity_changes_never_reuse_another_project_or_credentials(self):
-+        self.display()
-+        for override in ({"project_id": "other"}, {"client_email": "other@x"}, {"private_key_id": "other"}):
-+            self.env["GCP_SERVICE_ACCOUNT_B64"] = creds_b64(**override)
-+            before = len(self.firestore.requests)
-+            self.display()
-+            self.assertGreater(len(self.firestore.requests), before)
-+
-+    def test_local_and_api_invalidation_force_new_reads(self):
-+        self.display()
-+        for invalidate in (lambda: cache.invalidate(self.env),
-+                           lambda: self.env.update(GENAIE_CONSOLE_CONFIG_GENERATION="new-generation")):
-+            invalidate()
-+            before = len(self.firestore.requests)
-+            self.display()
-+            self.assertGreater(len(self.firestore.requests), before)
-+
-+    def test_invalidation_during_read_does_not_publish_older_data(self):
-+        fake = self.firestore
-+        def opener(request, **kw):
-+            response = fake(request, **kw)
-+            if "/documents/groups?" in request.full_url:
-+                cache.invalidate(self.env)
-+            return response
-+        cache.load(self.env, opener=opener, signer=self.signer, now=lambda: self.clock[0])
-+        self.assertFalse(os.path.exists(self.path()))
-+
-+    def test_corrupt_cache_or_invalid_membership_is_refreshed(self):
-+        self.display()
-+        with open(self.path()) as stream:
-+            entry = json.load(stream)
-+        for body in ("not JSON", json.dumps(dict(entry, result=dict(entry["result"], membership={"version": 99})))):
-+            with open(self.path(), "w") as stream:
-+                stream.write(body)
-+            before = len(self.firestore.requests)
-+            self.assertEqual(self.display()["membership"]["groups"][JID_A]["name"], "Alpha")
-+            self.assertGreater(len(self.firestore.requests), before)
-+
-+    def test_a_corrupt_cached_group_is_not_returned_without_quarantine(self):
-+        self.display()
-+        with open(self.path()) as stream:
-+            entry = json.load(stream)
-+        entry["result"]["membership"]["groups"][JID_A]["status"] = "invalid"
-+        with open(self.path(), "w") as stream:
-+            json.dump(entry, stream)
-+        before = len(self.firestore.requests)
-+        self.assertEqual(self.display()["membership"]["groups"][JID_A]["status"], "active")
-+        self.assertGreater(len(self.firestore.requests), before)
-+
-+    def test_rate_limit_metadata_survives_cached_failure_without_a_snapshot(self):
-+        def limited(request, **kw):
-+            raise urllib.error.HTTPError(request.full_url, 429, "limited", {"Retry-After": "12"}, io.BytesIO(b"{}"))
-+        self.firestore = limited
-+        # The refusal must be from Firestore rather than OAuth.
-+        from unittest.mock import patch
-+        with patch.object(config, "access_token", return_value="tok"):
-+            for _ in range(2):
-+                with self.assertRaises(config.ConfigUnavailable) as caught:
-+                    self.display()
-+                self.assertEqual(caught.exception.metadata, {"upstreamStatus": 429, "code": "config_rate_limited",
-+                                                            "quota": "unknown", "retryAfterSeconds": 12.0})
-+
-+
-+if __name__ == "__main__":
-+    unittest.main()
 diff --git a/workspace/lib/test_scoped_reads.py b/workspace/lib/test_scoped_reads.py
 new file mode 100644
 index 0000000..61137b2
