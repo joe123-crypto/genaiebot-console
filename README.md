@@ -70,7 +70,7 @@ npm run build
 |---|---|
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
 | Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
-| Campaigns | Live. Searchable and filterable; slot, reach, line split, ref prefix, copy. |
+| Campaigns | Live. Searchable and filterable, with New campaign creation when the companion bot support is deployed. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
 | Schedule | Live. Day timeline with the per-line overlap rule checked. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
@@ -247,8 +247,8 @@ reimplement here.
 **The pictures themselves come from the bot's asset index.** The images live in a
 Cloudflare R2 bucket and the index of them in Firestore, so the bot reports each
 picture's public URL beside the basename its `post_ad.py` declares, and a tile
-loads that URL directly. The console never holds the bucket, the keys or any
-credential, and never proxies the bytes: the URL is composed on the bot from one
+loads that URL directly. Picture previews use public URLs and never proxy the bytes. Campaign creation
+uses a server-side bucket-scoped upload token to sign direct browser uploads: the URL is composed on the bot from one
 environment variable, so putting a custom domain in front of the bucket moves the
 console with it and changes nothing here. The keys are content-addressed, so a URL
 never changes meaning and the browser can cache it indefinitely.
@@ -344,3 +344,25 @@ the account owner's phone.
 Next.js 15 App Router, React 19, TypeScript, vitest. Plain CSS with design
 tokens on `:root` in [`app/globals.css`](app/globals.css), matching `webetu-web`
 rather than introducing Tailwind. Light mode only.
+
+## Create a campaign
+
+Use **New campaign** on Campaigns. Enter a name, upload one or more JPEG/PNG
+pictures (up to 6 MiB each), add caption variants, choose a time and daily or
+weekday recurrence, and select active groups. Groups keep their existing
+WhatsApp lines, so the same campaign can post through several lines.
+
+Campaigns start switched off unless **Enabled** is selected. **Advanced settings**
+is optional and collapsed: timezone (Africa/Harare by default), tracking and
+contact overrides, per-group weekdays/pauses, notes, timeout and failure alerts.
+Leaving it untouched creates a complete campaign with working defaults. Picture
+previews can be reordered; one picture rotates per scheduled run. The form
+survives automatic refreshes and errors. A saved campaign with an unverified
+schedule is shown as pending while the bot retries automatically.
+
+Creation requires the companion bot patch, live Firestore/R2 modes, console
+writes enabled and server-side R2 upload configuration. Older bots show a clear
+unavailable reason while the form remains usable as an in-memory draft. See
+[integrations/README.md](integrations/README.md#campaign-creation) for installation,
+CORS, API contracts and verification. No new authentication or deployment is
+introduced by this feature.

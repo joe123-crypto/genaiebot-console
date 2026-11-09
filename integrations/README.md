@@ -83,3 +83,83 @@ Validate the bot with its collector/discovery/health tests, pinned WhatsApp
 adapter compatibility test, `workspace/lib/test_group_metrics.py`,
 `workspace/lib/test_group_discovery.py`, and `deploy/test_console_read.py`.
 Validate the console with `npm test`, `npm run typecheck`, and `npm run build`.
+
+## Campaign creation
+
+`genaebot-campaign-creation.patch` is based on genaebot commit `5728af9`.
+It includes caption override support; **do not also apply the older caption
+patch**. Apply to a clean isolated checkout containing that revision:
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-campaign-creation.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-campaign-creation.patch
+python3 workspace/lib/test_console_campaigns.py
+python3 workspace/lib/test_operator_config.py
+python3 workspace/lib/test_operator_writer.py
+python3 workspace/lib/test_promo_broadcast.py
+python3 workspace/lib/test_promo_config.py
+python3 deploy/test_console_read.py
+python3 deploy/test_console_write_api.py
+python3 deploy/test_console_campaign_api.py
+```
+
+Deploy the bot first, with `GENAIE_CONFIG_SOURCE=firestore`,
+`GENAIE_AD_ASSETS_SOURCE=r2`, `GENAIE_AD_ASSETS_BASE_URL` pointing at the existing
+public image origin, and its existing `GCP_SERVICE_ACCOUNT_WRITE_B64` supplied
+only to the console API. The new scripts are staged with `workspace/bin` and
+`workspace/lib`; there is no generated per-campaign code or manual installer.
+
+The authenticated `POST /internal/console/campaigns/create` route accepts the
+`NewCampaign` shape in `src/domains/campaign-create.ts`, plus server-assigned
+`actor`. `requestId` is stable across retries. Success reports `slug` and
+`scheduling: ready|pending`. Campaign, selected groups, asset index, creation
+receipt and audit are committed in one Firestore transaction. Concurrent edits
+cause a transaction conflict, preserving the other edit. A repeated request
+returns the existing campaign; a changed payload using that receipt is refused.
+
+The console signs five-minute immutable R2 PUT URLs using `R2_ACCOUNT_ID`,
+`R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. Configure these only
+on the console server, using a bucket-scoped object-write token. The bot needs
+no R2 write credentials. Set bucket CORS for the console's exact origin(s),
+including local development origins when needed:
+
+```json
+[{
+  "AllowedOrigins": ["https://YOUR-CONSOLE-HOST"],
+  "AllowedMethods": ["PUT"],
+  "AllowedHeaders": ["Content-Type", "If-None-Match", "x-amz-*"],
+  "ExposeHeaders": ["ETag"],
+  "MaxAgeSeconds": 300
+}]
+```
+
+Each JPEG/PNG is at most 6 MiB; at most 20 pictures and 100 groups are accepted
+per campaign. Files go directly to `ads/<slug>/<sha256>.<ext>`. Before creating
+an index entry, the bot downloads from its configured asset origin and checks
+magic bytes, length and SHA-256. An interrupted upload creates no campaign or
+index entry. Unreferenced immutable objects from abandoned forms are harmless
+and may be removed manually after confirming no asset document references them;
+do not apply a blanket expiry to the `ads/` prefix.
+
+The console API reconciles desired gateway schedules at startup and every
+minute. Job names are stable (`console-<slug>-promo`), a volume lock serializes
+reconciliation, and a read-back verifies schedule, timezone, command, timeout,
+and enablement. Jobs are initially added disabled. A lost acknowledgement is
+recovered by finding the existing named job, never by running it immediately.
+Pending schedules are visible and retried after API/gateway restart. A pending
+campaign cannot post or consume cap turns until reconciled. Existing enable
+controls continue to gate runs immediately; job enablement follows during the
+next reconciliation. Existing standby checks recognize the `-promo` suffix.
+
+The shared runner uses one resolved config and the campaign's timezone/date;
+it reuses caption and picture rotation, weekly restrictions, caps, connectivity
+checks, spacing and the per-group sent receipt. A process lock prevents duplicate
+simultaneous invocations. Missing verified pictures fail before any send. Existing
+manifest campaigns retain their scripts, assets and schedule ownership. Repo
+asset mirror tooling excludes console-owned campaign assets from repo parity
+and replacement operations.
+
+After deploying both sides, verify `overview.writes.campaignCreation` reports
+all capabilities, create a campaign with Enabled off, inspect its pictures,
+caption preview, two-line group assignments and disabled gateway job, then
+explicitly enable it if desired. This change does not deploy or send test adverts.

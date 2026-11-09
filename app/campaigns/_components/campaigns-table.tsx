@@ -155,12 +155,12 @@ export function CampaignsTable({ campaigns, initialFilter }: Props) {
                     <Link
                       className="campaign-preview-link"
                       href={`/campaigns/${campaign.slug}`}
-                      aria-label={`Preview ${campaignTitle(campaign.slug)}`}
+                      aria-label={`Preview ${campaign.source === "console" ? campaign.name : campaignTitle(campaign.slug)}`}
                     >
-                      {campaignTitle(campaign.slug)}
+                      {campaign.source === "console" ? campaign.name : campaignTitle(campaign.slug)}
                     </Link>
                   </div>
-                  <div className="cell-mono">{campaign.name}</div>
+                  <div className="cell-mono">{campaign.source === "console" ? campaign.slug : campaign.name}</div>
                   {campaign.enabled ? null : (
                     <div className="pill pill-warning" style={{ marginTop: 4 }}>
                       {campaignOffLabel(campaign)}

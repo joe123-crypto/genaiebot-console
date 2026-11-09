@@ -22,12 +22,12 @@ import type { Overview } from "@/src/lib/types";
  */
 export function daySlots(overview: Overview) {
   return overview.campaigns
-    .filter((campaign) => campaign.enabled && campaign.hour !== null)
+    .filter((campaign) => campaign.enabled && campaign.hour !== null && campaign.scheduleMinutes !== null)
     .map((campaign) => ({
       slug: campaign.slug,
       name: campaign.name,
-      time: slotLabel(campaign),
-      minutes: (campaign.hour ?? 0) * 60 + (campaign.minute ?? 0),
+      time: campaign.scheduleMinutes === undefined ? slotLabel(campaign) : clockLabel(campaign.scheduleMinutes!),
+      minutes: campaign.scheduleMinutes ?? (campaign.hour ?? 0) * 60 + (campaign.minute ?? 0),
       targetCount: campaign.targetCount,
       accounts: campaign.accounts,
     }))
@@ -60,9 +60,8 @@ export function nextUp(slots: DaySlot[], nowMinutes: number) {
 }
 
 /**
- * Which line a slot belongs to: the one carrying most of its groups. The
- * overlap rule is per-line, so a slot has to be attributed to exactly one even
- * though `accounts` is a tally across several.
+ * The main line for display: the one carrying most of its groups. Overlap
+ * checks consider every participating line, including minority lines.
  *
  * This is not quite the question the bar's colour asks — that one is only
  * "ads or not" — and the two can part company for a campaign whose largest
@@ -97,8 +96,10 @@ export type Clash = {
 export function clashes(slots: DaySlot[]): Clash[] {
   const perAccount = new Map<string, DaySlot[]>();
   for (const slot of [...slots].sort((a, b) => a.minutes - b.minutes)) {
-    const account = lineOf(slot);
-    perAccount.set(account, [...(perAccount.get(account) ?? []), slot]);
+    const accounts = Object.entries(slot.accounts).filter(([, count]) => count > 0).map(([account]) => account);
+    for (const account of accounts.length ? accounts : ["default"]) {
+      perAccount.set(account, [...(perAccount.get(account) ?? []), slot]);
+    }
   }
 
   const found: Clash[] = [];

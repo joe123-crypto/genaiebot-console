@@ -88,6 +88,9 @@ export type Campaign = {
    *  create a cron, so a screen must not pretend one can. Both absent from a bot
    *  older than the console's config writes. */
   cronEnabled?: boolean;
+  /** Bot-normalized occurrence on the requested Schedule date. */
+  scheduleMinutes?: number | null;
+  scheduleStatus?: "ready" | "pending";
   cron: string;
   hour: number | null;
   minute: number | null;
@@ -157,6 +160,7 @@ export type WriteCapabilities = {
   affectsProduction: boolean;
   fields: Record<string, string[]>;
   delete: string[];
+  campaignCreation?: { create: boolean; images: boolean; scheduling: boolean };
 };
 
 /** The settings every group's daily allowance derives from, in the shape a

@@ -1085,3 +1085,30 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .cap-settings-bands caption { text-align: left; padding-bottom: 6px; }
 .cap-settings-bands .modal-input { max-width: 110px; }
 .cap-settings .modal-actions { margin-top: 16px; }
+
+/* Campaign creation: ordinary settings first, optional details below. */
+.new-campaign { max-width: 1040px; }
+.campaign-create-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 18px; }
+.new-campaign .modal-input { width: 100%; box-sizing: border-box; }
+.new-campaign textarea { resize: vertical; }
+.campaign-check { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; }
+.campaign-create-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.campaign-weekdays { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; font-size: 13px; }
+.campaign-weekdays label { display: flex; gap: 5px; align-items: center; }
+.campaign-create-pictures { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; margin-top: 16px; }
+.campaign-create-pictures figure { margin: 0; min-width: 0; }
+.campaign-create-pictures img { width: 100%; height: 160px; object-fit: contain; background: var(--surface-muted); border-radius: 8px; }
+.campaign-create-pictures figcaption { font-size: 12px; overflow-wrap: anywhere; margin: 6px 0; }
+.campaign-create-picture-actions, .campaign-create-group-actions, .campaign-create-submit { display: flex; flex-wrap: wrap; gap: 8px; }
+.campaign-create-group-actions { margin: 12px 0; }
+.campaign-create-submit { justify-content: flex-end; margin-top: 20px; }
+.campaign-create-caption { margin: 14px 0; }
+.campaign-create-caption .btn { margin-top: 6px; }
+.campaign-create-groups { max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.campaign-create-groups > label { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.campaign-create-groups small { display: block; color: var(--text-muted); margin-top: 4px; overflow-wrap: anywhere; }
+.campaign-create-advanced summary { cursor: pointer; font-size: 14px; font-weight: 650; }
+.campaign-create-advanced summary span { margin-left: 8px; font-weight: 400; }
+.campaign-create-advanced h3 { font-size: 14px; margin-top: 24px; }
+.campaign-create-restriction { border-bottom: 1px solid var(--border); padding: 14px 0; font-size: 13px; }
+@media (max-width: 600px) { .campaign-create-columns { grid-template-columns: 1fr; gap: 0; } }
