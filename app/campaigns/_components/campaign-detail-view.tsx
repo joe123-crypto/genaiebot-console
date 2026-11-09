@@ -92,13 +92,14 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
     <ReadNotice label={label} resource={resource} lastAt={lastAt} retry={retry} pending={pending} />;
 
   return <>
-    <PageHead title={campaignTitle(slug)} subtitle={campaign
+    <PageHead title={campaign?.source === "console" ? campaign.name : campaignTitle(slug)} subtitle={campaign
       ? campaign.enabled
         ? `Runs at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
         : `Not posting (${campaignOffLabel(campaign)}) — would run at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
       : "Campaign details are unavailable."}
       actions={<Link className="link" href="/campaigns">All campaigns</Link>} />
 
+    {campaign?.scheduleStatus === "pending" ? <div className="banner" role="status">Campaign saved. Scheduling is pending; the bot will retry automatically.</div> : null}
     {notice("Campaign details", detail.campaign, campaignSnapshot?.receivedAt)}
     {writable ? notice("Save availability", detail.writes) : null}
     {writable && campaign ? <CampaignSwitch slug={slug} title={campaignTitle(slug)}
@@ -116,7 +117,7 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
 
     {campaign ? <CampaignImages images={campaign.images} assets={campaign.assets}
       adAssets={detail.adAssets ?? undefined} assetDir={campaignAssetDir(campaign.script)}
-      writable={writable} writeUnavailableReason={imageUnavailableReason} /> : <UnavailableSection title="Pictures" />}
+      writable={writable} writeUnavailableReason={campaign.source === "console" ? "Pictures can be uploaded when creating a campaign. Editing the saved picture set is not connected yet." : imageUnavailableReason} /> : <UnavailableSection title="Pictures" />}
 
     {preview ? <CaptionVariants slug={slug} captions={preview.captions} writable={writable}
       saveUnavailableReason={captionsFresh ? captionUnavailableReason : UNAVAILABLE_SAVE}

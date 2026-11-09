@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { BotUnavailableError, getCampaigns } from "@/src/lib/bot-client";
@@ -33,7 +34,7 @@ export default async function CampaignsPage({
     if (!(error instanceof BotUnavailableError)) throw error;
     return (
       <Shell>
-        <PageHead title="Campaigns" />
+        <PageHead title="Campaigns" actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
         <BotError detail={error.detail} />
       </Shell>
     );
@@ -41,7 +42,7 @@ export default async function CampaignsPage({
 
   return (
     <Shell>
-      <PageHead title="Campaigns" subtitle={subtitle(campaigns)} />
+      <PageHead title="Campaigns" subtitle={subtitle(campaigns)} actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
 
       {campaigns.length === 0 ? (
         <Empty>No campaigns are declared.</Empty>

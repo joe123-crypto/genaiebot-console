@@ -71,3 +71,13 @@ export function canDelete(
   }
   return gate;
 }
+
+/** Creation must reach live config, assets and a registered schedule together. */
+export function canCreateCampaign(consoleWrites: boolean, writes: WriteCapabilities | undefined): WriteGate {
+  const gate = botGate(consoleWrites, writes);
+  if (!gate.allowed) return gate;
+  if (!writes?.affectsProduction) return { allowed: false, reason: "Campaign creation requires the bot to use live Firestore configuration." };
+  const support = writes.campaignCreation;
+  if (!support?.create || !support.images || !support.scheduling) return { allowed: false, reason: "Deploy the companion bot update for campaign creation, pictures and scheduling." };
+  return { allowed: true };
+}

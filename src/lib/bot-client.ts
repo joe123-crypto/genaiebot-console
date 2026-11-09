@@ -484,3 +484,10 @@ export async function updateCampaignCaptions(
 ): Promise<void> {
   await writeConfig("campaigns", slug, { fields: { captions } }, { by });
 }
+
+/** Dedicated create operation: the bot commits assignments and audit atomically. */
+export async function createCampaign(input: import("@/src/domains/campaign-create").NewCampaign): Promise<import("@/src/domains/campaign-create").CreateCampaignResult> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  if (WRITE_SOURCE === "remote") return writeRemote("campaigns/create", { ...input, actor: (await import("@/src/config")).OPERATOR_NAME });
+  return runBridge(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-campaign-create"), [], { ...input, actor: (await import("@/src/config")).OPERATOR_NAME });
+}

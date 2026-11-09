@@ -1,0 +1,1309 @@
+diff --git a/README.md b/README.md
+index 911a137..e6a88f3 100644
+--- a/README.md
++++ b/README.md
+@@ -1669,3 +1669,31 @@ campaigns declared enabled. The original CV poster still contains the offline
+ ads contact number and must be corrected before re-enabling this campaign.
+ Restore `enabled: true` and run the CV installer to resume; a merge alone does
+ not change the live cron state.
++
++
++### Console-created campaigns
++
++The console API accepts authenticated `POST /internal/console/campaigns/create`
++requests when its existing write key is installed. This requires
++`GENAIE_CONFIG_SOURCE=firestore` and `GENAIE_AD_ASSETS_SOURCE=r2`, with
++`GENAIE_AD_ASSETS_BASE_URL` configured. Campaigns, group assignments, image index,
++audit and idempotency receipt save in one Firestore transaction. Existing
++manifest campaigns retain their installers and scripts.
++
++The console signs direct, immutable R2 picture uploads using its own bucket-scoped
++write token. The gateway needs no R2 write credentials. `console-campaign-create`
++checks uploaded bytes before saving; `run-console-campaign` uses the shared
++broadcast engine and the runtime read key. Caption overrides are also supported.
++
++Desired schedules reconcile when the console API starts and every minute.
++Stable `console-<slug>-promo` names and a volume lock recover uncertain gateway
++acknowledgements without duplicate jobs. Read-back verifies the job; pending
++campaigns cannot post or consume caps. Creation never triggers an immediate send.
++Failure alerts are off unless explicitly configured. New scripts are included by
++the existing workspace bin/lib staging rules.
++
++Run `python3 workspace/lib/test_console_campaigns.py` and
++`python3 deploy/test_console_campaign_api.py`, then the existing operator config,
++writer, broadcast, read bridge and console API test suites before deploying.
++Deploy bot support before enabling the console creation controls. Keep
++`GCP_SERVICE_ACCOUNT_WRITE_B64` isolated to the console API as before.
+diff --git a/deploy/railway/README.md b/deploy/railway/README.md
+index 7ce36f9..4ad4d24 100644
+--- a/deploy/railway/README.md
++++ b/deploy/railway/README.md
+@@ -1125,3 +1125,31 @@ cron drift checks compare it, and releases require only enabled campaigns.
+ Customer CV requests remain available during normal gateway hours. Correct the
+ CV artwork contact before setting `enabled: true` and running the CV installer.
+ A deployment does not register or re-enable cron jobs.
++
++
++### Console-created campaigns
++
++The console API accepts authenticated `POST /internal/console/campaigns/create`
++requests when its existing write key is installed. This requires
++`GENAIE_CONFIG_SOURCE=firestore` and `GENAIE_AD_ASSETS_SOURCE=r2`, with
++`GENAIE_AD_ASSETS_BASE_URL` configured. Campaigns, group assignments, image index,
++audit and idempotency receipt save in one Firestore transaction. Existing
++manifest campaigns retain their installers and scripts.
++
++The console signs direct, immutable R2 picture uploads using its own bucket-scoped
++write token. The gateway needs no R2 write credentials. `console-campaign-create`
++checks uploaded bytes before saving; `run-console-campaign` uses the shared
++broadcast engine and the runtime read key. Caption overrides are also supported.
++
++Desired schedules reconcile when the console API starts and every minute.
++Stable `console-<slug>-promo` names and a volume lock recover uncertain gateway
++acknowledgements without duplicate jobs. Read-back verifies the job; pending
++campaigns cannot post or consume caps. Creation never triggers an immediate send.
++Failure alerts are off unless explicitly configured. New scripts are included by
++the existing workspace bin/lib staging rules.
++
++Run `python3 workspace/lib/test_console_campaigns.py` and
++`python3 deploy/test_console_campaign_api.py`, then the existing operator config,
++writer, broadcast, read bridge and console API test suites before deploying.
++Deploy bot support before enabling the console creation controls. Keep
++`GCP_SERVICE_ACCOUNT_WRITE_B64` isolated to the console API as before.
+diff --git a/deploy/railway/console-api.py b/deploy/railway/console-api.py
+index b474254..cde913d 100755
+--- a/deploy/railway/console-api.py
++++ b/deploy/railway/console-api.py
+@@ -237,7 +237,7 @@ class WriteBridge:
+ 
+     def run(self, request):
+         """Return (status, body). Never raises, and never leaks stderr."""
+-        payload = json.dumps(request).encode("utf-8")
++        payload = json.dumps(request, ensure_ascii=False).encode("utf-8")
+         with self.lock:
+             self.runs += 1
+             try:
+@@ -445,8 +445,39 @@ class Handler(BaseHTTPRequestHandler):
+             bridge.cache.clear()
+         self.send_any(status, body, with_body)
+ 
++    def campaign_create_request(self, split):
++        if not authorized(self.headers.get("Authorization"), self.server.console["token"]):
++            self.send_any(401, b'{"error":"unauthorized"}', True)
++            return
++        if not (os.environ.get(WRITE_KEY_VAR) or "").strip():
++            self.send_any(503, b'{"error":"Campaign writes are not enabled."}', True)
++            return
++        try:
++            length = int(self.headers.get("Content-Length", "0"))
++            if split.query or not 0 < length <= 60 * 1024 or self.headers.get("Transfer-Encoding"):
++                raise ValueError("invalid request size")
++            if self.headers.get_content_type() != "application/json":
++                raise ValueError("use application/json")
++            raw = self.rfile.read(length)
++            if len(raw) != length:
++                raise ValueError("incomplete request")
++            request = json.loads(raw)
++            if not isinstance(request, dict) or "reconcile" in request:
++                raise ValueError("invalid campaign request")
++        except (ValueError, TypeError):
++            self.send_any(400, b'{"error":"Invalid campaign creation request."}', True)
++            return
++        status, body = self.server.console["campaigns"].run(request)
++        bridge = self.server.console["bridge"]
++        with bridge.lock:
++            bridge.cache.clear()
++        self.send_any(status, body, True)
++
+     def do_POST(self):
+         split = urlsplit(self.path)
++        if split.path == PREFIX + "campaigns/create":
++            self.campaign_create_request(split)
++            return
+         if split.path.startswith(PREFIX + "config/"):
+             if not authorized(self.headers.get("Authorization"),
+                               self.server.console["token"]):
+@@ -565,7 +596,9 @@ def build_server(bind, port, token, bridge_path, write_path=None, **kwargs):
+     server.server_close = close
+     server.console = {"token": token, "bridge": Bridge(bridge_path, **kwargs),
+                       "accounts": AccountControls(),
+-                      "writes": WriteBridge(write_path or default_write_bridge())}
++                      "writes": WriteBridge(write_path or default_write_bridge()),
++                      "campaigns": WriteBridge(_volume_bin("console-campaign-create"), timeout=120)}
++    server.console["campaigns"].lock = server.console["writes"].lock
+     return server
+ 
+ 
+@@ -591,10 +624,24 @@ def main():
+ 
+     if not os.path.exists(bridge_path):
+         log("warning: bridge not found at %s; requests will answer 502" % bridge_path)
++    # A durable Firestore desired schedule is retried after API/gateway restart.
++    stop_reconcile = threading.Event()
++    def reconcile_campaigns():
++        while not stop_reconcile.is_set():
++            if (os.environ.get(WRITE_KEY_VAR) or "").strip():
++                status, _ = server.console["campaigns"].run({"reconcile": True})
++                bridge = server.console["bridge"]
++                with bridge.lock:
++                    bridge.cache.clear()
++                if status != 200:
++                    log("campaign schedule reconciliation is pending")
++            stop_reconcile.wait(60)
++    threading.Thread(target=reconcile_campaigns, daemon=True).start()
+     log("listening on %s:%d, bridge %s" % (bind, port, bridge_path))
+     try:
+         server.serve_forever()
+     finally:
++        stop_reconcile.set()
+         server.server_close()
+     return 0
+ 
+diff --git a/deploy/test_console_campaign_api.py b/deploy/test_console_campaign_api.py
+new file mode 100644
+index 0000000..79b0086
+--- /dev/null
++++ b/deploy/test_console_campaign_api.py
+@@ -0,0 +1,42 @@
++"""Drive the real authenticated HTTP route with an isolated echo bridge."""
++import importlib.util
++import json
++from pathlib import Path
++import unittest
++from unittest.mock import patch
++from test_console_write_api import Harness, API, ECHO_WRITE
++
++
++class CampaignAPI(Harness):
++    def serve_campaign(self, source=ECHO_WRITE):
++        base = self.serve()
++        self.server.console["campaigns"] = API.WriteBridge(self.script("create.py", source))
++        return base
++    def test_forwards_request_and_clears_cached_reads(self):
++        base = self.serve_campaign()
++        self.server.console["bridge"].cache["stale"] = (99999999999, b"cached")
++        code, body = self.post(base, "/campaigns/create", {"slug": "demo", "requestId": "request"})
++        self.assertEqual(code, 200)
++        self.assertEqual(json.loads(body)["echo"]["slug"], "demo")
++        self.assertEqual(self.server.console["bridge"].cache, {})
++    def test_authentication_and_write_key_are_required(self):
++        base = self.serve_campaign()
++        self.assertEqual(self.post(base, "/campaigns/create", {}, token=None)[0], 401)
++        self.set_key(None)
++        self.assertEqual(self.post(base, "/campaigns/create", {})[0], 503)
++        self.assertEqual(self.server.console["campaigns"].runs, 0)
++    def test_rejects_untrusted_worker_command_and_oversized_input(self):
++        base = self.serve_campaign()
++        for body in [{"reconcile": True}, [], b"{", b" " * (60 * 1024 + 1)]:
++            self.assertEqual(self.post(base, "/campaigns/create", body)[0], 400)
++        self.assertEqual(self.server.console["campaigns"].runs, 0)
++    def test_pending_is_a_successful_saved_result(self):
++        source = 'import json,sys\nsys.stdin.read()\njson.dump({"ok":True,"status":200,"slug":"demo","scheduling":"pending"},sys.stdout)'
++        base = self.serve_campaign(source)
++        code, body = self.post(base, "/campaigns/create", {"slug": "demo"})
++        self.assertEqual(code, 200)
++        self.assertEqual(json.loads(body)["scheduling"], "pending")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/deploy/upload-ad-image.py b/deploy/upload-ad-image.py
+index 1e53cda..1354bd1 100755
+--- a/deploy/upload-ad-image.py
++++ b/deploy/upload-ad-image.py
+@@ -527,6 +527,15 @@ def main(argv):
+             rows = operator_config.list_documents(
+                 creds["project_id"], ad_assets.COLLECTION, token,
+                 opener=urllib.request.urlopen, sleep=time.sleep)
++            # Console-created campaigns are canonical in Firestore, not mirrored
++            # in this repo. Never flag or prune their assets as repo drift.
++            campaigns_raw = operator_config.list_documents(
++                creds["project_id"], "campaigns", token,
++                opener=urllib.request.urlopen, sleep=time.sleep)
++            console_slugs = {slug for slug, fields in campaigns_raw
++                             if operator_config.decode_fields(fields).get("kind") == "console"}
++            rows = [(doc_id, fields) for doc_id, fields in rows
++                    if operator_config.decode_fields(fields).get("campaign") not in console_slugs]
+             indexed, quarantined = ad_assets._assemble(rows)
+ 
+             if args.verify:
+diff --git a/workspace/bin/console-campaign-create b/workspace/bin/console-campaign-create
+new file mode 100755
+index 0000000..794dd26
+--- /dev/null
++++ b/workspace/bin/console-campaign-create
+@@ -0,0 +1,38 @@
++#!/usr/bin/env python3
++"""One bounded JSON creation request; write credentials never reach runners."""
++import importlib.machinery
++import importlib.util
++import json
++import os
++from pathlib import Path
++import sys
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
++import console_campaigns as campaigns
++import operator_config
++import operator_writer
++
++
++def main():
++    try:
++        raw = sys.stdin.buffer.read(campaigns.MAX_REQUEST + 1)
++        campaigns.need(len(raw) <= campaigns.MAX_REQUEST, "request is too large")
++        data = json.loads(raw)
++        loader = importlib.machinery.SourceFileLoader("campaign_write_env", str(Path(__file__).with_name("console-write")))
++        spec = importlib.util.spec_from_loader(loader.name, loader)
++        bridge = importlib.util.module_from_spec(spec)
++        loader.exec_module(bridge)
++        store = campaigns.Store(bridge.write_env())
++        if data == {"reconcile": True}:
++            campaigns.reconcile_all(store)
++            result = {}
++        else:
++            result = campaigns.create(data, store)
++        print(json.dumps({"ok": True, "status": 200, **result}))
++        return 0
++    except (operator_writer.WriteRefused, operator_config.ConfigUnavailable, ValueError) as ex:
++        print(json.dumps({"ok": False, "status": getattr(ex, "status", 503), "error": str(ex), "problems": []}))
++        return 1
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/workspace/bin/console-read b/workspace/bin/console-read
+index c3df3f4..af0edc7 100755
+--- a/workspace/bin/console-read
++++ b/workspace/bin/console-read
+@@ -43,6 +43,7 @@ import promo_broadcast  # noqa: E402
+ import ad_assets  # noqa: E402
+ import config_shadow  # noqa: E402
+ import promo_config  # noqa: E402
++import console_campaigns
+ import operator_config  # noqa: E402
+ import operator_writer  # noqa: E402
+ import group_discovery  # noqa: E402
+@@ -194,12 +195,17 @@ def store_enabled(entry):
+     return switches.get(entry["slug"]) is not False
+ 
+ 
+-def disabled_promos(declared):
++def disabled_promos(declared, day=None):
+     """Slugs that are switched off, by either switch. They stay configured on
+     their groups and their copy is still worth previewing, but nothing here may
+     predict a send for one."""
+-    return set(entry["slug"] for entry in declared.get("promos", [])
+-               if not effective_enabled(entry))
++    disabled = set(entry["slug"] for entry in declared.get("promos", []) if not effective_enabled(entry))
++    for slug, campaign in console_campaigns.definitions(membership()).items():
++        if (not resolved().get("storeSwitches", resolved()["switches"]).get(slug, False)
++                or campaign.get("scheduleStatus") != "ready"
++                or (day and console_campaigns.schedule_minutes(campaign, day) is None)):
++            disabled.add(slug)
++    return disabled
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -213,7 +219,7 @@ def group_rows(day):
+     cap snapshot."""
+     m = membership()
+     groups = promo_membership.groups(m)
+-    disabled = disabled_promos(manifest())
++    disabled = disabled_promos(manifest(), day)
+     decisions = promo_caps.plan(m, list(groups), day=day, record=False,
+                                 disabled=disabled)
+ 
+@@ -367,7 +373,7 @@ def campaign_records(day):
+         error = None
+         try:
+             module = import_campaign(script)
+-            captions = [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))]
++            captions = operator_config.campaign_captions(resolved(), slug, [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))])
+             tracking = dict(getattr(module, "TRACKING", {}) or {})
+             raw_images = getattr(module, "IMAGE", None)
+             if raw_images is None:
+@@ -418,6 +424,7 @@ def campaign_records(day):
+                 "error": error,
+             }
+         )
++    records.extend(console_campaigns.records(m, day, resolved().get("storeSwitches")))
+     records.sort(key=lambda row: (row["hour"] if row["hour"] is not None else 99, row["minute"] or 0))
+     return records
+ 
+@@ -436,13 +443,21 @@ def preview(slug, day):
+     declared = manifest()
+ 
+     entry = next((row for row in declared.get("promos", []) if row["slug"] == slug), None)
+-    if entry is None:
+-        raise NotFound("unknown campaign %r" % slug)
+-
+-    enabled = effective_enabled(entry)
+-    module = import_campaign(script_path(entry["script"]))
+-    captions = [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))]
+-    tracking = dict(getattr(module, "TRACKING", {}) or {})
++    custom = console_campaigns.definitions(m).get(slug)
++    if custom is not None:
++        enabled = resolved().get("storeSwitches", resolved()["switches"]).get(slug, False) and custom.get("scheduleStatus") == "ready"
++        captions = custom["captions"]
++        tracking = custom.get("tracking", {})
++    else:
++        if entry is None:
++            raise NotFound("unknown campaign %r" % slug)
++        enabled = effective_enabled(entry)
++        module = import_campaign(script_path(entry["script"]))
++        captions = operator_config.campaign_captions(resolved(), slug, [str(text) for text in as_list(getattr(module, "POST_TEXTS", None))])
++        tracking = dict(getattr(module, "TRACKING", {}) or {})
++
++    occurrence = console_campaigns.schedule_occurrence(custom, day) if custom else None
++    caption_day = occurrence[0] if occurrence else day
+ 
+     # Every assignment, paused ones included: this is the campaign's "where it
+     # goes" list, and a paused group missing from it could never be resumed.
+@@ -451,7 +466,7 @@ def preview(slug, day):
+         m, slug, include_paused=True)
+     all_jids = list(daily_jids) + list(weekly_jids)
+     decisions = promo_caps.plan(m, list(promo_membership.groups(m)), day=day, record=False,
+-                                disabled=disabled_promos(declared))
++                                disabled=disabled_promos(declared, day))
+     numbers = promo_membership.account_numbers(m) or {}
+     contact_account = (m.get("defaults") or {}).get("contact_account")
+     entries = promo_membership.groups(m)
+@@ -465,7 +480,7 @@ def preview(slug, day):
+         # The advertised number is the configured contact line when one is set,
+         # otherwise whichever line actually posts to this group.
+         bot_number = numbers.get(contact_account) if contact_account else None
+-        bot_number = bot_number or numbers.get(account)
++        bot_number = tracking.get("number") or bot_number or numbers.get(account)
+ 
+         # caption_for's ``allowed`` is the group's posting WEEKDAYS, so a weekly
+         # group's variants still step by one per actual post. It is not the caps
+@@ -479,7 +494,7 @@ def preview(slug, day):
+         variant, rendered, ref = None, None, None
+         if captions:
+             variant, rendered, ref = promo_broadcast.caption_for(
+-                jid, captions, day=day, allowed=weekdays,
++                jid, captions, day=caption_day, allowed=weekdays,
+                 tracking=tracking, bot_number=bot_number,
+             )
+ 
+@@ -496,6 +511,8 @@ def preview(slug, day):
+                 "cap": decision.get("cap"),
+                 "paused": paused,
+                 "sendsToday": (enabled and not paused
++                               and (not custom or occurrence is not None)
++                               and (not weekdays or caption_day.weekday() in weekdays)
+                                and (allowed is None or slug in allowed)),
+                 "allowedToday": sorted(allowed) if allowed is not None else [],
+                 "weekly": [str(token) for token in (weekly_jids.get(jid) or [])],
+@@ -575,6 +592,9 @@ def write_capabilities():
+         "fields": dict((collection, list(names))
+                        for collection, names in operator_writer.EDITABLE.items()),
+         "delete": list(operator_writer.DELETABLE),
++        "campaignCreation": {"create": current == promo_config.FIRESTORE,
++                             "images": ad_assets.mode()[0] == "r2" and bool(ad_assets.base_url()),
++                             "scheduling": True},
+     }
+ 
+ 
+@@ -631,7 +651,7 @@ def main(argv):
+             # Without it a disabled campaign is indistinguishable from one the
+             # daily cap held back.
+             payload = {"date": day.isoformat(),
+-                       "disabledPromos": sorted(disabled_promos(manifest())),
++                       "disabledPromos": sorted(disabled_promos(manifest(), day)),
+                        "groups": group_rows(day),
+                        **group_discovery.read(membership())}
+             group_metrics.attach(payload, membership())
+diff --git a/workspace/bin/run-console-campaign b/workspace/bin/run-console-campaign
+new file mode 100755
+index 0000000..fd382fd
+--- /dev/null
++++ b/workspace/bin/run-console-campaign
+@@ -0,0 +1,10 @@
++#!/usr/bin/env python3
++"""Generic data-defined campaign command. No write key or arbitrary code."""
++import fcntl
++from pathlib import Path
++import sys
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
++from console_campaigns import run_campaign
++
++if __name__ == "__main__":
++    sys.exit(run_campaign(sys.argv[1], sys.argv[2:]))
+diff --git a/workspace/lib/console_campaigns.py b/workspace/lib/console_campaigns.py
+new file mode 100644
+index 0000000..d9f0839
+--- /dev/null
++++ b/workspace/lib/console_campaigns.py
+@@ -0,0 +1,444 @@
++"""Data-defined campaigns: validated atomic creation and recoverable cron setup.
++
++The gateway API owns writes. Runs use only the read key and existing broadcast
++engine. Files, job names, object keys and command argv are generated here, never
++accepted as executable input from the console.
++"""
++import concurrent.futures
++import copy
++import datetime as dt
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import sys
++import time
++import urllib.error
++import urllib.parse
++import urllib.request
++from zoneinfo import ZoneInfo
++
++import ad_assets
++import operator_config as config
++import operator_writer as writer
++import promo_config
++import promo_membership
++
++SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
++DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
++MAX_REQUEST = 60 * 1024
++
++
++def need(condition, message):
++    if not condition:
++        raise writer.WriteRefused(message)
++
++
++def valid_days(days):
++    return (isinstance(days, list) and 0 < len(days) <= 7
++            and all(type(day) is int and 0 <= day <= 6 for day in days)
++            and len(set(days)) == len(days))
++
++
++def validate(data):
++    need(isinstance(data, dict), "campaign must be an object")
++    allowed = {"requestId", "slug", "name", "enabled", "captions", "images", "schedule", "groups",
++               "tracking", "comment", "weeklyComment", "timeoutSeconds", "failureAlertTo", "actor"}
++    need(not set(data) - allowed, "campaign has unexpected fields")
++    need(len(json.dumps(data).encode()) <= MAX_REQUEST, "campaign configuration exceeds 60 KiB")
++    need(isinstance(data.get("requestId"), str) and re.fullmatch(r"[a-f0-9-]{36}", data["requestId"]), "invalid request ID")
++    need(isinstance(data.get("slug"), str) and SLUG.fullmatch(data["slug"]) and data["slug"] != "new", "invalid or reserved campaign ID")
++    need(isinstance(data.get("name"), str) and 0 < len(data["name"].strip()) <= 120, "enter a campaign name (at most 120 characters)")
++    need(type(data.get("enabled")) is bool, "enabled must be boolean")
++    captions = data.get("captions")
++    need(isinstance(captions, list) and captions and all(isinstance(text, str) and text.strip() for text in captions), "keep at least one nonblank caption")
++    schedule = data.get("schedule")
++    need(isinstance(schedule, dict) and not set(schedule) - {"time", "timezone", "weekdays"}, "invalid schedule")
++    need(isinstance(schedule.get("time"), str) and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", schedule["time"]), "invalid posting time")
++    need(valid_days(schedule.get("weekdays")), "choose campaign weekdays")
++    try:
++        ZoneInfo(schedule.get("timezone", ""))
++    except (ValueError, KeyError, TypeError):
++        raise writer.WriteRefused("invalid timezone")
++    groups = data.get("groups")
++    need(isinstance(groups, list) and 0 < len(groups) <= 100, "choose between 1 and 100 active groups")
++    seen = set()
++    for group in groups:
++        need(isinstance(group, dict) and not set(group) - {"jid", "weekdays", "paused"}, "invalid group assignment")
++        jid = group.get("jid")
++        need(isinstance(jid, str) and re.fullmatch(r"[0-9-]+@g\.us", jid) and jid not in seen, "invalid or duplicate group ID")
++        seen.add(jid)
++        need(type(group.get("paused", False)) is bool, "group pause must be boolean")
++        if "weekdays" in group:
++            need(valid_days(group["weekdays"]) and set(group["weekdays"]) <= set(schedule["weekdays"]), "group weekdays must be a nonempty subset of campaign weekdays")
++    images = data.get("images")
++    need(isinstance(images, list) and 0 < len(images) <= 20, "choose between 1 and 20 pictures")
++    filenames, keys = set(), set()
++    for index, image in enumerate(images):
++        need(isinstance(image, dict) and set(image) == {"filename", "key", "sha256", "bytes", "contentType"}, "invalid picture metadata")
++        need(isinstance(image.get("filename"), str) and ad_assets.FILENAME_RE.fullmatch(image["filename"]), "invalid picture filename")
++        try:
++            ad_assets._entry("%s-%s" % (data["slug"], index + 1), image_entry(data["slug"], image, index))
++        except (ValueError, TypeError):
++            raise writer.WriteRefused("invalid JPEG/PNG picture metadata (maximum 6 MiB)")
++        need(image["key"].startswith("ads/%s/" % data["slug"]), "picture belongs to a different campaign")
++        need(image["filename"] not in filenames and image["key"] not in keys, "duplicate picture or filename")
++        filenames.add(image["filename"])
++        keys.add(image["key"])
++    timeout = data.get("timeoutSeconds", 7200)
++    need(type(timeout) is int and 60 <= timeout <= 7200, "timeout must be 60 to 7200 seconds")
++    for key in ("comment", "weeklyComment"):
++        need(isinstance(data.get(key, ""), str) and len(data.get(key, "")) <= 2000, "notes must be at most 2000 characters")
++    phone = r"\+[1-9][0-9]{6,14}"
++    need(isinstance(data.get("failureAlertTo", ""), str), "invalid failure alert number")
++    if data.get("failureAlertTo"):
++        need(re.fullmatch(phone, data["failureAlertTo"]), "use an international failure alert number")
++    tracking = data.get("tracking", {})
++    need(isinstance(tracking, dict) and not set(tracking) - {"prefix", "label", "number", "prefill", "link_line"}, "invalid tracking settings")
++    if tracking:
++        need(isinstance(tracking.get("prefix"), str) and re.fullmatch(r"[A-Za-z0-9-]{1,64}", tracking["prefix"]), "tracking requires a ref prefix")
++        need(all(isinstance(value, str) and len(value) <= 1000 for value in tracking.values()), "invalid tracking text")
++        if tracking.get("number"):
++            need(re.fullmatch(phone, tracking["number"]), "use an international contact number")
++    need(isinstance(data.get("actor", ""), str) and len(data.get("actor", "")) <= 200, "invalid actor")
++    return data
++
++
++def image_entry(slug, image, index):
++    return {"campaign": slug, "filename": image["filename"], "key": image["key"],
++            "sha256": image["sha256"], "bytes": image["bytes"], "content_type": image["contentType"],
++            "rank": (index + 1) * 10, "enabled": True, "comment": None}
++
++
++def image_url(image, env=None):
++    origin = ad_assets.base_url(env)
++    need(origin is not None, "the bot asset origin is not configured")
++    return origin + "/" + image["key"]
++
++
++def verify_image(image, env=None, opener=None):
++    """Bounded download from the configured asset origin, never a supplied URL."""
++    opener = opener or urllib.request.urlopen
++    request = urllib.request.Request(image_url(image, env), headers={"User-Agent": ad_assets.USER_AGENT})
++    try:
++        with opener(request, timeout=20) as response:
++            body = response.read(ad_assets.MAX_BYTES + 1)
++    except (OSError, urllib.error.URLError) as ex:
++        raise writer.WriteRefused("picture could not be verified; retry the upload", status=503) from ex
++    magic = b"\x89PNG\r\n\x1a\n" if image["contentType"] == "image/png" else b"\xff\xd8\xff"
++    need(body.startswith(magic) and len(body) == image["bytes"] and hashlib.sha256(body).hexdigest() == image["sha256"], "picture content, size or checksum does not match its upload")
++
++
++class Store:
++    """Firestore REST transaction; retries never reapply a different payload.
++
++    Read and commit use a single snapshot. The native transaction prevents lost
++    group edits and duplicate campaign/operation creates across API instances.
++    """
++    def __init__(self, env=None):
++        self.env = os.environ if env is None else env
++        creds = config.credentials(self.env)
++        need(creds is not None, "Firestore write credentials are unavailable")
++        self.project = creds["project_id"]
++        self.base = "projects/%s/databases/(default)/documents" % self.project
++        self.url = config.API_ROOT + "/" + self.base
++        self.token = config.access_token(creds, config.token_cache_path(config.state_dir(self.env)),
++                                         opener=urllib.request.urlopen, signer=config.node_signer, now=time.time, sleep=time.sleep)
++        self.transaction = None
++
++    def request(self, suffix, body=None, missing=False):
++        return config._request(self.url + suffix, data=None if body is None else json.dumps(body).encode(),
++                               method="GET" if body is None else "POST", missing_ok=missing,
++                               headers=dict(config._auth(self.token), **{"Content-Type": "application/json"}),
++                               opener=urllib.request.urlopen, sleep=time.sleep)
++
++    def begin(self):
++        self.transaction = self.request(":beginTransaction", {})["transaction"]
++
++    def rollback(self):
++        if self.transaction:
++            try:
++                self.request(":rollback", {"transaction": self.transaction})
++            except config.ConfigUnavailable:
++                pass
++            self.transaction = None
++
++    def query(self):
++        return "?" + urllib.parse.urlencode({"transaction": self.transaction}) if self.transaction else ""
++
++    def get(self, collection, doc_id):
++        row = self.request("/%s/%s%s" % (collection, urllib.parse.quote(doc_id, safe=""), self.query()), missing=True)
++        return config.decode_fields(row.get("fields", {})) if row else None
++
++    def list(self, collection):
++        page, rows = None, []
++        while True:
++            query = {"pageSize": 1000}
++            if self.transaction:
++                query["transaction"] = self.transaction
++            if page:
++                query["pageToken"] = page
++            result = self.request("/%s?%s" % (collection, urllib.parse.urlencode(query)))
++            rows.extend((config.doc_id_of(row["name"]), row.get("fields", {})) for row in result.get("documents", []))
++            page = result.get("nextPageToken")
++            if not page:
++                return rows
++
++    def commit(self, docs):
++        writes = []
++        for collection, doc_id, fields, exists in docs:
++            write = {"update": {"name": "%s/%s/%s" % (self.base, collection, doc_id), "fields": config.encode_fields(fields)}}
++            if exists is not None:
++                write["currentDocument"] = {"exists": exists}
++            writes.append(write)
++        body = {"writes": writes}
++        if self.transaction:
++            body["transaction"] = self.transaction
++        self.request(":commit", body)
++        self.transaction = None
++
++
++def payload_digest(data):
++    return hashlib.sha256(json.dumps({key: value for key, value in data.items() if key != "actor"}, sort_keys=True).encode()).hexdigest()
++
++
++def create(data, store, env=None, verify=verify_image, reconcile=None):
++    env = os.environ if env is None else env
++    need(promo_config.mode(env)[0] == "firestore", "campaign creation requires live Firestore configuration")
++    need(ad_assets.mode(env)[0] == "r2", "campaign creation requires R2 assets")
++    validate(data)
++    slug = data["slug"]
++    digest = payload_digest(data)
++    # Check before downloading again on retry, then recheck within transaction.
++    operation = store.get("campaign_creations", data["requestId"])
++    if operation:
++        need(operation.get("digest") == digest, "this request ID already saved different campaign settings; open the saved campaign")
++        return finish(slug, store, reconcile)
++    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
++        list(pool.map(lambda image: verify(image, env), data["images"]))
++    store.begin()
++    try:
++        operation = store.get("campaign_creations", data["requestId"])
++        if operation:
++            need(operation.get("digest") == digest, "creation request has changed")
++            store.rollback()
++            return finish(slug, store, reconcile)
++        raw = {collection: store.list(collection) for collection in config.COLLECTIONS}
++        need(slug not in dict(raw["campaigns"]), "a campaign with this ID already exists; choose a different name")
++        declared = promo_config.read_manifest(env) or {}
++        need(not any(row.get("slug") == slug for row in declared.get("promos", [])), "campaign ID is already declared in the bot")
++        campaign = {"kind": "console", "name": data["name"].strip(), "enabled": data["enabled"],
++                    "captions": data["captions"], "schedule": data["schedule"], "tracking": data.get("tracking", {}),
++                    "comment": data.get("comment", ""), "weekly_comment": data.get("weeklyComment", ""),
++                    "timeoutSeconds": data.get("timeoutSeconds", 7200), "failureAlertTo": data.get("failureAlertTo", ""),
++                    "images": data["images"], "scheduleStatus": "pending",
++                    "rank": writer.next_rank(writer._decoded(raw, "campaigns"))}
++        raw["campaigns"].append((slug, config.encode_fields(campaign)))
++        group_docs = dict(writer._decoded(raw, "groups"))
++        docs = [("campaigns", slug, campaign, False)]
++        for selection in data["groups"]:
++            jid = selection["jid"]
++            group = copy.deepcopy(group_docs.get(jid))
++            need(group is not None and promo_membership.is_active(group), "%s is no longer an active configured group" % jid)
++            group["promos"] = list(dict.fromkeys(list(group.get("promos") or []) + [slug]))
++            if selection.get("paused"):
++                group["paused_promos"] = list(dict.fromkeys(list(group.get("paused_promos") or []) + [slug]))
++            restriction = selection.get("weekdays", data["schedule"]["weekdays"])
++            if set(restriction) != set(range(7)):
++                group.setdefault("weekly", {})[slug] = [DAYS[day] for day in sorted(restriction)]
++            raw["groups"] = [(key, fields) for key, fields in raw["groups"] if key != jid] + [(jid, config.encode_fields(group))]
++            docs.append(("groups", jid, group, True))
++        membership, _, undecodable = config.assemble(raw)
++        _, report = config.quarantine(membership, undecodable)
++        need(not any(selection["jid"] in report.get("quarantined", {}) for selection in data["groups"]), "a group assignment failed the bot validator")
++        audit_id, audit = writer.audit_document(data.get("actor"), "campaigns", slug, None, campaign)
++        audit["assignments"] = data["groups"]
++        docs.extend(("assets", "%s-%d" % (slug, index + 1), image_entry(slug, image, index), False) for index, image in enumerate(data["images"]))
++        docs.extend([("audit", audit_id, audit, False), ("campaign_creations", data["requestId"], {"slug": slug, "digest": digest}, False)])
++        store.commit(docs)
++    finally:
++        store.rollback()
++    return finish(slug, store, reconcile)
++
++
++def finish(slug, store, reconcile):
++    try:
++        if reconcile is None:
++            reconcile_one(slug, store)
++        else:
++            reconcile(slug, store)
++        return {"slug": slug, "scheduling": "ready"}
++    except Exception:
++        return {"slug": slug, "scheduling": "pending", "warning": "Campaign saved. The gateway schedule is not verified yet; the bot will retry automatically."}
++
++
++def cron_expression(schedule):
++    hour, minute = (int(part) for part in schedule["time"].split(":"))
++    days = "*" if len(schedule["weekdays"]) == 7 else ",".join(str((day + 1) % 7) for day in sorted(schedule["weekdays"]))
++    return "%s %s * * %s" % (minute, hour, days)
++
++
++def gateway(arguments):
++    environment = dict(os.environ)
++    environment.pop("OPENCLAW_HOME", None)
++    environment["OPENCLAW_GATEWAY_TOKEN"] = environment.get("GATEWAY_AUTH_TOKEN", "")
++    done = subprocess.run(["openclaw", "cron"] + arguments, capture_output=True, text=True, env=environment, timeout=20, check=True)
++    return json.loads(done.stdout or "{}") if arguments[0] in ("list", "add") else {}
++
++
++def reconcile_one(slug, store, call=gateway):
++    import fcntl
++    directory = Path(config.state_dir()) / "runtime"
++    directory.mkdir(parents=True, exist_ok=True)
++    with (directory / "console-campaign-scheduler.lock").open("a") as lock:
++        fcntl.flock(lock, fcntl.LOCK_EX)
++        return _reconcile_one(slug, store, call)
++
++
++def _reconcile_one(slug, store, call):
++    campaign = store.get("campaigns", slug)
++    if not campaign or campaign.get("kind") != "console":
++        return
++    name = "console-%s-promo" % slug
++    expression = cron_expression(campaign["schedule"])
++    jobs = call(["list", "--all", "--json"]).get("jobs", [])
++    matching = [job for job in jobs if job.get("name") == name]
++    need(len(matching) <= 1, "duplicate gateway jobs require operator review")
++    runner = str(Path(__file__).resolve().parents[1] / "bin" / "run-console-campaign")
++    argv = json.dumps(["python3", runner, slug])
++    flags = ["--name", name, "--cron", expression, "--tz", campaign["schedule"]["timezone"], "--exact",
++             "--session", "isolated", "--command-argv", argv, "--command-cwd", str(Path(runner).parents[1]),
++             "--timeout-seconds", str(campaign["timeoutSeconds"]), "--no-deliver"]
++    def matches(job):
++        return (job.get("enabled") == campaign["enabled"]
++                and job.get("schedule", {}).get("expr") == expression
++                and job.get("schedule", {}).get("tz") == campaign["schedule"]["timezone"]
++                and job.get("payload", {}).get("timeoutSeconds") == campaign["timeoutSeconds"]
++                and job.get("payload", {}).get("argv") == json.loads(argv)
++                and job.get("payload", {}).get("cwd") == str(Path(runner).parents[1])
++                and (not campaign.get("failureAlertTo") or job.get("failureAlert", {}).get("to") == campaign["failureAlertTo"]))
++    if matching and matches(matching[0]):
++        if campaign.get("scheduleStatus") != "ready":
++            mark_status(slug, store, "ready")
++        return
++    if matching:
++        identifier = matching[0]["id"]
++        call(["edit", identifier] + flags + (["--enable"] if campaign["enabled"] else ["--disable"]))
++    else:
++        # Disabled first: no job may race an incomplete creation/reconciliation.
++        call(["add"] + flags + ["--disabled", "--json"])
++        jobs = call(["list", "--all", "--json"]).get("jobs", [])
++        found = [job for job in jobs if job.get("name") == name]
++        need(len(found) == 1, "new gateway job was not found uniquely")
++        identifier = found[0]["id"]
++    if campaign.get("failureAlertTo"):
++        call(["edit", identifier, "--failure-alert", "--failure-alert-after", "1", "--failure-alert-channel", "whatsapp",
++              "--failure-alert-to", campaign["failureAlertTo"], "--failure-alert-cooldown", "1h"])
++    if not matching and campaign["enabled"]:
++        call(["edit", identifier, "--enable"])
++    verified = [job for job in call(["list", "--all", "--json"]).get("jobs", []) if job.get("name") == name]
++    need(len(verified) == 1, "gateway job is not unique")
++    job = verified[0]
++    need(matches(job), "gateway schedule did not match saved campaign")
++    mark_status(slug, store, "ready")
++
++
++def mark_status(slug, store, status):
++    # A field mask avoids overwriting caption/switch edits during reconciliation.
++    store.request(":commit", {"writes": [{"update": {"name": "%s/campaigns/%s" % (store.base, slug),
++                   "fields": config.encode_fields({"scheduleStatus": status})}, "updateMask": {"fieldPaths": ["scheduleStatus"]},
++                   "currentDocument": {"exists": True}}]})
++
++
++def reconcile_all(store):
++    for slug, fields in store.list("campaigns"):
++        if config.decode_fields(fields).get("kind") == "console":
++            try:
++                reconcile_one(slug, store)
++            except Exception as ex:
++                mark_status(slug, store, "pending")
++                sys.stderr.write("[console-campaign] schedule pending for %s: %s\n" % (slug, type(ex).__name__))
++
++
++def schedule_occurrence(campaign, day):
++    """The local and displayed occurrence on a Harare Schedule date."""
++    display = ZoneInfo("Africa/Harare")
++    zone = ZoneInfo(campaign["schedule"]["timezone"])
++    hour, minute = map(int, campaign["schedule"]["time"].split(":"))
++    for delta in (-1, 0, 1):
++        local_date = day + dt.timedelta(days=delta)
++        if local_date.weekday() not in campaign["schedule"]["weekdays"]:
++            continue
++        local = dt.datetime.combine(local_date, dt.time(hour, minute), zone)
++        shown = local.astimezone(display)
++        if shown.date() == day:
++            return local_date, shown.hour * 60 + shown.minute
++    return None
++
++
++def schedule_minutes(campaign, day):
++    occurrence = schedule_occurrence(campaign, day)
++    return occurrence[1] if occurrence else None
++
++
++def definitions(membership):
++    return {slug: data for slug, data in (membership.get("promos") or {}).items() if data.get("kind") == "console"}
++
++
++def records(membership, day, switches=None):
++    result = []
++    for slug, campaign in definitions(membership).items():
++        daily, weekly = promo_membership.groups_for_promo(membership, slug)
++        accounts = {}
++        for jid in list(daily) + list(weekly):
++            line = promo_membership.account_of(membership["groups"][jid])
++            accounts[line] = accounts.get(line, 0) + 1
++        hour, minute = map(int, campaign["schedule"]["time"].split(":"))
++        result.append({"slug": slug, "name": campaign["name"], "enabled": bool((switches or {}).get(slug)) and campaign.get("scheduleStatus") == "ready",
++                       "storeEnabled": bool((switches or {}).get(slug)), "cronEnabled": campaign.get("scheduleStatus") == "ready",
++                       "cron": cron_expression(campaign["schedule"]), "hour": hour, "minute": minute,
++                       "scheduleMinutes": schedule_minutes(campaign, day), "timezone": campaign["schedule"]["timezone"],
++                       "installer": "", "script": "", "failureAlertTo": campaign.get("failureAlertTo", ""), "legacyNames": [],
++                       "timeoutSeconds": campaign["timeoutSeconds"], "captions": campaign["captions"], "tracking": campaign.get("tracking", {}),
++                       "images": [image["filename"] for image in campaign["images"]],
++                       "assets": [{"filename": image["filename"], "url": image_url(image),
++                                   "sha256": image["sha256"], "bytes": image["bytes"],
++                                   "contentType": image["contentType"], "rank": (index + 1) * 10}
++                                  for index, image in enumerate(campaign["images"])],
++                       "targetCount": len(daily) + len(weekly), "weeklyCount": len(weekly), "accounts": accounts,
++                       "source": "console", "scheduleStatus": campaign.get("scheduleStatus", "pending"), "error": None})
++    return result
++
++
++def run_campaign(slug, argv=None, now=None, resolve=None, broadcast=None, ensure=None):
++    """Reuse the complete broadcast engine, with one config read and day."""
++    import fcntl
++    import promo_broadcast
++    need(isinstance(slug, str) and SLUG.fullmatch(slug), "invalid campaign ID")
++    source = (resolve or promo_config.resolve)(slug)
++    campaign = definitions(source.get("membership") or {}).get(slug)
++    need(source.get("mode") == "firestore" and campaign is not None, "console campaign requires Firestore configuration")
++    dry = "--dry-run" in (argv or []) or "--refs" in (argv or [])
++    if not dry and (source.get("enabled") is not True or campaign.get("scheduleStatus") != "ready"):
++        return 0
++    now = now or dt.datetime.now(dt.timezone.utc)
++    day = now.astimezone(ZoneInfo(campaign["schedule"]["timezone"])).date()
++    if not dry and day.weekday() not in campaign["schedule"]["weekdays"]:
++        return 0
++    # Keep strict all-picture validation for data-only campaigns: there are no
++    # baked files to fall back to, and a missing asset must never change rotation.
++    paths = [(ensure or ad_assets.ensure)(image_entry(slug, image, index))
++             for index, image in enumerate(campaign["images"])]
++    state = Path(config.state_dir()) / "runtime" / "cron-state" / ("console-%s-promo" % slug)
++    state.mkdir(parents=True, exist_ok=True)
++    with (state / "run.lock").open("a") as lock:
++        try:
++            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        except BlockingIOError:
++            return 0
++        return (broadcast or promo_broadcast.broadcast)(text=campaign["captions"], image=paths,
++                    targets_file=str(state / "targets.json"), state_file=str(state / "state.json"),
++                    tracking=campaign.get("tracking") or None, promo_name=slug + "-promo", argv=argv or [],
++                    cron_timeout=campaign["timeoutSeconds"], run_day=day, cap_day=now.astimezone(ZoneInfo("Africa/Harare")).date(), resolve_config=lambda *args, **kwargs: source)
+diff --git a/workspace/lib/operator_config.py b/workspace/lib/operator_config.py
+index c490d81..b2a2890 100644
+--- a/workspace/lib/operator_config.py
++++ b/workspace/lib/operator_config.py
+@@ -417,6 +417,25 @@ def assemble(raw):
+     return membership, enabled, undecodable
+ 
+ 
++def validate_captions(captions):
++    """A campaign override is a non-empty list of non-blank caption templates."""
++    if (not isinstance(captions, list) or not captions or
++            any(not isinstance(text, str) or not text.strip() for text in captions)):
++        raise ConfigInvalid("captions must be a non-empty list of non-blank strings")
++    if len(json.dumps(captions, ensure_ascii=False).encode("utf-8")) > 60 * 1024:
++        raise ConfigInvalid("captions exceed 60 KiB")
++    return list(captions)
++
++
++def campaign_captions(source, slug, fallback):
++    """Copy from the same resolved config as targeting; file mode is a rollback."""
++    if source.get("mode") != "firestore":
++        return list(fallback)
++    meta = ((source.get("membership") or {}).get("promos") or {}).get(slug) or {}
++    return validate_captions(meta["captions"]) if "captions" in meta else list(fallback)
++
++
++
+ def quarantine(membership, undecodable=None):
+     """``(clean, report)``. Each group is validated on its own, against the shared
+     settings; one that fails is left out of ``clean`` and listed in
+diff --git a/workspace/lib/operator_writer.py b/workspace/lib/operator_writer.py
+index 4cd7a60..c11e539 100644
+--- a/workspace/lib/operator_writer.py
++++ b/workspace/lib/operator_writer.py
+@@ -70,7 +70,7 @@ EDITABLE = {
+     "groups": ("name", "source", "status", "activity", "account", "daily_cap",
+                "promos", "paused_promos", "weekly", "note"),
+     "lines": ("number",),
+-    "campaigns": ("enabled", "comment", "weekly_comment", "dir"),
++    "campaigns": ("enabled", "comment", "weekly_comment", "dir", "captions"),
+     "settings": ("activity", "caps_enabled", "contact_account", "bands"),
+ }
+ # What may be deleted outright. See prepare_delete for why nothing else is.
+@@ -392,6 +392,13 @@ def write(collection, doc_id, patch, actor, env=None, *, opener=None, signer=Non
+     read at all -- a write must never be applied to a guess at the current state.
+     """
+     env = os.environ if env is None else env
++    if collection == "campaigns" and "captions" in patch:
++        if (env.get("GENAIE_CONFIG_SOURCE") or "").strip().lower() != "firestore":
++            raise WriteRefused("caption editing requires Firestore", status=409)
++        try:
++            operator_config.validate_captions(patch["captions"])
++        except operator_config.ConfigInvalid as ex:
++            raise WriteRefused(str(ex)) from ex
+     now = now or time.time
+     project, raw = operator_config.fetch(env, opener=opener, signer=signer,
+                                          now=now, sleep=sleep)
+diff --git a/workspace/lib/promo_broadcast.py b/workspace/lib/promo_broadcast.py
+index 5a28f5e..7f20a29 100644
+--- a/workspace/lib/promo_broadcast.py
++++ b/workspace/lib/promo_broadcast.py
+@@ -476,7 +476,7 @@ def send_ad(target, text, image_path, account=None):
+ 
+ 
+ # --------------------------------------------------------------------- run ----
+-def _resolve_image(image):
++def _resolve_image(image, day=None):
+     """``image`` is either a single path (fixed) or a list of paths that rotate
+     daily by date ordinal so a group never sees the same image two days running.
+     Returns (path_or_None, rotating)."""
+@@ -484,7 +484,7 @@ def _resolve_image(image):
+         assets = [a for a in image if a]
+         if not assets:
+             return (None, True)
+-        return (assets[date.today().toordinal() % len(assets)], True)
++        return (assets[(day or date.today()).toordinal() % len(assets)], True)
+     return (image, False)
+ 
+ 
+@@ -1032,7 +1032,7 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+               send_delay_min=None, send_delay_max=None, rng=None, sleep=None,
+               cron_timeout=_PROBE_CRON_TIMEOUT, start_jitter=None,
+               caps=_PROBE_CAPS, membership_path=None, account_status=None,
+-              resolve_config=None):
++              resolve_config=None, run_day=None, cap_day=None):
+     """Resolve targets, skip groups already sent today (and weekly-limited groups
+     off their configured weekday), then send the advert to each pending group,
+     committing state per group so a crash or retry never double-posts. Returns a
+@@ -1076,7 +1076,7 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+     args = sys.argv[1:] if argv is None else argv
+     show_refs = "--refs" in args
+     dry = "--dry-run" in args or show_refs
+-    day = date.today()
++    day = run_day or date.today()
+     today = day.isoformat()
+     variants = _variants(text)
+     if tracking and not tracking.get("prefix"):
+@@ -1091,7 +1091,7 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+     # that existence check is what turns "no asset could be fetched" into a
+     # failed run with nothing sent, before a single group is posted to.
+     image = ad_assets.resolve(promo_name, image)
+-    image_path, rotating = _resolve_image(image)
++    image_path, rotating = _resolve_image(image, day)
+     if not image_path or not os.path.exists(image_path):
+         sys.stderr.write("ERROR: promo image missing: %s\n" % image_path)
+         return 1
+@@ -1132,6 +1132,9 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+             print("NO_REPLY")
+             return 0
+ 
++    variants = operator_config.campaign_captions(source, promo_config.promo_key(promo_name), variants)
++    variant_images = {index: path for index, path in variant_images.items() if index < len(variants)}
++
+     targets = source["doc"]
+     entries = load_targets(targets)
+     weekly = load_weekly_targets(targets)
+@@ -1187,7 +1190,7 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+         print("NO_REPLY")
+         return 0
+ 
+-    weekday = date.today().weekday()
++    weekday = day.weekday()
+ 
+     def eligible_today(jid):
+         """A weekly-limited group is only eligible on its configured weekdays;
+@@ -1199,7 +1202,7 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+     # Per-group daily cap: a group in six campaigns does not have to take six
+     # ads a day. Rotation decides which campaigns use today's allowance, so this
+     # promo may be asked to stand down for a group it still targets.
+-    eligible, cap_decisions = apply_caps(promo_name, eligible, day, caps=caps,
++    eligible, cap_decisions = apply_caps(promo_name, eligible, cap_day or day, caps=caps,
+                                          membership_path=membership_path,
+                                          record=not dry,
+                                          membership=source["membership"],
+diff --git a/workspace/lib/promo_config.py b/workspace/lib/promo_config.py
+index 31ac2de..15ac95e 100644
+--- a/workspace/lib/promo_config.py
++++ b/workspace/lib/promo_config.py
+@@ -33,6 +33,9 @@ which imports this module.
+ """
+ 
+ import json
++import datetime
++import time
++from zoneinfo import ZoneInfo
+ import os
+ import sys
+ 
+@@ -188,6 +191,14 @@ def resolve(promo, targets_file=None, membership_path=None, env=None, err=None,
+         declared = manifest_switches(env)
+         switches = dict((slug_, on and declared.get(slug_, True))
+                         for slug_, on in loaded["enabled"].items())
++        # Data-defined campaigns have no baked manifest entry. A pending job
++        # cannot consume cap turns until reconciliation verifies its schedule.
++        for key, meta in (membership.get("promos") or {}).items():
++            if meta.get("kind") == "console":
++                import console_campaigns
++                campaign_day = datetime.datetime.fromtimestamp(inject.get("now", time.time)(), ZoneInfo("Africa/Harare")).date()
++                switches[key] = (switches.get(key, False) and meta.get("scheduleStatus") == "ready"
++                                 and console_campaigns.schedule_occurrence(meta, campaign_day) is not None)
+         # A caller that names no campaign (the console's read model) wants the
+         # membership and the switches, not one campaign's target list.
+         doc = promo_membership.targets_payload(membership, slug) if slug else {}
+diff --git a/workspace/lib/test_console_campaigns.py b/workspace/lib/test_console_campaigns.py
+new file mode 100644
+index 0000000..21cd280
+--- /dev/null
++++ b/workspace/lib/test_console_campaigns.py
+@@ -0,0 +1,258 @@
++"""Campaign creation, verified assets, scheduler recovery and real engine dry runs."""
++import copy
++import datetime as dt
++import hashlib
++import importlib.machinery
++import importlib.util
++import io
++import json
++import os
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++import console_campaigns as cc
++import operator_config as config
++import operator_writer as writer
++import promo_broadcast
++from test_operator_config import seed_store, JID_A, JID_B, JID_C
++
++ENV = {"GENAIE_CONFIG_SOURCE": "firestore", "GENAIE_AD_ASSETS_SOURCE": "r2", "GENAIE_AD_ASSETS_BASE_URL": "https://assets.example.test"}
++BODY = b"\x89PNG\r\n\x1a\nexample-image"
++SHA = hashlib.sha256(BODY).hexdigest()
++
++
++def payload():
++    return {"requestId": "12345678-1234-1234-1234-123456789abc", "slug": "demo", "name": "Demo Campaign", "enabled": False,
++            "captions": ["Hello {bot_number}"], "schedule": {"time": "09:00", "timezone": "Africa/Harare", "weekdays": list(range(7))},
++            "groups": [{"jid": JID_A}, {"jid": JID_B}],
++            "images": [{"filename": "one.png", "key": "ads/demo/%s.png" % SHA, "sha256": SHA, "bytes": len(BODY), "contentType": "image/png"}]}
++
++
++class MemoryStore:
++    base = "projects/test/databases/(default)/documents"
++    def __init__(self):
++        self.docs = seed_store()
++        self.commits = []
++        self.in_transaction = False
++        self.fail_commit = False
++    def get(self, collection, key):
++        fields = self.docs.get(collection, {}).get(key)
++        return config.decode_fields(fields) if fields is not None else None
++    def list(self, collection):
++        return copy.deepcopy(list(self.docs.get(collection, {}).items()))
++    def begin(self):
++        self.in_transaction = True
++    def rollback(self):
++        self.in_transaction = False
++    def commit(self, docs):
++        if self.fail_commit:
++            raise config.ConfigUnavailable("transaction conflict")
++        pending = copy.deepcopy(self.docs)
++        for collection, key, fields, exists in docs:
++            if exists is False and key in pending.get(collection, {}):
++                raise config.ConfigUnavailable("already exists")
++            pending.setdefault(collection, {})[key] = config.encode_fields(fields)
++        self.docs = pending
++        self.commits.append(copy.deepcopy(docs))
++        self.in_transaction = False
++    def request(self, suffix, body):
++        assert suffix == ":commit"
++        for write in body["writes"]:
++            collection, key = write["update"]["name"].rsplit("/", 2)[-2:]
++            self.docs[collection][key].update(write["update"]["fields"])
++        return {}
++
++
++class FakeGateway:
++    def __init__(self):
++        self.jobs = []
++        self.calls = []
++        self.lose_add_ack = False
++    def __call__(self, args):
++        self.calls.append(args)
++        if args[0] == "list":
++            return {"jobs": copy.deepcopy(self.jobs)}
++        if args[0] == "add":
++            job = {"id": "one", "enabled": False}
++            self.jobs.append(job)
++        else:
++            job = next(job for job in self.jobs if job["id"] == args[1])
++        def flag(name):
++            return args[args.index(name) + 1] if name in args else None
++        for option, key in [("--name", "name")]:
++            if flag(option): job[key] = flag(option)
++        if "--cron" in args: job["schedule"] = {"expr": flag("--cron"), "tz": flag("--tz")}
++        if "--command-argv" in args:
++            job["payload"] = {"argv": json.loads(flag("--command-argv")), "cwd": flag("--command-cwd"), "timeoutSeconds": int(flag("--timeout-seconds"))}
++        if "--enable" in args: job["enabled"] = True
++        if "--disable" in args: job["enabled"] = False
++        if "--failure-alert-to" in args: job["failureAlert"] = {"to": flag("--failure-alert-to")}
++        if args[0] == "add" and self.lose_add_ack:
++            self.lose_add_ack = False
++            raise TimeoutError("ack lost")
++        return {}
++
++
++class Creation(unittest.TestCase):
++    def setUp(self):
++        self.store = MemoryStore()
++        self.data = payload()
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.env_patch = patch.dict(os.environ, {**ENV, "OPENCLAW_STATE_DIR": self.temp.name})
++        self.env_patch.start()
++        self.addCleanup(self.env_patch.stop)
++    def create(self, **kwargs):
++        return cc.create(self.data, self.store, env=ENV, verify=lambda *args: None, reconcile=lambda *args: None, **kwargs)
++    def test_minimum_form_is_atomic_and_preserves_group_configuration(self):
++        before = self.store.get("groups", JID_A)
++        self.assertEqual(self.create()["scheduling"], "ready")
++        self.assertEqual(len(self.store.commits), 1)
++        campaign = self.store.get("campaigns", "demo")
++        self.assertFalse(campaign["enabled"])
++        self.assertEqual(campaign["timeoutSeconds"], 7200)
++        self.assertEqual(campaign["tracking"], {})
++        self.assertEqual(campaign["failureAlertTo"], "")
++        group = self.store.get("groups", JID_A)
++        self.assertEqual(group["promos"], before["promos"] + ["demo"])
++        for key in before.keys() - {"promos"}:
++            self.assertEqual(group[key], before[key])
++        self.assertTrue(self.store.docs["audit"])
++        self.assertTrue(self.store.docs["assets"])
++        self.assertFalse(self.store.in_transaction)
++    def test_same_operation_retries_without_writes_and_changed_payload_is_refused(self):
++        self.create()
++        self.create()
++        self.assertEqual(len(self.store.commits), 1)
++        self.data["name"] = "Changed"
++        with self.assertRaises(writer.WriteRefused): self.create()
++    def test_duplicate_id_never_overwrites(self):
++        self.create()
++        self.data["requestId"] = "abcdefab-1234-1234-1234-123456789abc"
++        with self.assertRaises(writer.WriteRefused): self.create()
++        self.assertEqual(len(self.store.commits), 1)
++    def test_no_commit_if_a_group_is_inactive_or_commit_fails(self):
++        self.data["groups"].append({"jid": JID_C})
++        with self.assertRaises(writer.WriteRefused): self.create()
++        self.assertNotIn("demo", self.store.docs["campaigns"])
++        self.data = payload(); self.store.fail_commit = True
++        with self.assertRaises(config.ConfigUnavailable): self.create()
++        self.assertNotIn("demo", self.store.docs["campaigns"])
++    def test_weekly_pauses_and_tracking_defaults(self):
++        self.data["schedule"]["weekdays"] = [0, 2, 4]
++        self.data["groups"][0].update(weekdays=[0], paused=True)
++        self.create()
++        self.assertEqual(self.store.get("groups", JID_A)["weekly"]["demo"], ["Mon"])
++        self.assertIn("demo", self.store.get("groups", JID_A)["paused_promos"])
++        self.assertEqual(self.store.get("groups", JID_B)["weekly"]["demo"], ["Mon", "Wed", "Fri"])
++    def test_invalid_inputs_are_refused_before_any_write(self):
++        for changes in [{"captions": [" "]}, {"images": []}, {"groups": []}, {"timeoutSeconds": True}, {"tracking": {"number": "+10000000000"}}, {"schedule": {"time": "25:00", "timezone": "Africa/Harare", "weekdays": [0]}}]:
++            with self.subTest(changes=changes), self.assertRaises(writer.WriteRefused): cc.validate({**payload(), **changes})
++        self.assertEqual(self.store.commits, [])
++    def test_saved_pending_recovers_after_lost_gateway_ack_and_restart(self):
++        gateway = FakeGateway(); gateway.lose_add_ack = True
++        reconcile = lambda slug, store: cc.reconcile_one(slug, store, call=gateway)
++        result = cc.create(self.data, self.store, ENV, verify=lambda *args: None, reconcile=reconcile)
++        self.assertEqual(result["scheduling"], "pending")
++        self.assertEqual(len(gateway.jobs), 1)
++        self.assertEqual(cc.create(self.data, self.store, ENV, verify=lambda *args: None, reconcile=reconcile)["scheduling"], "ready")
++        self.assertEqual(len(gateway.jobs), 1)
++        edits_before = len([call for call in gateway.calls if call[0] != "list"])
++        cc.reconcile_one("demo", self.store, call=gateway)
++        self.assertEqual(edits_before, len([call for call in gateway.calls if call[0] != "list"]))
++        self.assertFalse(gateway.jobs[0]["enabled"])
++    def test_enabled_creation_sets_future_recurring_job_without_sending(self):
++        self.data["enabled"] = True
++        self.data["schedule"]["weekdays"] = [0, 2, 4]
++        gateway = FakeGateway()
++        result = cc.create(self.data, self.store, ENV, verify=lambda *args: None, reconcile=lambda slug, store: cc.reconcile_one(slug, store, gateway))
++        self.assertEqual(result["scheduling"], "ready")
++        self.assertTrue(gateway.jobs[0]["enabled"])
++        self.assertEqual(gateway.jobs[0]["schedule"]["expr"], "0 9 * * 1,3,5")
++        self.assertFalse(any("run" in call for call in gateway.calls))
++    def test_asset_verification_checks_magic_size_and_digest(self):
++        image = self.data["images"][0]
++        cc.verify_image(image, ENV, opener=lambda *args, **kwargs: io.BytesIO(BODY))
++        for body in [b"not-an-image", BODY + b"extra", b"\x89PNG\r\n\x1a\nother-content"]:
++            with self.assertRaises(writer.WriteRefused): cc.verify_image(image, ENV, opener=lambda *args, **kwargs: io.BytesIO(body))
++    def test_real_engine_rotates_one_picture_and_never_resends_same_day(self):
++        self.data["enabled"] = True
++        self.data["captions"] = ["Offer A {bot_number}", "Offer B {bot_number}"]
++        second = dict(self.data["images"][0], filename="two.png", sha256="b" * 64, key="ads/demo/%s.png" % ("b" * 64))
++        self.data["images"].append(second)
++        self.create()
++        self.store.docs["campaigns"]["demo"].update(config.encode_fields({"scheduleStatus": "ready"}))
++        membership, enabled, _ = config.assemble({name: self.store.list(name) for name in config.COLLECTIONS})
++        source = {"mode": "firestore", "source": "firestore", "enabled": True, "switches": enabled,
++                  "membership": membership, "doc": promo_membership_payload(membership)}
++        paths = {}
++        for name in ("one.png", "two.png"):
++            paths[name] = str(Path(self.temp.name) / name)
++            Path(paths[name]).write_bytes(BODY)
++        def engine(**kwargs):
++            return promo_broadcast.broadcast(**kwargs, caps=None, start_jitter=0, send_delay=0,
++                         sleep=lambda _: None, account_status=lambda accounts: {account: True for account in accounts})
++        def run(day):
++            return cc.run_campaign("demo", now=dt.datetime(2026, 11, day, 9, tzinfo=dt.timezone.utc),
++                resolve=lambda _: source, ensure=lambda entry: paths[entry["filename"]], broadcast=engine)
++        with patch("sys.stdout", io.StringIO()), patch("promo_broadcast.send_ad", return_value=(True, "sent")) as send:
++            self.assertEqual(run(9), 0)
++            first_picture = send.call_args_list[0].args[2]
++            self.assertEqual(send.call_count, 2)
++            self.assertEqual({call.kwargs["account"] for call in send.call_args_list}, {"default", "ads"})
++            self.assertEqual(run(9), 0)
++            self.assertEqual(send.call_count, 2)
++            self.assertEqual(run(10), 0)
++            self.assertEqual(send.call_count, 4)
++            self.assertNotEqual(send.call_args_list[-1].args[2], first_picture)
++
++    def test_schedule_normalizes_timezone_and_off_weekdays(self):
++        self.create(); campaign = self.store.get("campaigns", "demo")
++        campaign["schedule"] = {"time": "23:30", "timezone": "America/New_York", "weekdays": [0]}
++        self.assertEqual(cc.schedule_minutes(campaign, dt.date(2026, 11, 10)), 390)
++        self.assertIsNone(cc.schedule_minutes(campaign, dt.date(2026, 11, 9)))
++    def test_preview_uses_the_occurrences_local_weekday_and_caption_date(self):
++        self.data["enabled"] = True
++        self.data["schedule"] = {"time": "23:30", "timezone": "America/New_York", "weekdays": [0]}
++        self.create()
++        self.store.docs["campaigns"]["demo"].update(config.encode_fields({"scheduleStatus": "ready"}))
++        m, enabled, _ = config.assemble({name: self.store.list(name) for name in config.COLLECTIONS})
++        source = {"mode": "firestore", "source": "firestore", "enabled": True, "storeSwitches": enabled,
++                  "switches": {"demo": False}, "membership": m}
++        loader = importlib.machinery.SourceFileLoader("campaign_preview_test", str(Path(__file__).resolve().parents[1] / "bin/console-read"))
++        spec = importlib.util.spec_from_loader(loader.name, loader)
++        bridge = importlib.util.module_from_spec(spec); loader.exec_module(bridge)
++        with patch.object(bridge, "resolved", return_value=source), patch.object(bridge, "manifest", return_value={"promos": []}):
++            preview = bridge.preview("demo", dt.date(2026, 11, 10))
++        self.assertTrue(preview["enabled"])
++        self.assertTrue(all(row["sendsToday"] for row in preview["groups"]))
++        self.assertEqual({row["account"] for row in preview["groups"]}, {"default", "ads"})
++
++    def test_runner_passes_two_line_targets_and_local_day_to_real_engine(self):
++        self.data["enabled"] = True
++        self.data["tracking"] = {"prefix": "DM"}
++        self.create()
++        self.store.docs["campaigns"]["demo"].update(config.encode_fields({"scheduleStatus": "ready"}))
++        m, enabled, _ = config.assemble({name: self.store.list(name) for name in config.COLLECTIONS})
++        source = {"mode": "firestore", "source": "firestore", "enabled": True, "switches": enabled, "membership": m, "doc": promo_membership_payload(m)}
++        path = str(Path(self.temp.name) / "one.png")
++        Path(path).write_bytes(BODY)
++        output = io.StringIO()
++        with patch("sys.stdout", output), patch("promo_broadcast.send_ad") as send:
++            result = cc.run_campaign("demo", ["--dry-run"], now=dt.datetime(2026, 11, 9, 9, tzinfo=dt.timezone.utc), resolve=lambda slug: source, ensure=lambda entry: path)
++        self.assertEqual(result, 0)
++        self.assertIn("account ads", output.getvalue())
++        self.assertIn("DM-", output.getvalue())
++        send.assert_not_called()
++
++
++def promo_membership_payload(m):
++    import promo_membership
++    return promo_membership.targets_payload(m, "demo")
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -82,7 +82,8 @@ export function clockLabel(minutes: number) {
  * Two switches decide it: the operator's own (in Firestore) and whether a cron
  * is registered. A bot older than the split reports only the combined one.
  */
-export function campaignOffLabel(campaign: { enabled: boolean; storeEnabled?: boolean; cronEnabled?: boolean }) {
+export function campaignOffLabel(campaign: { enabled: boolean; storeEnabled?: boolean; cronEnabled?: boolean; scheduleStatus?: "ready" | "pending" }) {
+  if (campaign.scheduleStatus === "pending") return "scheduling pending";
   if (campaign.enabled) return null;
   const switchedOff = campaign.storeEnabled === false;
   const noCron = campaign.cronEnabled === false;
