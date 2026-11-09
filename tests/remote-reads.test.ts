@@ -16,6 +16,24 @@ const busy = (retryAfter?: string) => new Response('{"error":"busy"}', {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("remote reads", () => {
+  it("uses the fresh read contract without reusing an ordinary read", async () => {
+    const fetch = vi.fn(async (url: string) => Response.json(payload(url)));
+    vi.stubGlobal("fetch", fetch);
+    await Promise.all([getGroups(), getGroups(undefined, { fresh: true })]);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://bot.example/internal/console/groups?",
+      "https://bot.example/internal/console/groups?fresh=1",
+    ]);
+  });
+
+  it("preserves structured quota errors without retrying a quota-limited preflight", async () => {
+    const metadata = { code: "config_rate_limited", upstreamStatus: 429, quota: "daily", retryAfterSeconds: 300 };
+    const fetch = vi.fn(async () => Response.json({ error: "config unavailable", ...metadata }, { status: 503 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(getGroups(undefined, { fresh: true })).rejects.toMatchObject({ metadata });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("completes a cold campaign page's four reads with at most two requests active", async () => {
     let release!: () => void;
     const ready = new Promise<void>((resolve) => { release = resolve; });

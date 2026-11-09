@@ -1,4 +1,5 @@
 import { BotUnavailableError, WriteRefusedError, WritesDisabledError } from "@/src/lib/bot-client";
+import type { BotErrorMetadata } from "@/src/lib/bot-error-metadata";
 
 /**
  * What a server action hands back after a config write. A value, not a thrown
@@ -16,7 +17,9 @@ import { BotUnavailableError, WriteRefusedError, WritesDisabledError } from "@/s
  */
 export type WriteOutcome =
   | { ok: true; warnings?: string[] }
-  | { ok: false; detail: string; problems?: string[] };
+  | ({ ok: false; detail: string; problems?: string[] } & BotErrorMetadata);
+
+export const CONFIG_RATE_LIMITED_MESSAGE = "Firestore is limiting configuration reads. Nothing was saved. Your changes are still here; try again later.";
 
 export const READ_ONLY_OUTCOME: WriteOutcome = {
   ok: false, detail: "The console is in read-only mode.",
@@ -25,10 +28,18 @@ export const READ_ONLY_OUTCOME: WriteOutcome = {
 /** The failures an operator should see, as an outcome. Anything else is a bug
  *  and is rethrown so it surfaces as one. */
 export function failedWrite(error: unknown): WriteOutcome {
-  if (error instanceof WriteRefusedError) {
-    return { ok: false, detail: error.detail, problems: error.problems };
+  if (error instanceof BotUnavailableError &&
+      (error.metadata?.code === "config_rate_limited" ||
+       /cannot read the current config, so nothing was changed: firestore\.googleapis\.com answered HTTP 429/.test(error.detail))) {
+    return { ok: false, detail: CONFIG_RATE_LIMITED_MESSAGE, ...error.metadata, code: "config_rate_limited" };
   }
-  if (error instanceof BotUnavailableError || error instanceof WritesDisabledError) {
+  if (error instanceof WriteRefusedError) {
+    return { ok: false, detail: error.detail, problems: error.problems, ...error.metadata };
+  }
+  if (error instanceof BotUnavailableError) {
+    return { ok: false, detail: error.detail, ...error.metadata };
+  }
+  if (error instanceof WritesDisabledError) {
     return { ok: false, detail: error.detail };
   }
   throw error;

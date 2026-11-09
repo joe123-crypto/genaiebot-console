@@ -134,6 +134,24 @@ describe("EditGroup", () => {
     expect(screen.getByText(/campaigns still read membership.json/)).toBeTruthy();
   });
 
+  it("keeps the selected tier and draft after a quota refusal, then allows a manual save", async () => {
+    const detail = "Firestore is limiting configuration reads. Nothing was saved. Your changes are still here; try again later.";
+    update.mockResolvedValueOnce({ ok: false, code: "config_rate_limited", detail })
+      .mockResolvedValueOnce({ ok: true });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Harare Market" }));
+    fireEvent.change(screen.getByLabelText("Tier"), { target: { value: "busy" } });
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Keep this draft" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save changes" })));
+    expect(screen.getByRole("alert").textContent).toBe(detail);
+    expect((screen.getByLabelText("Tier") as HTMLSelectElement).value).toBe("busy");
+    expect((screen.getByLabelText("Note") as HTMLTextAreaElement).value).toBe("Keep this draft");
+    expect(update).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save changes" })));
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("says when a change takes effect", () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Edit Harare Market" }));

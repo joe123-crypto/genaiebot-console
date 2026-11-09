@@ -88,6 +88,22 @@ async function mockSpawn(
   return spawned;
 }
 
+describe("fresh local config reads", () => {
+  it("forwards the bypass flag to the local bridge", async () => {
+    const spawned = await mockSpawn({ stdout: '{"groups":[],"disabledPromos":[]}' });
+    const { getGroups } = await loadWith("local");
+    await getGroups("2026-11-09", { fresh: true });
+    expect(spawned[0].argv).toEqual(["-I", "/checkout/workspace/bin/console-read", "groups", "--date", "2026-11-09", "--fresh-config"]);
+  });
+
+  it("retains metadata on a local strict-read failure", async () => {
+    const metadata = { code: "config_rate_limited", upstreamStatus: 429, quota: "daily", retryAfterSeconds: 300 };
+    await mockSpawn({ failWith: JSON.stringify({ error: "config unavailable", ...metadata }) });
+    const { getGroups } = await loadWith("local");
+    await expect(getGroups(undefined, { fresh: true })).rejects.toMatchObject({ metadata });
+  });
+});
+
 describe("checkShape", () => {
   it("accepts a payload that carries everything the screens read", async () => {
     const { checkShape } = await loadWith("remote");

@@ -58,7 +58,7 @@ export async function saveCaptionsAction(
   }
 
   try {
-    const current = await getCampaignPreview(slug);
+    const current = await getCampaignPreview(slug, undefined, { fresh: true });
     if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
       return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving." };
     }
@@ -139,7 +139,7 @@ export async function applyCampaignGroupsAction(
 
   let plan;
   try {
-    const { groups } = await getGroups();
+    const { groups } = await getGroups(undefined, { fresh: true });
     plan = planAssignmentWrites(slug, staged, groups);
   } catch (error) {
     return stopped(error, null, []);
@@ -192,7 +192,7 @@ export async function setCampaignEnabledAction(slug: string, enabled: boolean): 
   }
   if (typeof enabled !== "boolean") return { ok: false, detail: "The change could not be read." };
   try {
-    const campaign = (await getCampaigns()).find((entry) => entry.slug === slug);
+    const campaign = (await getCampaigns(undefined, { fresh: true })).find((entry) => entry.slug === slug);
     if (!campaign) return { ok: false, detail: "This campaign is no longer on record." };
     if ((campaign.storeEnabled ?? campaign.enabled) === enabled) return { ok: true };
     await updateCampaign(slug, { enabled }, { by: OPERATOR_NAME });

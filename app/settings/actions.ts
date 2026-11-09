@@ -30,7 +30,7 @@ export async function saveCapSettingsAction(draft: CapDraft, expected: Required<
   }
 
   try {
-    const overview = await getOverview();
+    const overview = await getOverview(undefined, { fresh: true });
     const settings = overview.capSettings;
     if (!settings) {
       return { ok: false, detail: "This bot predates editing cap settings from the console." };
