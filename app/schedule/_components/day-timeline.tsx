@@ -296,7 +296,7 @@ export function DayTimeline({
           {/* Rows stay in saved order. Sorting them by the drafted time would
               move the row out from under the pointer that is dragging it. */}
           <div style={{ display: "grid", gap: 6 }}>
-            {slots.map((base) => {
+            {[...slots].sort((first, second) => first.slug.localeCompare(second.slug)).map((base) => {
               const slot = bySlug.get(base.slug) ?? base;
               const runMinutes = worstCaseRunSeconds(slot.targetCount) / 60;
               const onAds = (slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0);

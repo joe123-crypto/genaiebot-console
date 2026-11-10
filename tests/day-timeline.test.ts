@@ -78,6 +78,19 @@ function overlapWarning() {
 }
 
 describe("dragging a run to a new time", () => {
+  it("keeps campaign rows fixed across crossing times, refreshes and remounts", () => {
+    const view = mount();
+    const order = () => screen.getAllByRole("slider").map((element) => element.getAttribute("aria-label"));
+    drag(bar(), 120);
+    expect(order()).toEqual(["Alpha start time", "Beta start time"]);
+    const refreshed = { ...props, slots: [slot("beta", 600), slot("alpha", 660)] };
+    view.rerender(createElement(DayTimeline, refreshed));
+    expect(order()).toEqual(["Alpha start time", "Beta start time"]);
+    view.unmount();
+    mount(refreshed);
+    expect(order()).toEqual(["Alpha start time", "Beta start time"]);
+  });
+
   it("moves the bar by how far the pointer travelled, not to where it landed", () => {
     mount();
     drag(bar(), 30);
@@ -228,7 +241,7 @@ describe("saving", () => {
   });
 
   it.each([
-    { desired: 720, confirmed: 540, expected: "Alpha is next at 09:00", rowOrder: ["Beta start time", "Alpha start time"] },
+    { desired: 720, confirmed: 540, expected: "Alpha is next at 09:00", rowOrder: ["Alpha start time", "Beta start time"] },
     { desired: 480, confirmed: 660, expected: "Beta is next at 10:00", rowOrder: ["Alpha start time", "Beta start time"] },
   ])("selects the earliest confirmed occurrence after a pending move to $desired", ({ desired, confirmed, expected, rowOrder }) => {
     const view = mount();

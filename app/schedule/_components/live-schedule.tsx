@@ -26,6 +26,6 @@ export function LiveScheduleView({ initial, initialError, writable }: { initial:
   useLivePoll(read);
   const gate = canEditSchedule(writable, data?.writes);
   return <><SyncNotice sync={data?.sync} error={error} />{data?.slots && data.date && data.timezone ?
-    <DayTimeline slots={[...data.slots].sort((a, b) => a.minutes - b.minutes || a.slug.localeCompare(b.slug))} nowMinutes={now ?? 0} timezone={data.timezone} date={data.date}
+    <DayTimeline slots={data.slots} nowMinutes={now ?? 0} timezone={data.timezone} date={data.date}
       saveUnavailableReason={gate.allowed ? undefined : gate.reason} /> : <p role="status">Loading the live schedule…</p>}</>;
 }
