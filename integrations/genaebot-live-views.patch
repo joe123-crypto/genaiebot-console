@@ -314,10 +314,10 @@ index 6660eb8..b5dc668 100644
                  return hit
 diff --git a/workspace/lib/console_live_api.py b/workspace/lib/console_live_api.py
 new file mode 100644
-index 0000000..016c48c
+index 0000000..438e3c7
 --- /dev/null
 +++ b/workspace/lib/console_live_api.py
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,308 @@
 +"""Small authenticated display endpoints over the shared local index."""
 +import base64
 +import datetime
@@ -388,7 +388,7 @@ index 0000000..016c48c
 +            self.writes_active = max(0, self.writes_active - 1)
 +            self.write_fence = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 +            self.cache = None
-+            self.index.touch()
++            self.index.request_boundary()
 +
 +    def close(self):
 +        self.index.close()
@@ -403,6 +403,7 @@ index 0000000..016c48c
 +            if datetime.datetime.fromisoformat(config["fetchedAt"].replace("Z", "+00:00")) < datetime.datetime.fromisoformat(self.write_fence.replace("Z", "+00:00")):
 +                raise console_live_index.NotReady("Waiting for the committed changes to reach the display index.")
 +            self.write_fence = None
++            config, revision = self.index.snapshot()
 +        now = time.time()
 +        day = datetime.datetime.now(ZoneInfo("Africa/Harare")).date()
 +        signature = (revision, str(day))
@@ -455,6 +456,13 @@ index 0000000..016c48c
 +            with self.index.condition:
 +                self.index.lease_until = self.index.clock() + console_live_index.LEASE_SECONDS
 +        self.index.counters["indexedRequests"] += 1
++        # Never hold the projection lock while waiting on the network. Local
++        # telemetry and other requests must remain usable during an outage.
++        if route not in ("metrics", "discoveries", "status"):
++            with self.lock:
++                boundary = self.write_fence if not self.writes_active else None
++            if boundary:
++                self.index.await_boundary(boundary)
 +        with self.lock:
 +            if route == "metrics":
 +                return self.metrics(params)
@@ -467,7 +475,13 @@ index 0000000..016c48c
 +                rows.sort(key=lambda row: (row["name"] or "", row["jid"]))
 +                return self.page("discoveries", rows, params, digest(result), self.index.status(),
 +                                 {"discovery": result.get("groupDiscovery")})
-+            model = self._model()
++            try:
++                model = self._model()
++            except console_live_index.NotReady:
++                if params.get("since"):
++                    sync = dict(self.index.status(), stale=True, state="awaiting-commit")
++                    return {"sync": sync, "revision": params["since"], "unchanged": True}
++                raise
 +            sync = self.index.status()
 +            if route == "navigation":
 +                return {"sync": sync, "campaignTotal": len(model["campaigns"]),
@@ -614,10 +628,10 @@ index 0000000..016c48c
 +    return (not params.get("line") or params["line"] in row["accounts"]) and (not params.get("cadence") or (row["weeklyCount"] > 0) == (params["cadence"] == "weekly")) and (not params.get("slot") or params["slot"] == slot)
 diff --git a/workspace/lib/console_live_index.py b/workspace/lib/console_live_index.py
 new file mode 100644
-index 0000000..c41dc40
+index 0000000..6a97642
 --- /dev/null
 +++ b/workspace/lib/console_live_index.py
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,356 @@
 +"""Durable, display-only Firestore index. Never imported by writers or sends.
 +
 +The single API process owns the leased stream. Readers open independent SQLite
@@ -666,6 +680,7 @@ index 0000000..c41dc40
 +        self.stream = stream or firestore_stream
 +        self.error = None
 +        self.connected = False
++        self.restart_requested = False
 +        self.counters = {"syncDocuments": 0, "rebuilds": 0, "activeStreams": 0,
 +                         "indexedRequests": 0, "returnedRows": 0}
 +        fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -721,6 +736,32 @@ index 0000000..c41dc40
 +        return {"revision": str(point["revision"]), "syncedAt": stamp, "lagSeconds": lag,
 +                "stale": not self.connected or bool(self.error),
 +                "state": "syncing" if not point["readTime"] else "stale" if not self.connected or self.error else "live"}
++
++    def request_boundary(self):
++        """Resume the shared stream to obtain a prompt consistent read boundary.
++
++        An idle Listen may not emit a new read_time for a minute. Reconnecting
++        with the durable resume positions confirms writes without a full read.
++        """
++        self.touch()
++        with self.condition:
++            self.restart_requested = True
++            if self.cancel:
++                self.cancel()
++            self.condition.notify_all()
++
++    def await_boundary(self, stamp, timeout=5):
++        target = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
++        deadline = time.monotonic() + timeout
++        with self.condition:
++            while True:
++                point = self.checkpoint()["readTime"]
++                if point and datetime.datetime.fromisoformat(point.replace("Z", "+00:00")) >= target:
++                    return True
++                remaining = deadline - time.monotonic()
++                if self.stopped or remaining <= 0:
++                    return False
++                self.condition.wait(remaining)
 +
 +    def documents(self, collection):
 +        with self.db() as db:
@@ -795,6 +836,8 @@ index 0000000..c41dc40
 +                       (generation, revision + int(changed), read_time, json.dumps(tokens)))
 +            db.execute("DELETE FROM docs WHERE generation != ?", (generation,))
 +        self.error = None
++        with self.condition:
++            self.condition.notify_all()
 +
 +    def _run(self):
 +        delay = 1
@@ -805,6 +848,7 @@ index 0000000..c41dc40
 +                    self.condition.wait(1)
 +                if self.stopped:
 +                    return
++                self.restart_requested = False
 +            try:
 +                self.counters["activeStreams"] = 1
 +                self.stream(self)
@@ -814,8 +858,12 @@ index 0000000..c41dc40
 +                self.error = type(exc).__name__
 +                self.connected = False
 +                with self.condition:
-+                    self.condition.wait(delay)
-+                delay = min(delay * 2, 300)
++                    if self.restart_requested:
++                        self.error = None
++                        delay = 1
++                    else:
++                        self.condition.wait(delay)
++                        delay = min(delay * 2, 300)
 +            finally:
 +                self.counters["activeStreams"] = 0
 +
@@ -871,7 +919,7 @@ index 0000000..c41dc40
 +    index.cancel = cancel
 +    def monitor():
 +        while not done.wait(0.5):
-+            if index.stopped or index.clock() >= index.lease_until:
++            if index.stopped or index.restart_requested or index.clock() >= index.lease_until:
 +                cancel()
 +                return
 +    threading.Thread(target=monitor, daemon=True).start()
@@ -1049,10 +1097,10 @@ index 7cc719f..1873b31 100644
          requests = len(self.firestore.requests)
 diff --git a/workspace/lib/test_console_live.py b/workspace/lib/test_console_live.py
 new file mode 100644
-index 0000000..2cc857e
+index 0000000..a1da94c
 --- /dev/null
 +++ b/workspace/lib/test_console_live.py
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,294 @@
 +"""Live display budgets and durable synchronization behavior, without network."""
 +import datetime
 +import importlib.machinery
@@ -1200,12 +1248,68 @@ index 0000000..2cc857e
 +    def test_post_write_fence_refuses_older_index_until_consistent_boundary(self):
 +        view = self.service()
 +        view.write_fence = "2026-11-10T10:01:00Z"
-+        with self.assertRaises(live.NotReady):
-+            view.handle("groups", "")
++        with patch.object(self.index, "await_boundary", return_value=False):
++            with self.assertRaises(live.NotReady):
++                view.handle("groups", "")
++            held = view.handle("groups", "since=confirmed-client-result")
++            self.assertTrue(held["unchanged"])
++            self.assertEqual(held["sync"]["state"], "awaiting-commit")
 +        # Local metrics remain available while config waits for the commit.
 +        self.assertEqual(view.handle("metrics", "ids=" + JID_A)["rows"][0]["jid"], JID_A)
 +        self.index.publish([], "2026-11-10T10:02:00Z", {})
 +        self.assertTrue(view.handle("groups", "")["rows"])
++
++    def test_save_resumes_stream_and_waits_for_prompt_boundary_without_rebuild(self):
++        view = self.service()
++        self.index.cancel = Mock()
++        view.begin_write()
++        view.fence()
++        self.index.cancel.assert_called_once()
++        self.assertTrue(self.index.restart_requested)
++        self.assertEqual(self.index.checkpoint()["tokens"], {"1": "resume"})
++        before = self.index.counters.copy()
++        # A resumed Listen confirms a newer boundary even if no documents changed.
++        def confirm():
++            time.sleep(.02)
++            self.index.publish([], "2099-01-01T00:00:00Z", {"1": "resumed"})
++        worker = threading.Thread(target=confirm)
++        worker.start()
++        try:
++            self.assertTrue(view.handle("groups", "")["rows"])
++            self.assertIsNone(view.write_fence)
++            self.assertEqual(self.index.counters["rebuilds"], before["rebuilds"])
++            self.assertEqual(self.index.counters["syncDocuments"], before["syncDocuments"])
++        finally:
++            worker.join()
++
++    def test_telemetry_is_not_locked_behind_a_slow_commit_confirmation(self):
++        view = self.service()
++        view.write_fence = "2099-01-01T00:00:00Z"
++        waiting, release, measured = threading.Event(), threading.Event(), threading.Event()
++        def slow_boundary(*args):
++            waiting.set()
++            release.wait(3)
++            return False
++        def read_groups():
++            view.handle("groups", "since=previous")
++        def read_metrics():
++            try:
++                view.handle("metrics", "ids=" + JID_A)
++                measured.set()
++            except Exception:
++                pass
++        with patch.object(self.index, "await_boundary", side_effect=slow_boundary):
++            reader = threading.Thread(target=read_groups)
++            reader.start()
++            self.assertTrue(waiting.wait(1))
++            metric_reader = threading.Thread(target=read_metrics)
++            metric_reader.start()
++            try:
++                self.assertTrue(measured.wait(1), "telemetry waited for Firestore confirmation")
++            finally:
++                release.set()
++                reader.join()
++                metric_reader.join()
 +
 +    def test_request_validation_and_telemetry_are_bounded(self):
 +        view = self.service()

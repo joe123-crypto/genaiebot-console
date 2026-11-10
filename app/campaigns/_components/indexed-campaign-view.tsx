@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHead } from "@/app/_components/ui";
 import { SyncNotice, useLivePage } from "@/app/_components/live-page";
 import { liveFetch, LoadMore, useLivePoll } from "@/app/_components/use-live";
@@ -8,7 +8,7 @@ import { CampaignGroups } from "./campaign-groups";
 import { CampaignImages } from "./campaign-images";
 import { CaptionVariants } from "./caption-variants";
 import { CampaignSwitch } from "./campaign-switch";
-import { loadCampaignGroupChoices } from "@/app/campaigns/actions";
+import { loadCampaignGroupChoices } from "./group-choices";
 import { canWrite } from "@/src/lib/write-capabilities";
 import type { Campaign, AdAssets, PreviewRow } from "@/src/lib/types";
 import type { CampaignRow, LivePage, SyncStatus, LiveContext } from "@/src/lib/live-types";
@@ -59,9 +59,10 @@ export function IndexedCampaignView({ slug, initial, initialError, writable }: {
 function IndexedAssignments({ slug, writable, context, variantCount }: { slug: string; writable: boolean; context?: LiveContext; variantCount: number }) {
   const root = useRef<HTMLDivElement>(null);
   const data = useLivePage<PreviewRow>("preview", null, new URLSearchParams({ slug }).toString(), row => row.jid, root);
-  const liveGroups = data.rows.map(({ caption, cap, ...row }) => row);
+  const liveGroups = useMemo(() => data.rows.map(({ caption, cap, ...row }) => row), [data.rows]);
+  const knownGroups = useMemo(() => data.rows.map(row => ({ jid: row.jid, name: row.name, account: row.account, status: "active" as const })), [data.rows]);
   return <div ref={root}><SyncNotice sync={data.page?.sync} error={data.error} />
-    <CampaignGroups slug={slug} liveGroups={liveGroups} knownGroups={data.rows.map(row => ({ jid: row.jid, name: row.name, account: row.account, status: "active" }))}
+    <CampaignGroups slug={slug} liveGroups={liveGroups} knownGroups={knownGroups}
       loadChoices={loadCampaignGroupChoices} pagedChoices partialMembership variantCount={variantCount}
       membershipAvailable={Boolean(data.page?.rows)} membershipLoaded={Boolean(data.page?.rows)} previewAvailable={Boolean(data.page?.rows)}
       gate={canWrite(writable, context?.writes, "groups", "promos", "paused_promos", "weekly")} />

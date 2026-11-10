@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
-import { loadCampaignGroupChoices } from "@/app/campaigns/actions";
+import { loadCampaignGroupChoices } from "./group-choices";
 import { useRouter } from "next/navigation";
 import { PageHead, Stat } from "@/app/_components/ui";
 import { CampaignGroups } from "@/app/campaigns/_components/campaign-groups";

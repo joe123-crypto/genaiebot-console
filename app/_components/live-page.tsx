@@ -4,7 +4,7 @@ import { liveFetch, useLivePoll } from "./use-live";
 import type { LivePage, SyncStatus } from "@/src/lib/live-types";
 
 export function SyncNotice({ sync, error }: { sync?: SyncStatus; error?: string | null }) {
-  return error || sync?.stale ? <p className="banner" role="status">{error ?? "Configuration is out of date."}
+  return error || sync?.stale ? <p className="banner" role="status">{error ?? (sync?.state === "awaiting-commit" ? "Waiting for saved changes to reach the display." : "Configuration is out of date.")}
     {sync?.syncedAt ? ` Last confirmed: ${new Date(sync.syncedAt).toLocaleString()}.` : " Synchronizing the display index…"}
     {" "}Your current data and drafts are kept.</p> : null;
 }
