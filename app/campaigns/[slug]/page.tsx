@@ -1,22 +1,18 @@
-import { notFound } from "next/navigation";
 import { Shell } from "@/app/_components/shell-wrapper";
-import { CampaignDetailView } from "@/app/campaigns/_components/campaign-detail-view";
-import { loadCampaignDetail } from "@/src/domains/campaign-detail";
-import { captionSaveUnavailableReason, imageWritesUnavailableReason } from "@/src/lib/bot-client";
+import { IndexedCampaignView } from "../_components/indexed-campaign-view";
+import { getLiveView } from "@/src/lib/live-client";
+import { BotUnavailableError } from "@/src/lib/bot-client";
 import { WRITES_ENABLED } from "@/src/config";
-
+import type { CampaignRow, SyncStatus } from "@/src/lib/live-types";
+import type { LiveContext } from "@/src/lib/live-types";
+import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
-
 export default async function CampaignPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const detail = await loadCampaignDetail(slug);
-  if (detail.campaign.ok && detail.campaign.data === null) notFound();
-
-  return (
-    <Shell>
-      <CampaignDetailView key={slug} slug={slug} detail={detail} writable={WRITES_ENABLED}
-        captionUnavailableReason={captionSaveUnavailableReason(detail.writes.ok ? detail.writes.data ?? undefined : undefined)}
-        imageUnavailableReason={imageWritesUnavailableReason()} />
-    </Shell>
-  );
+  let initial: { campaign: CampaignRow | null; context?: LiveContext; sync: SyncStatus } | null = null;
+  let initialError: string | undefined;
+  try { initial = await getLiveView("campaign", new URLSearchParams({ slug })); }
+  catch (error) { if (!(error instanceof BotUnavailableError)) throw error; initialError = error.detail; }
+  if (initial?.campaign === null && !initial.sync.stale) notFound();
+  return <Shell live><IndexedCampaignView key={slug} slug={slug} initial={initial} initialError={initialError} writable={WRITES_ENABLED} /></Shell>;
 }

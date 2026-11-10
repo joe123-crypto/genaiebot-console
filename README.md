@@ -29,13 +29,15 @@ with the same ref code, the same `wa.me` link and the same daily cap decision.
 It never changes operator config, contacts the gateway, or records a cap snapshot.
 The bot maintains private config display caches and outage snapshots on its volume.
 
-Console config displays share a three-minute cache across pages and tabs. Metrics
-and discovery retain their existing refresh schedules. Save preflight reads use
-`fresh=1` (`--fresh-config` locally) to bypass both backend caches and require live
-Firestore config; failed live reads never authorize a save from a snapshot. Deploy
-the companion bot support before this console version. Attempted config writes
-and campaign creation invalidate the display caches, so saved changes appear
-immediately. External edits may take five minutes to appear.
+Schedule, Groups, Campaigns and assignment pickers use the bot's durable SQLite
+display index. One shared Firestore change stream serves all visible tabs; it
+starts on demand and stops after 90 seconds without a visible-page request.
+The initial bootstrap or a required reset reads the indexed collections once.
+Normal lists, searches, scrolling and polling query the index rather than Firestore.
+External changes arrive through the stream. Stale indexed data stays visible with
+its age; every save still requires successful live Firestore validation.
+Deploy the companion live-view bot support before this console version; no
+full-directory fallback is attempted when its endpoints are missing.
 
 Firestore quota refusals keep the group editor and its draft open, explain that
 nothing was saved, and allow a manual retry. Backend display reads wait five
@@ -392,12 +394,22 @@ wrong, rather than implying the campaigns have no pictures. Picture *writes* sti
 wait on a companion bot update, in the same way caption writes waited on their
 patch.
 
-While the console is visible and online, it refreshes the current page and sidebar
-60 seconds after each completed refresh. Checks pause in hidden tabs or while
-offline, and resume with an immediate refresh when visible and online again.
-Each tab checks independently, using the same server-side adapters as page loads;
-gateway credentials stay on the server. Existing bot errors are retried on the
-next check. Activity remains a placeholder.
+The home page is the editable live Schedule; `/schedule` redirects there. The old
+overview cards have been removed. Its clock advances locally every 15 seconds and
+its small schedule response polls every 30 seconds. Draft drags survive updates.
+
+Groups and Campaigns initially fetch ten rows, and scrolling or **Load more**
+fetches another ten. Search is debounced by 300 ms; changing a filter queries the
+whole index directly instead of narrowing only loaded rows. Results reflow
+around the visible row when their revision changes. Open group editors retain
+the original record and draft independently of the table's current rows.
+
+Discoveries and visible DMC/member observations update in separate 30-second
+requests. Those observations come from the bot's local inventory and telemetry.
+Only visible group IDs are requested for metrics. Campaign sections and paginated
+assignment pickers load when opened. Browser polling pauses when hidden/offline
+and resumes with one request. The shell never refreshes the entire page.
+Internal links disable prefetch, and gateway credentials stay on the server.
 
 ## Campaign read failures
 
@@ -436,10 +448,9 @@ backend before this console; older bots retain the previous read and save paths.
   aggregations instead of downloading groups, previews or pictures.
 - The campaign's group directory loads when **Add groups** opens. Saved browser
   draft additions are checked by ID; a failed check retains the draft.
-- Console configuration displays share a process-safe cache for 180 seconds.
-  With the existing response cache and polling interval, healthy external edits
-  appear within five minutes. Failed refreshes wait at least 300 seconds, or a
-  longer upstream retry delay. Strict save checks bypass these display caches.
+- Indexed console displays use one leased change stream and 30-second resource
+  polling. Legacy read bridges retain their bounded config cache. Strict save
+  checks bypass both the display index and legacy display caches.
 - Campaign group changes use one transactional batch (up to 100 existing groups),
   reading shared rules once and committing changed groups with their audits.
   Validation or conflict failures write nothing; uncertain commits are never

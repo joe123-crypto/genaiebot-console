@@ -1,5 +1,8 @@
 "use client";
 
+import { PaginatedPicker } from "@/app/_components/paginated-picker";
+import { notifyLiveChange } from "@/app/_components/use-live";
+
 import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { Pause, Play, Plus, Trash2, X } from "lucide-react";
 import { applyCampaignGroupsAction, type ApplyGroupsOutcome } from "@/app/campaigns/actions";
@@ -17,6 +20,8 @@ type Props = {
   knownGroups: KnownCampaignGroup[];
   loadChoices?: (jids?: string[]) => Promise<KnownCampaignGroup[]>;
   variantCount: number;
+  pagedChoices?: boolean;
+  partialMembership?: boolean;
   /** Failed reads are not evidence that a group disappeared. */
   membershipAvailable?: boolean;
   membershipLoaded?: boolean;
@@ -195,7 +200,7 @@ export function CampaignGroups(props: Props) {
   return <CampaignGroupEditor key={props.slug} {...props} />;
 }
 
-function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups, loadChoices, variantCount, gate,
+function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups, loadChoices, variantCount, gate, pagedChoices = false, partialMembership = false,
   membershipAvailable = true, membershipLoaded = true, previewAvailable = true }: Props) {
   const id = useId();
   const key = groupDraftKey(slug);
@@ -228,7 +233,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
     for (const group of initialKnownGroups) result.set(group.jid, group);
     return [...result.values()];
   }, [choices, lookup, initialKnownGroups, loadChoices]);
-  const canReconcile = membershipAvailable && previewAvailable && additionsChecked;
+  const canReconcile = !partialMembership && membershipAvailable && previewAvailable && additionsChecked;
 
   useEffect(() => {
     if (!loadChoices || !additionsKey) return;
@@ -242,6 +247,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
   }, [additionsKey, initialKnownGroups, loadChoices]);
 
   async function openChoices() {
+    if (pagedChoices) { setOpen(true); return; }
     if (!loadChoices) { setOpen(true); return; }
     if (choicesLoading) return;
     setChoicesLoading(true);
@@ -378,6 +384,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
       ? { ...previous, draft: withoutJids(previous.draft, outcome.done), invalid: false }
       : previous);
     if (outcome.ok) {
+        notifyLiveChange();
       setNotice(`Applied to ${plural(outcome.done.length, "group")}. The campaign uses it from its next run.`);
     } else {
       setFailure(outcome);
@@ -489,7 +496,11 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
           </tbody>
         </table>
       </div>
-      {open && membershipLoaded ? <AddGroupsDialog groups={available} close={() => setOpen(false)} add={add} /> : null}
+      {open && membershipLoaded ? pagedChoices ? <PaginatedPicker kind="groups" exclude={[...assigned]}
+        close={() => setOpen(false)} choose={rows => {
+          setChoices(previous => [...previous, ...rows.map(row => ({ jid: row.id, name: row.name, account: row.account ?? "default", status: row.status ?? "active" }))]);
+          add(rows.map(row => row.id)); setOpen(false);
+        }} /> : <AddGroupsDialog groups={available} close={() => setOpen(false)} add={add} /> : null}
       {removalRow ? <RemoveGroupDialog group={removalRow.group} close={() => setRemoveJid(null)}
         fallbackFocus={addButton} confirm={() => {
           const jid = removalRow.group.jid;

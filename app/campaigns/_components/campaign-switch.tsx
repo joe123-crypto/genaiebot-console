@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyLiveChange } from "@/app/_components/use-live";
+
 import { useEffect, useState, useTransition } from "react";
 import { Pause, Play } from "lucide-react";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
@@ -57,7 +59,7 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
     if (target === null || !gate.allowed || pending) return;
     startTransition(async () => {
       const outcome = await setCampaignEnabledAction(slug, target);
-      if (outcome.ok) close();
+      if (outcome.ok) { notifyLiveChange(); close(); }
       else setError({ detail: outcome.detail, problems: outcome.problems });
     });
   }

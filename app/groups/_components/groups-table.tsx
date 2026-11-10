@@ -1,6 +1,9 @@
 "use client";
 
-import { Fragment, useId, useRef, useState } from "react";
+import { PaginatedPicker } from "@/app/_components/paginated-picker";
+import { addGroupCampaignAction } from "@/app/groups/actions";
+import { liveFetch, notifyLiveChange, useLivePoll } from "@/app/_components/use-live";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
@@ -69,6 +72,8 @@ type Props = {
   campaignGate?: WriteGate;
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: GroupFilter;
+  remote?: { onFilter: (filter: GroupFilter) => void; total: number; lines: string[]; campaigns: GroupCampaignOption[]; tiers: string[] };
+
 };
 
 const VIEWS: GroupView[] = ["all", "needs-decision", "advertising", "no-campaign"];
@@ -76,7 +81,7 @@ const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-membe
 
 export function GroupsTable({
   groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
-  campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES,
+  campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES, remote,
 }: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
@@ -89,8 +94,28 @@ export function GroupsTable({
   const [incomplete, setIncomplete] =
     useState<{ label: string; warnings: string[] } | null>(null);
 
+  const [campaignGroup, setCampaignGroup] = useState<Group | null>(null);
+  const [extraGroups, setExtraGroups] = useState<Record<string, Group>>({});
+  const [editorDeleted, setEditorDeleted] = useState(false);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null);
+  async function loadGroup(group: Group, edit = false) {
+    try {
+      const result = await liveFetch<{ group: Group | null }>("group", new URLSearchParams({ ids: group.jid }));
+      if (!result.group) { setAssignmentError("This group no longer exists. Any open draft is retained."); return; }
+      setExtraGroups(previous => ({ ...previous, [group.jid]: result.group! }));
+      if (edit) { setEditorDeleted(false); setEditingGroup(result.group); }
+    } catch { setAssignmentError("Group details are unavailable. Your draft is retained."); }
+  }
+  useLivePoll(async signal => {
+    if (!remote || !editingGroup) return;
+    try { const result = await liveFetch<{ group: Group | null }>("group", new URLSearchParams({ ids: editingGroup.jid }), signal);
+      if (!signal.aborted) setEditorDeleted(result.group === null); } catch { /* Saves still require live validation. */ }
+  }, Boolean(remote && editingGroup));
+  const filterChanged = remote?.onFilter;
+  useEffect(() => { filterChanged?.(filter); }, [filter, filterChanged]);
   const off = new Set(disabledPromos);
-  const visible = sortGroupsForTable(filterGroups(groups, filter));
+  const visible = remote ? groups : sortGroupsForTable(filterGroups(groups, filter));
   const columns = writesEnabled ? 10 : 9;
   const unfiltered = isDefaultGroupFilter(filter);
 
@@ -107,6 +132,15 @@ export function GroupsTable({
 
   return (
     <div className="card">
+      {editorDeleted && editingGroup ? <p role="alert">This group no longer exists. Your open draft is retained.</p> : null}
+      {assignmentError ? <p role="alert">{assignmentError}</p> : null}
+      {campaignGroup ? <PaginatedPicker kind="campaigns" multiple={false} exclude={campaignGroup.promos} close={() => setCampaignGroup(null)} choose={async ([row]) => {
+        const result = await addGroupCampaignAction(campaignGroup.jid, row.id);
+        if (result.ok) { setCampaignGroup(null); notifyLiveChange(); } else setAssignmentError(result.detail);
+      }} /> : null}
+      {editingGroup ? <EditGroup key={editingGroup.jid} group={editingGroup} label={confirmLabel(editingGroup)}
+        lines={editing.lines} tiers={editing.tiers} editable={editing.editableFields} gate={editorDeleted ? { allowed: false, reason: "This group no longer exists. Your draft is retained." } : editing.edit}
+        initiallyOpen onDismiss={() => setEditingGroup(null)} /> : null}
       <FilterBar label="Filter groups">
         <FilterSearch
           id={`${id}-q`}
@@ -146,21 +180,21 @@ export function GroupsTable({
           id={`${id}-line`}
           label="Line"
           value={filter.line}
-          options={lineOptions(groups, filter.line)}
+          options={remote ? remote.lines.map(value => ({ value, label: value })) : lineOptions(groups, filter.line)}
           onChange={(value) => set("line", value)}
         />
         <Facet
           id={`${id}-campaign`}
           label="Campaign"
           value={filter.campaign}
-          options={campaignOptions(groups, disabledPromos, filter.campaign)}
+          options={remote ? remote.campaigns.map(row => ({ value: row.slug, label: row.name })) : campaignOptions(groups, disabledPromos, filter.campaign)}
           onChange={(value) => set("campaign", value)}
         />
         <Facet
           id={`${id}-tier`}
           label="Tier"
           value={filter.tier}
-          options={tierOptions(groups, filter.tier)}
+          options={remote ? remote.tiers.map(value => ({ value, label: value })) : tierOptions(groups, filter.tier)}
           onChange={(value) => set("tier", value)}
         />
 
@@ -189,9 +223,9 @@ export function GroupsTable({
 
       <FilterSummary
         shown={visible.length}
-        total={groups.length}
+        total={remote?.total ?? groups.length}
         noun="group"
-        unfiltered={unfiltered}
+        unfiltered={unfiltered && (!remote || visible.length === remote.total)}
       >
         <p className="card-note">
           Groups needing a decision are listed first. A group the bot cannot post in returns{" "}
@@ -229,7 +263,7 @@ export function GroupsTable({
           <tbody>
             {visible.map((group) => (
               <Fragment key={group.jid}>
-                <tr>
+                <tr data-live-id={group.jid}>
                   <td>
                     <div className="cell-strong">{groupLabel(group)}</div>
                     <div className="cell-mono">{shortJid(group.jid)}</div>
@@ -284,7 +318,9 @@ export function GroupsTable({
                           </span>
                         );
                       })}
-                      {writesEnabled ? <AddGroupCampaign group={group} campaigns={campaigns} gate={campaignGate} /> : null}
+                      {writesEnabled ? remote ? <button className="row-action" aria-label={`Add campaign to ${confirmLabel(group)}`}
+                        disabled={!campaignGate.allowed || group.status !== "active"} onClick={() => setCampaignGroup(group)}>+</button>
+                        : <AddGroupCampaign group={group} campaigns={campaigns} gate={campaignGate} /> : null}
                     </div>
                   </td>
                   <td>
@@ -292,16 +328,18 @@ export function GroupsTable({
                       aria-label={`More about ${confirmLabel(group)}`}
                       aria-expanded={expanded.has(group.jid)}
                       aria-controls={`${id}-details-${group.jid}`}
-                      onClick={() => setExpanded((current) => {
+                      onClick={() => { if (remote && !expanded.has(group.jid)) void loadGroup(group);
+                        setExpanded((current) => {
                         const next = new Set(current);
                         if (next.has(group.jid)) next.delete(group.jid); else next.add(group.jid);
                         return next;
-                      })}>
+                      }); }}>
                       More <span aria-hidden="true">{expanded.has(group.jid) ? "▴" : "▾"}</span>
                     </button>
                   </td>
                   {writesEnabled ? (
                     <td className="cell-actions">
+                      {remote ? <button className="row-action" aria-label={`Edit ${confirmLabel(group)}`} onClick={() => { void loadGroup(group, true); }}>Edit</button> : (
                       <EditGroup
                         group={group}
                         label={confirmLabel(group)}
@@ -310,6 +348,7 @@ export function GroupsTable({
                         gate={editing.edit}
                         editable={editing.editableFields}
                       />
+                      )}
                       <DeleteGroup
                         jid={group.jid}
                         label={confirmLabel(group)}
@@ -323,7 +362,7 @@ export function GroupsTable({
                   ) : null}
                 </tr>
                 <tr id={`${id}-details-${group.jid}`} hidden={!expanded.has(group.jid)} className="group-details-row">
-                  <td colSpan={columns}><GroupDetails jid={group.jid} note={group.note} metrics={group.metrics} /></td>
+                  <td colSpan={columns}><GroupDetails jid={group.jid} note={extraGroups[group.jid]?.note ?? group.note} metrics={group.metrics} /></td>
                 </tr>
               </Fragment>
             ))}

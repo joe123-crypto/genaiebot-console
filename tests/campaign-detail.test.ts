@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ campaigns: vi.fn(), preview: vi.fn(), groups: vi.fn(), overview: vi.fn(), notFound: vi.fn() }));
+const mocks = vi.hoisted(() => ({ campaigns: vi.fn(), preview: vi.fn(), groups: vi.fn(), overview: vi.fn(), notFound: vi.fn(), live: vi.fn() }));
+vi.mock("@/src/lib/live-client", () => ({ getLiveView: mocks.live }));
 vi.mock("@/src/lib/bot-client", () => ({
   BotUnavailableError: class extends Error { constructor(public detail: string, public status?: number) { super(detail); } },
   getCampaignPayload: mocks.campaigns, getCapabilities: mocks.overview, getCampaignPreview: mocks.preview, getGroups: mocks.groups,
@@ -15,6 +16,7 @@ import CampaignPage from "@/app/campaigns/[slug]/page";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.live.mockResolvedValue({ campaign: { slug: "borehole", enabled: true }, sync: { stale: false } });
   mocks.campaigns.mockResolvedValue({
     date: "2026-11-09", adAssets: { mode: "r2", source: "firestore", fetchedAt: "x", note: null },
     campaign: { slug: "borehole", enabled: true },
@@ -51,7 +53,7 @@ describe("campaign resource loading", () => {
   });
 
   it("returns 404 only when a successful list confirms the campaign is absent", async () => {
-    mocks.campaigns.mockResolvedValue({ date: "2026-11-09", campaign: null });
+    mocks.live.mockResolvedValue({ campaign: null, sync: { stale: false } });
     await expect(CampaignPage({ params: Promise.resolve({ slug: "borehole" }) })).rejects.toThrow("404");
     expect(mocks.notFound).toHaveBeenCalledOnce();
   });

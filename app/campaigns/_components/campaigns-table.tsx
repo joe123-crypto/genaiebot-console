@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { Repeat2 } from "lucide-react";
 import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
@@ -28,9 +28,10 @@ import type { Campaign } from "@/src/lib/types";
 type Props = {
   /** Every campaign, in the order the bridge sends them — which is the order
    *  they run through the day. Nothing here reorders them. */
-  campaigns: Campaign[];
+  campaigns: (Campaign & { captionCount?: number })[];
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: CampaignFilter;
+  remote?: { onFilter: (filter: CampaignFilter) => void; total: number; lines: string[] };
   /** `WRITES_ENABLED` reads an unprefixed environment variable, so it is false
    *  in a browser bundle. The server page has to hand it over. */
   writesEnabled?: boolean;
@@ -47,7 +48,7 @@ const NO_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
 
 export function CampaignsTable({
   campaigns, initialFilter, writesEnabled = false,
-  switchGate = NO_WRITES, deleteGate = NO_WRITES,
+  switchGate = NO_WRITES, deleteGate = NO_WRITES, remote,
 }: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
@@ -57,7 +58,9 @@ export function CampaignsTable({
   );
   const search = useRef<HTMLInputElement>(null);
 
-  const visible = filterCampaigns(campaigns, filter);
+  const changed = remote?.onFilter;
+  useEffect(() => { changed?.(filter); }, [filter, changed]);
+  const visible = remote ? campaigns : filterCampaigns(campaigns, filter) as (Campaign & { captionCount?: number })[];
   const unfiltered = isDefaultCampaignFilter(filter);
   const columns = writesEnabled ? 7 : 6;
 
@@ -102,7 +105,7 @@ export function CampaignsTable({
           id={`${id}-line`}
           label="Line"
           value={filter.line}
-          options={campaignLineOptions(campaigns, filter.line)}
+          options={remote ? remote.lines.map(value => ({ value, label: value })) : campaignLineOptions(campaigns, filter.line)}
           onChange={(value) => set("line", value)}
         />
         <Facet
@@ -116,7 +119,7 @@ export function CampaignsTable({
           id={`${id}-slot`}
           label="Slot"
           value={filter.slot}
-          options={campaignSlotOptions(campaigns, filter.slot)}
+          options={remote ? ["morning", "afternoon", "evening", "unscheduled"].map(value => ({ value, label: value })) : campaignSlotOptions(campaigns, filter.slot)}
           onChange={(value) => set("slot", value)}
         />
 
@@ -129,9 +132,9 @@ export function CampaignsTable({
 
       <FilterSummary
         shown={visible.length}
-        total={campaigns.length}
+        total={remote?.total ?? campaigns.length}
         noun="campaign"
-        unfiltered={unfiltered}
+        unfiltered={unfiltered && (!remote || visible.length === remote.total)}
       />
 
       <div
@@ -154,7 +157,7 @@ export function CampaignsTable({
           </thead>
           <tbody>
             {visible.map((campaign) => (
-              <tr key={campaign.slug} className="campaign-preview-row">
+              <tr data-live-id={campaign.slug} key={campaign.slug} className="campaign-preview-row">
                 <td
                   className="cell-strong"
                   style={{
@@ -167,7 +170,7 @@ export function CampaignsTable({
                 </td>
                 <td>
                   <div className="cell-strong">
-                    <Link
+                    <Link prefetch={false}
                       className="campaign-preview-link"
                       href={`/campaigns/${campaign.slug}`}
                       aria-label={`Preview ${campaignLabel(campaign)}`}
@@ -225,7 +228,7 @@ export function CampaignsTable({
                     <span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         <Repeat2 size={14} aria-hidden />
-                        {plural(campaign.captions.length, "variant")}
+                        {plural((campaign.captionCount ?? campaign.captions.length), "variant")}
                       </span>
                       <br />
                       {plural(campaign.images.length, "image")}

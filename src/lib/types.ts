@@ -268,7 +268,12 @@ export type CampaignPreview = {
 /** The groups payload carries the switched-off campaigns alongside the rows,
  *  so a screen can tell "this campaign is off" from "today's cap held it back"
  *  without also fetching the campaigns route. */
+export type GroupContext = Pick<Overview, "accounts" | "capSettings" | "writes" | "actions"> & {
+  campaigns: Pick<Campaign, "slug" | "name" | "enabled">[];
+};
+
 export type GroupsPayload = {
+  context?: GroupContext;
   date: string;
   disabledPromos: string[];
   groups: Group[];

@@ -1,0 +1,1223 @@
+diff --git a/.github/workflows/deploy-main.yml b/.github/workflows/deploy-main.yml
+index ec141f8..ec13a95 100644
+--- a/.github/workflows/deploy-main.yml
++++ b/.github/workflows/deploy-main.yml
+@@ -73,6 +73,9 @@ jobs:
+           )
+           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 --exclude=SC2016 "${files[@]}"
+ 
++      - name: Install console stream dependencies
++        run: python3 -m pip install -r deploy/railway/requirements-console.txt
++
+       - name: Run repository validation and tests
+         run: ./deploy/ci-check.sh --base-sha "$BASE_SHA" --head-sha "$GITHUB_SHA"
+ 
+diff --git a/README.md b/README.md
+index d79814d..70e514d 100644
+--- a/README.md
++++ b/README.md
+@@ -1964,3 +1964,39 @@ Local callers send the same request to `workspace/bin/console-schedule --apply`
+ on stdin; that mode attempts gateway reconciliation immediately. The console API
+ worker provides automatic retry for any pending updates. Repeating a request for
+ an already-saved time is safe; stale revisions reject changes as a whole.
++
++## Indexed live console views
++
++The console's Schedule home page, paginated Groups/Campaigns views, and assignment
++pickers use `/internal/console/live/*`. A single demand-driven Firestore Listen
++stream maintains `console-live.sqlite` in the private Firestore state directory.
++The stream covers settings, lines, campaigns, groups and campaign-deletion receipts;
++it never watches audit entries or asset bytes. No display query downloads config
++collections. The initial sync, a credential/schema change, or an existence mismatch
++can require a complete bootstrap. Restart and idle reconnects resume from durable
++positions. Bootstrap and reset generations publish only at consistent boundaries.
++
++Visible console resources poll every 30 seconds and renew a 90-second activity
++lease. When the lease expires, the stream disconnects and the index stays on disk.
++Group DMC/member requests read only local telemetry for requested IDs. Discovery
++requests read local inventories and indexed membership without invoking config
++loaders. Metrics keep their own observation timestamps. Stale config remains
++viewable with synchronization status; saves still validate live Firestore state.
++Successful writes fence displays until the stream passes the write boundary.
++
++The API validates and authenticates the live routes independently of the legacy
++read bridge. `groups`, `campaigns`, `discoveries` and `preview` return at most ten
++rows plus query/revision-bound continuation cursors. `q` retains case-insensitive
++substring matching, and filters apply before pagination. Changed revisions return
++an anchor-based current window; unchanged polls return only freshness metadata.
++`metrics` accepts up to 100 validated group IDs. `schedule` contains only timeline
++slots and editing capabilities. Campaign metadata, captions/pictures and previews
++have separate requests. `/live/status` exposes sync lag and counters for indexed
++requests, returned rows, streamed documents, rebuilds and active streams.
++
++The runtime image and portable CI install `deploy/railway/requirements-console.txt`.
++For local testing, install it in a virtual environment before running the index
++protocol tests. Existing CLI config readers, campaign runners and all writer
++validation remain authoritative and independent of this display index. Deploy the
++bot endpoints before the updated console; it intentionally has no full-directory
++fallback when a live endpoint is missing. Roll back the console before the bot.
+diff --git a/deploy/railway/Dockerfile b/deploy/railway/Dockerfile
+index 9207d26..335da14 100644
+--- a/deploy/railway/Dockerfile
++++ b/deploy/railway/Dockerfile
+@@ -58,6 +58,12 @@ RUN apt-get update \
+       passwd sudo ca-certificates tini util-linux \
+  && rm -rf /var/lib/apt/lists/*
+ 
++# Firestore Listen uses one leased stream for every console display.
++COPY deploy/railway/requirements-console.txt /opt/requirements-console.txt
++RUN python3 -m venv /opt/console-python \
++ && /opt/console-python/bin/pip install --no-cache-dir -r /opt/requirements-console.txt
++ENV PATH="/opt/console-python/bin:${PATH}"
++
+ # The node base image ships uid 1000 as `node`; use that uid for the gateway
+ # account so host-owned bind mounts retain the expected ownership.
+ RUN userdel -r node 2>/dev/null || true \
+diff --git a/deploy/railway/console-api.py b/deploy/railway/console-api.py
+index 4c6f7df..1b69ba2 100755
+--- a/deploy/railway/console-api.py
++++ b/deploy/railway/console-api.py
+@@ -630,6 +630,17 @@ class Handler(BaseHTTPRequestHandler):
+         self.send_any(status, body, with_body)
+ 
+     def do_POST(self):
++        live = self.server.console.get("live")
++        if live is not None:
++            live.begin_write()
++        try:
++            return self._do_POST()
++        finally:
++            live = self.server.console.get("live")
++            if live is not None:
++                live.fence()
++
++    def _do_POST(self):
+         split = urlsplit(self.path)
+         deletion = re.fullmatch(re.escape(PREFIX) + r"campaigns/([a-z0-9][a-z0-9-]{0,63})/delete", split.path)
+         if deletion:
+@@ -698,6 +709,26 @@ class Handler(BaseHTTPRequestHandler):
+             self.account_request(route, split.query, "GET", with_body)
+             return
+ 
++        if route.startswith("live/"):
++            view = route[5:]
++            if view not in ("groups", "campaigns", "schedule", "metrics", "discoveries", "navigation", "campaign", "detail", "preview", "group", "status"):
++                self.send_any(404, b'{"error":"Unknown live view."}', with_body)
++                return
++            try:
++                with config["liveLock"]:
++                    if config.get("live") is None:
++                        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(config["bridge"].path)), "lib"))
++                        from console_live_api import LiveViews
++                        config["live"] = LiveViews(config["bridge"].path)
++                payload = config["live"].handle(view, split.query)
++                self.send_any(200, json.dumps(payload).encode(), with_body)
++            except ValueError:
++                self.send_any(400, b'{"error":"Invalid live-view query."}', with_body)
++            except Exception:
++                self.send_any(503, b'{"error":"Live view is synchronizing or unavailable. Previous data is retained."}', with_body,
++                              headers=(("Retry-After", "5"),))
++            return
++
+         try:
+             args = plan(route, split.query)
+         except Refuse as exc:
+@@ -773,9 +804,11 @@ def build_server(bind, port, token, bridge_path, write_path=None,
+     close_server = server.server_close
+     def close():
+         server.console["accounts"].close()
++        if server.console.get("live") is not None:
++            server.console["live"].close()
+         close_server()
+     server.server_close = close
+-    server.console = {"token": token, "bridge": Bridge(bridge_path, **kwargs),
++    server.console = {"live": None, "liveLock": threading.Lock(), "token": token, "bridge": Bridge(bridge_path, **kwargs),
+                       "accounts": AccountControls(),
+                       "writes": WriteBridge(write_path or default_write_bridge()),
+                       "schedules": WriteBridge(_volume_bin("console-schedule"), timeout=30),
+diff --git a/deploy/railway/requirements-console.txt b/deploy/railway/requirements-console.txt
+new file mode 100644
+index 0000000..bd26e59
+--- /dev/null
++++ b/deploy/railway/requirements-console.txt
+@@ -0,0 +1 @@
++google-cloud-firestore==2.21.0
+diff --git a/deploy/test_console_api.py b/deploy/test_console_api.py
+index d26ce0c..666f990 100644
+--- a/deploy/test_console_api.py
++++ b/deploy/test_console_api.py
+@@ -96,6 +96,26 @@ class ConsoleApiTests(unittest.TestCase):
+             with error:
+                 return error.code, error.read(), dict(error.headers)
+ 
++    def test_live_routes_are_authenticated_uncached_and_do_not_run_legacy_bridge(self):
++        base = self.serve()
++        live = unittest.mock.Mock()
++        live.handle.return_value = {"rows": [], "sync": {"stale": False}, "revision": "1"}
++        self.server.console["live"] = live
++        self.assertEqual(self.fetch(base + "/live/groups", token=None)[0], 401)
++        for _ in range(2):
++            status, body, headers = self.fetch(base + "/live/groups?q=market")
++            self.assertEqual(status, 200)
++            self.assertEqual(headers["Cache-Control"], "no-store")
++        self.assertEqual(live.handle.call_count, 2)
++        self.assertEqual(live.handle.call_args.args, ("groups", "q=market"))
++        self.assertEqual(self.server.console["bridge"].runs, 0)
++        live.handle.side_effect = ValueError("bad cursor")
++        self.assertEqual(self.fetch(base + "/live/groups?cursor=bad")[0], 400)
++        live.handle.side_effect = RuntimeError("private detail")
++        status, body, _ = self.fetch(base + "/live/groups")
++        self.assertEqual(status, 503)
++        self.assertNotIn(b"private detail", body)
++
+     def test_account_routes_use_separate_uncached_controls(self):
+         base = self.serve()
+         controls = self.server.console["accounts"]
+diff --git a/deploy/test_console_read.py b/deploy/test_console_read.py
+index 5fc900a..f44f06a 100644
+--- a/deploy/test_console_read.py
++++ b/deploy/test_console_read.py
+@@ -82,9 +82,19 @@ class ConsoleReadTests(unittest.TestCase):
+ 
+     # -- payload shapes ---------------------------------------------------
+ 
++    def test_group_controls_match_overview_without_loading_campaign_assets(self):
++        groups = self.ok("groups", "--date", DAY)
++        overview = self.ok("overview", "--date", DAY)
++        context = groups["context"]
++        for key in ("writes", "actions", "accounts", "capSettings"):
++            self.assertEqual(context[key], overview[key])
++        self.assertEqual({row["slug"]: row for row in context["campaigns"]}, {
++            row["slug"]: {key: row[key] for key in ("slug", "name", "enabled")}
++            for row in overview["campaigns"]})
++
+     def test_groups_describes_every_known_group_the_same_way(self):
+         payload = self.ok("groups", "--date", DAY)
+-        self.assertEqual(set(payload), {"date", "disabledPromos", "groups", "discoveredGroups", "groupDiscovery"})
++        self.assertEqual(set(payload), {"date", "disabledPromos", "groups", "discoveredGroups", "groupDiscovery", "context"})
+         self.assertEqual(payload["date"], DAY)
+         self.assertTrue(payload["groups"])
+         for row in payload["groups"]:
+diff --git a/workspace/bin/console-read b/workspace/bin/console-read
+index 935918f..85fb019 100755
+--- a/workspace/bin/console-read
++++ b/workspace/bin/console-read
+@@ -857,6 +857,21 @@ def main(argv):
+             if command == "group":
+                 payload["discoveredGroups"] = [row for row in payload.get("discoveredGroups", []) if row["jid"] == slug]
+             group_metrics.attach(payload, membership())
++            if command in ("groups", "group"):
++                # All of this comes from the config already read for the rows;
++                # no overview, preview or asset catalogue is needed by a picker.
++                declared = manifest().get("promos", [])
++                converted = console_campaigns.definitions(membership())
++                choices = [{"slug": row["slug"], "name": row.get("name"),
++                            "enabled": effective_enabled(row)} for row in declared
++                           if row["slug"] not in converted and row["slug"] not in resolved().get("deleted", [])]
++                choices.extend({"slug": slug, "name": row.get("name"),
++                                "enabled": bool(resolved().get("storeSwitches", {}).get(slug))
++                                           and row.get("scheduleStatus") == "ready"}
++                               for slug, row in converted.items())
++                payload["context"] = {"writes": write_capabilities(), "actions": action_capabilities(),
++                                      "accounts": accounts(membership()), "capSettings": cap_settings(membership()),
++                                      "campaigns": choices}
+         elif command == "campaigns":
+             payload = {"date": day.isoformat(), "adAssets": ad_assets_status(),
+                        "campaigns": campaign_records(day), "deletions": deletion_records()}
+diff --git a/workspace/lib/console_config.py b/workspace/lib/console_config.py
+index 6660eb8..b5dc668 100644
+--- a/workspace/lib/console_config.py
++++ b/workspace/lib/console_config.py
+@@ -80,6 +80,23 @@ def _cached(entry, identity, epoch, now):
+     return dict(result, source="snapshot")
+ 
+ 
++def _project(result, *, campaign=None, group_ids=None, include_groups=True, include_campaigns=True):
++    """Derive a narrower display without changing the original cache or its age."""
++    membership = dict(result["membership"])
++    groups = membership.get("groups") or {}
++    if not include_groups:
++        groups = {}
++    elif group_ids is not None:
++        groups = {jid: groups[jid] for jid in group_ids if jid in groups}
++    elif campaign is not None:
++        groups = {jid: row for jid, row in groups.items()
++                  if campaign in (row.get("promos") or []) or campaign in (row.get("weekly") or {})}
++    membership["groups"] = groups
++    if not include_campaigns:
++        membership["promos"] = {}
++    return dict(result, membership=membership, enabled=result["enabled"] if include_campaigns else {})
++
++
+ def load(env=None, *, fresh=False, now=None, log=None, campaign=None, group_ids=None,
+          include_groups=True, include_campaigns=True, **inject):
+     env = os.environ if env is None else env
+@@ -103,6 +120,17 @@ def load(env=None, *, fresh=False, now=None, log=None, campaign=None, group_ids=
+         fcntl.flock(lock, fcntl.LOCK_EX)
+         epoch = _epoch(epoch_directory)
+         if not fresh:
++            # A healthy full-directory read already contains every narrower
++            # display. Never use outage data or extend its TTL by copying it.
++            if directory != epoch_directory:
++                full = config._read_json(os.path.join(epoch_directory, CACHE_FILE))
++                if isinstance(full, dict) and not full.get("error"):
++                    try:
++                        broader = _cached(full, identity, epoch, now)
++                    except config.ConfigUnavailable:
++                        broader = None
++                    if broader is not None and not broader.get("degraded"):
++                        return _project(broader, **scope)
+             hit = _cached(config._read_json(path), identity, epoch, now)
+             if hit is not None:
+                 return hit
+diff --git a/workspace/lib/console_live_api.py b/workspace/lib/console_live_api.py
+new file mode 100644
+index 0000000..71f6d2b
+--- /dev/null
++++ b/workspace/lib/console_live_api.py
+@@ -0,0 +1,272 @@
++"""Small authenticated display endpoints over the shared local index."""
++import base64
++import datetime
++import hashlib
++import importlib.machinery
++import importlib.util
++import io
++import json
++import os
++from pathlib import Path
++import re
++import sqlite3
++import threading
++import time
++from urllib.parse import parse_qs
++from zoneinfo import ZoneInfo
++
++import console_live_index
++import group_discovery
++import group_metrics
++
++PAGE_SIZE = 10
++
++
++def digest(value):
++    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
++
++
++def title(slug):
++    return " ".join(part.upper() if part in ("cv", "it", "ict", "ai", "r2") else part.capitalize() for part in slug.split("-"))
++
++
++def cursor_encode(value):
++    return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
++
++
++def cursor_decode(value):
++    try:
++        if len(value) > 4096:
++            raise ValueError()
++        return json.loads(base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)))
++    except Exception as exc:
++        raise ValueError("Invalid page cursor.") from exc
++
++
++class LiveViews:
++    def __init__(self, bridge_path, env=None, *, index=None):
++        self.env = dict(os.environ if env is None else env)
++        self.index = index or console_live_index.Index(self.env)
++        loader = importlib.machinery.SourceFileLoader("console_live_read", str(bridge_path))
++        spec = importlib.util.spec_from_loader(loader.name, loader)
++        self.bridge = importlib.util.module_from_spec(spec)
++        loader.exec_module(self.bridge)
++        self.lock = threading.RLock()
++        self.writes_active = 0
++        self.write_fence = None
++        self.cache = None
++        self.cache_at = 0
++        self.sql = sqlite3.connect(":memory:", check_same_thread=False)
++        self.sql.execute("CREATE TABLE rows(kind TEXT,id TEXT,position INTEGER,body TEXT,PRIMARY KEY(kind,id))")
++
++    def begin_write(self):
++        with self.lock:
++            self.writes_active += 1
++
++    def fence(self):
++        with self.lock:
++            self.writes_active = max(0, self.writes_active - 1)
++            self.write_fence = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
++            self.cache = None
++            self.index.touch()
++
++    def close(self):
++        self.index.close()
++        with self.lock:
++            self.sql.close()
++
++    def _model(self):
++        if self.writes_active:
++            raise console_live_index.NotReady("Waiting for the active write.")
++        config, revision = self.index.snapshot()
++        if self.write_fence:
++            if datetime.datetime.fromisoformat(config["fetchedAt"].replace("Z", "+00:00")) < datetime.datetime.fromisoformat(self.write_fence.replace("Z", "+00:00")):
++                raise console_live_index.NotReady("Waiting for the committed changes to reach the display index.")
++            self.write_fence = None
++        now = time.time()
++        day = datetime.datetime.now(ZoneInfo("Africa/Harare")).date()
++        signature = (revision, str(day))
++        # Local histories may change cap allowances without a config write.
++        if self.cache and self.cache[0] == signature and now - self.cache_at < 30:
++            return self.cache[1]
++        bridge = self.bridge
++        bridge._RESOLVED.clear()
++        bridge._RESOLVED["config"] = bridge.promo_config.resolve(
++            None, env=self.env, membership_path=bridge.MEMBERSHIP,
++            config_loader=lambda *args, **kwargs: config, err=io.StringIO())
++        groups = bridge.group_rows(day)
++        campaigns = bridge.campaign_records(day, include_assets=False)
++        # No image catalogue reads. List copy is a count, not downloaded captions.
++        for row in campaigns:
++            row["captionCount"] = len(row.get("captions", []))
++            row.pop("captions", None)
++            row.pop("images", None)
++            row.pop("assets", None)
++            row.pop("script", None)
++        def band(row):
++            return 0 if row["status"] != "active" else 1 if row["promos"] else 2
++        groups.sort(key=lambda row: (band(row), row["jid"]))
++        campaigns.sort(key=lambda row: (row["hour"] if row["hour"] is not None else 99, row["minute"] or 0, row["slug"]))
++        self.sql.execute("DELETE FROM rows")
++        for kind, rows, key in (("groups", groups, "jid"), ("campaigns", campaigns, "slug")):
++            self.sql.executemany("INSERT INTO rows VALUES(?,?,?,?)", [
++                (kind, row[key], i, json.dumps(row)) for i, row in enumerate(rows)])
++        self.sql.commit()
++        model = {"date": str(day), "groups": groups, "campaigns": campaigns, "config": config,
++                 "context": {"accounts": bridge.accounts(config["membership"]),
++                    "capSettings": bridge.cap_settings(config["membership"]),
++                    "writes": bridge.write_capabilities(), "actions": bridge.action_capabilities()},
++                 "disabledPromos": sorted(bridge.disabled_promos(bridge.manifest(), day))}
++        self.cache = (signature, model)
++        self.cache_at = now
++        return model
++
++    def handle(self, route, query):
++        values = parse_qs(query, keep_blank_values=True)
++        if any(len(v) != 1 for v in values.values()):
++            raise ValueError("Repeated query parameters are not supported.")
++        params = {k: v[0] for k, v in values.items()}
++        allowed = {"q", "status", "line", "campaign", "tier", "cadence", "slot", "cursor", "anchor", "since", "ids", "slug"}
++        if set(params) - allowed or len(params.get("q", "")) > 512:
++            raise ValueError("Invalid display query.")
++        if route not in ("metrics", "discoveries"):
++            self.index.touch()
++        elif self.index.thread is not None:
++            with self.index.condition:
++                self.index.lease_until = self.index.clock() + console_live_index.LEASE_SECONDS
++        self.index.counters["indexedRequests"] += 1
++        with self.lock:
++            if route == "metrics":
++                return self.metrics(params)
++            if route == "status":
++                return {"sync": self.index.status(), "counters": dict(self.index.counters)}
++            if route == "discoveries":
++                membership = self.index.observation_membership(include_ids=True)
++                result = group_discovery.read(membership, self.env)
++                rows = result.get("discoveredGroups", [])
++                rows.sort(key=lambda row: (row["name"] or "", row["jid"]))
++                return self.page("discoveries", rows, params, digest(result), self.index.status(),
++                                 {"discovery": result.get("groupDiscovery")})
++            model = self._model()
++            sync = self.index.status()
++            if route == "navigation":
++                return {"sync": sync, "campaignTotal": len(model["campaigns"]),
++                        "groupsNeedingReview": sum(row["status"] != "active" for row in model["groups"])}
++            if route == "schedule":
++                slots = [{"slug": row["slug"], "name": row["name"],
++                          "minutes": row.get("scheduleMinutes", (row["hour"] or 0) * 60 + (row["minute"] or 0)),
++                          "targetCount": row["targetCount"], "accounts": row["accounts"],
++                          **({"scheduleEdit": row["scheduleEdit"]} if row.get("scheduleEdit") else {})}
++                         for row in model["campaigns"] if row["enabled"] and row["hour"] is not None and row.get("scheduleMinutes", 0) is not None]
++                for slot in slots:
++                    slot["time"] = "%02d:%02d" % divmod(slot["minutes"], 60)
++                payload = {"date": model["date"], "timezone": "Africa/Harare", "slots": slots,
++                           "writes": model["context"]["writes"]}
++                revision = digest(payload)
++                return {"sync": sync, "revision": revision, **({"unchanged": True} if params.get("since") == revision else payload)}
++            if route == "group":
++                jid = params.get("ids", "")
++                if not group_discovery.GROUP.fullmatch(jid):
++                    raise ValueError("Invalid group.")
++                return {"group": next((row for row in model["groups"] if row["jid"] == jid), None), "sync": sync}
++            if route in ("campaign", "detail", "preview"):
++                slug = params.get("slug", "")
++                if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", slug):
++                    raise ValueError("Invalid campaign.")
++                row = next((row for row in model["campaigns"] if row["slug"] == slug), None)
++                if row is None:
++                    return {"campaign": None, "sync": sync}
++                if route == "campaign":
++                    revision = digest([row, model["context"]])
++                    return {"sync": sync, "revision": revision, **({"unchanged": True} if params.get("since") == revision
++                            else {"campaign": row, "context": model["context"]})}
++                day = datetime.date.fromisoformat(model["date"])
++                if route == "detail":
++                    records = self.bridge.campaign_records(day, only_slug=slug, include_assets=True)
++                    return {"campaign": records[0] if records else None, "adAssets": self.bridge.ad_assets_status(), "sync": sync}
++                preview = self.bridge.preview(slug, day)
++                rows = preview.pop("groups")
++                return self.page("preview", rows, params, digest(preview | {"groups": rows}), sync,
++                                 {"variantCount": len(preview["captions"]), "context": model["context"]})
++            if route in ("groups", "campaigns"):
++                self.sql.create_function("matches", 1, lambda body: int(matches(route, json.loads(body), params)))
++                rows = [json.loads(body) for (body,) in self.sql.execute(
++                    "SELECT body FROM rows WHERE kind=? AND matches(body) ORDER BY position", (route,))]
++                revision = digest([model["date"], rows, model["context"], self.deletions() if route == "campaigns" else model["disabledPromos"]])
++                facets = {"lines": [a["id"] for a in model["context"]["accounts"]],
++                          "campaigns": [{"slug": c["slug"], "name": c["name"], "enabled": c["enabled"]} for c in model["campaigns"]],
++                          "tiers": list((model["context"].get("capSettings") or {}).get("bands", {"busy": [], "normal": [], "quiet": []}))}
++                return self.page(route, rows, params, revision, sync,
++                                 {"context": model["context"], "facets": facets, "disabledPromos": model["disabledPromos"],
++                                  "deletions": self.deletions() if route == "campaigns" else []})
++            raise ValueError("Unknown live view.")
++
++    def deletions(self):
++        # Cleanup receipts are synchronized alongside config, never re-queried
++        # by list polling. Older bot checkouts simply have no receipts.
++        return [{"slug": slug, "name": row.get("name", slug), "cleanup": row.get("cleanup", "pending"),
++                 "detail": row.get("detail")} for slug, row in self.index.documents("campaign_deletions")]
++
++    def page(self, kind, rows, params, revision, sync, extra):
++        key = "slug" if kind == "campaigns" else "jid"
++        signature = digest({k: v for k, v in params.items() if k not in ("cursor", "anchor", "since")})
++        offset = 0
++        if params.get("cursor"):
++            point = cursor_decode(params["cursor"])
++            if not isinstance(point, dict) or point.get("kind") != kind or point.get("query") != signature:
++                raise ValueError("Page cursor belongs to another query.")
++            if point.get("revision") != revision:
++                return {"reset": True, "sync": sync, "revision": revision}
++            offset = point.get("offset")
++            if type(offset) is not int or offset < 0:
++                raise ValueError("Invalid page cursor.")
++        elif params.get("anchor"):
++            offset = next((i for i, row in enumerate(rows) if row[key] == params["anchor"]), 0)
++        page = rows[offset:offset + PAGE_SIZE]
++        if kind == "groups":
++            page = [dict(row, note=None) for row in page]
++        next_cursor = cursor_encode({"kind": kind, "query": signature, "revision": revision, "offset": offset + PAGE_SIZE}) if offset + PAGE_SIZE < len(rows) else None
++        self.index.counters["returnedRows"] += len(page) if params.get("since") != revision else 0
++        payload = {"sync": sync, "revision": revision}
++        if params.get("since") == revision:
++            return dict(payload, unchanged=True)
++        return dict(payload, rows=page, nextCursor=next_cursor, total=len(rows), **extra)
++
++    def metrics(self, params):
++        ids = list(dict.fromkeys(params.get("ids", "").split(","))) if params.get("ids") else []
++        if len(ids) > 100 or any(not group_discovery.GROUP.fullmatch(jid) for jid in ids):
++            raise ValueError("Invalid telemetry group selection.")
++        try:
++            membership = self.index.observation_membership()
++        except console_live_index.NotReady:
++            membership = {"defaults": {"accounts": {}}}
++        payload = {"groups": [{"jid": jid} for jid in ids]}
++        group_metrics.attach(payload, membership, self.env, group_ids=ids)
++        return {"rows": payload["groups"], "sync": self.index.status()}
++
++
++def matches(kind, row, params):
++    q = params.get("q", "").strip().lower()
++    if kind == "groups":
++        haystack = " ".join([row.get("name") or "Unnamed group", row["jid"], row["jid"].removesuffix("@g.us")])
++        if params.get("ids") and row["jid"] not in params["ids"].split(","):
++            return False
++        if q not in haystack.lower():
++            return False
++        status = params.get("status", "all")
++        active = row["status"] == "active"
++        if status == "advertising" and (not active or not row["promos"]) or status == "needs-decision" and active:
++            return False
++        if status == "no-campaign" and (not active or row["promos"]):
++            return False
++        if status not in ("all", "advertising", "needs-decision", "no-campaign") and row["status"] != status:
++            return False
++        return (not params.get("line") or row["account"] == params["line"]) and (not params.get("tier") or row["activity"] == params["tier"]) and (not params.get("campaign") or params["campaign"] in row["promos"])
++    haystack = " ".join([title(row["slug"]), row["slug"], row["name"] or "", (row.get("tracking") or {}).get("prefix", "")])
++    running = row["enabled"] and not row.get("error")
++    status = params.get("status", "all")
++    if q not in haystack.lower() or status == "running" and not running or status == "off" and row["enabled"] or status == "failing" and not row.get("error") or status == "no-groups" and (not running or row["targetCount"]):
++        return False
++    hour = row.get("hour")
++    slot = "unscheduled" if hour is None else "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
++    return (not params.get("line") or params["line"] in row["accounts"]) and (not params.get("cadence") or (row["weeklyCount"] > 0) == (params["cadence"] == "weekly")) and (not params.get("slot") or params["slot"] == slot)
+diff --git a/workspace/lib/console_live_index.py b/workspace/lib/console_live_index.py
+new file mode 100644
+index 0000000..c41dc40
+--- /dev/null
++++ b/workspace/lib/console_live_index.py
+@@ -0,0 +1,322 @@
++"""Durable, display-only Firestore index. Never imported by writers or sends.
++
++The single API process owns the leased stream. Readers open independent SQLite
++snapshots. Documents and resume positions publish together, never mid-bootstrap.
++"""
++import contextlib
++import datetime
++import hashlib
++import json
++import os
++import sqlite3
++import threading
++import time
++
++import operator_config as config
++
++SCHEMA = 2
++COLLECTIONS = ("settings", "lines", "campaigns", "groups", "campaign_deletions")
++LEASE_SECONDS = 90
++
++
++class NotReady(Exception):
++    pass
++
++
++def identity(env):
++    creds = config.credentials(env)
++    if not creds:
++        raise config.ConfigUnavailable("no service account configured")
++    return hashlib.sha256(json.dumps([SCHEMA, config.API_ROOT, creds], sort_keys=True).encode()).hexdigest()
++
++
++class Index:
++    def __init__(self, env=None, *, clock=time.time, stream=None):
++        self.env = dict(os.environ if env is None else env)
++        self.clock = clock
++        self.identity = identity(self.env)
++        self.path = os.path.join(config.state_dir(self.env), "console-live.sqlite")
++        os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
++        self.lock = threading.RLock()
++        self.condition = threading.Condition(self.lock)
++        self.lease_until = 0
++        self.stopped = False
++        self.thread = None
++        self.cancel = None
++        self.stream = stream or firestore_stream
++        self.error = None
++        self.connected = False
++        self.counters = {"syncDocuments": 0, "rebuilds": 0, "activeStreams": 0,
++                         "indexedRequests": 0, "returnedRows": 0}
++        fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
++        os.close(fd)
++        with self.db() as db:
++            version = db.execute("PRAGMA user_version").fetchone()[0]
++            if version != SCHEMA:
++                db.execute("DROP TABLE IF EXISTS docs")
++                db.execute("DROP TABLE IF EXISTS meta")
++            db.execute("PRAGMA user_version=%d" % SCHEMA)
++            db.executescript("""
++              PRAGMA journal_mode=WAL;
++              CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK(id=1), identity TEXT,
++                generation INTEGER, revision INTEGER, read_time TEXT, tokens TEXT);
++              CREATE TABLE IF NOT EXISTS docs (generation INTEGER, collection TEXT, id TEXT, body TEXT,
++                PRIMARY KEY(generation, collection, id));
++            """)
++            row = db.execute("SELECT identity FROM meta WHERE id=1").fetchone()
++            if row is None or row[0] != self.identity:
++                db.execute("DELETE FROM docs")
++                db.execute("DELETE FROM meta")
++                db.execute("INSERT INTO meta VALUES(1,?,0,0,NULL,'{}')", (self.identity,))
++            db.execute("DELETE FROM docs WHERE generation != (SELECT generation FROM meta WHERE id=1)")
++        os.chmod(self.path, 0o600)
++
++    @contextlib.contextmanager
++    def db(self):
++        db = sqlite3.connect(self.path, timeout=5)
++        try:
++            with db:
++                yield db
++        finally:
++            db.close()
++
++    def checkpoint(self):
++        with self.db() as db:
++            generation, revision, stamp, tokens = db.execute(
++                "SELECT generation,revision,read_time,tokens FROM meta WHERE id=1").fetchone()
++        return {"generation": generation, "revision": revision, "readTime": stamp, "tokens": json.loads(tokens)}
++
++    def touch(self):
++        with self.condition:
++            self.lease_until = self.clock() + LEASE_SECONDS
++            if self.thread is None:
++                self.thread = threading.Thread(target=self._run, name="console-index", daemon=True)
++                self.thread.start()
++            self.condition.notify_all()
++
++    def status(self):
++        point = self.checkpoint()
++        stamp = point["readTime"]
++        lag = max(0, self.clock() - datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()) if stamp else None
++        return {"revision": str(point["revision"]), "syncedAt": stamp, "lagSeconds": lag,
++                "stale": not self.connected or bool(self.error),
++                "state": "syncing" if not point["readTime"] else "stale" if not self.connected or self.error else "live"}
++
++    def documents(self, collection):
++        with self.db() as db:
++            return [(name, config.decode_fields(json.loads(body))) for name, body in db.execute(
++                "SELECT id,body FROM docs WHERE generation=(SELECT generation FROM meta WHERE id=1) AND collection=? ORDER BY id", (collection,))]
++
++    def observation_membership(self, include_ids=False):
++        """Telemetry needs account numbers; discovery additionally needs IDs only."""
++        raw = {collection: [] for collection in COLLECTIONS}
++        with self.db() as db:
++            db.execute("BEGIN")
++            generation, stamp = db.execute("SELECT generation,read_time FROM meta WHERE id=1").fetchone()
++            if not stamp:
++                raise NotReady("The display index is synchronizing.")
++            for collection, name, body in db.execute(
++                    "SELECT collection,id,body FROM docs WHERE generation=? AND collection IN ('settings','lines')", (generation,)):
++                raw[collection].append((name, json.loads(body)))
++            membership = config.assemble(raw)[0]
++            if include_ids:
++                membership["groups"] = {name: {} for (name,) in db.execute(
++                    "SELECT id FROM docs WHERE generation=? AND collection='groups'", (generation,))}
++        return membership
++
++    def snapshot(self):
++        with self.db() as db:
++            db.execute("BEGIN")
++            generation, revision, stamp = db.execute(
++                "SELECT generation,revision,read_time FROM meta WHERE id=1").fetchone()
++            if not stamp:
++                raise NotReady("The display index is synchronizing. Try again shortly.")
++            raw = {collection: [] for collection in COLLECTIONS}
++            for collection, name, body in db.execute(
++                    "SELECT collection,id,body FROM docs WHERE generation=? ORDER BY collection,id", (generation,)):
++                raw[collection].append((name, json.loads(body)))
++        import campaign_deletion
++        deleted = sorted(campaign_deletion.deleted_slugs(raw))
++        membership, enabled, undecodable = config.assemble(raw)
++        membership, report = config.quarantine(membership, undecodable)
++        enabled, report["campaigns"] = config.campaign_switches(enabled)
++        return {"source": "snapshot", "membership": membership, "enabled": enabled,
++                "report": report, "fetchedAt": stamp, "degraded": None, "deleted": deleted}, str(revision)
++
++    def publish(self, changes, read_time, tokens, *, reset=False):
++        """Called only at a global consistent stream boundary."""
++        with self.lock, self.db() as db:
++            generation, revision = db.execute("SELECT generation,revision FROM meta WHERE id=1").fetchone()
++            if reset:
++                generation += 1
++                self.counters["rebuilds"] += 1
++            changed = reset
++            for collection, name, fields in changes:
++                if collection not in COLLECTIONS:
++                    raise ValueError("unexpected index collection")
++                previous = db.execute("SELECT body FROM docs WHERE generation=? AND collection=? AND id=?",
++                                      (generation, collection, name)).fetchone()
++                body = json.dumps(fields, sort_keys=True) if fields is not None else None
++                if (previous[0] if previous else None) == body:
++                    continue
++                changed = True
++                if fields is None:
++                    db.execute("DELETE FROM docs WHERE generation=? AND collection=? AND id=?", (generation, collection, name))
++                else:
++                    db.execute("INSERT OR REPLACE INTO docs VALUES(?,?,?,?)", (generation, collection, name, body))
++            # Validate shared configuration before making this generation visible.
++            raw = {collection: [] for collection in COLLECTIONS}
++            for collection, name, body in db.execute("SELECT collection,id,body FROM docs WHERE generation=?", (generation,)):
++                raw[collection].append((name, json.loads(body)))
++            membership, enabled, undecodable = config.assemble(raw)
++            config.quarantine(membership, undecodable)
++            config.campaign_switches(enabled)
++            db.execute("UPDATE meta SET generation=?,revision=?,read_time=?,tokens=? WHERE id=1",
++                       (generation, revision + int(changed), read_time, json.dumps(tokens)))
++            db.execute("DELETE FROM docs WHERE generation != ?", (generation,))
++        self.error = None
++
++    def _run(self):
++        delay = 1
++        while True:
++            with self.condition:
++                while not self.stopped and self.clock() >= self.lease_until:
++                    self.connected = False
++                    self.condition.wait(1)
++                if self.stopped:
++                    return
++            try:
++                self.counters["activeStreams"] = 1
++                self.stream(self)
++                delay = 1
++            except Exception as exc:
++                # Curated status only. Exception text may contain credential context.
++                self.error = type(exc).__name__
++                self.connected = False
++                with self.condition:
++                    self.condition.wait(delay)
++                delay = min(delay * 2, 300)
++            finally:
++                self.counters["activeStreams"] = 0
++
++    def close(self):
++        with self.condition:
++            self.stopped = True
++            if self.cancel:
++                self.cancel()
++            self.condition.notify_all()
++        if self.thread:
++            self.thread.join(5)
++
++
++def firestore_stream(index):
++    """Public Listen RPC, with durable resume tokens and an idle cancellation timer."""
++    import base64
++    from google.cloud.firestore_v1.services.firestore import FirestoreClient
++    from google.cloud.firestore_v1.types import ListenRequest, Target
++    from google.oauth2 import service_account
++    from google.protobuf.json_format import MessageToDict
++    from google.protobuf.timestamp_pb2 import Timestamp
++    from google.api_core.exceptions import InvalidArgument, FailedPrecondition
++
++    creds = config.credentials(index.env)
++    client = FirestoreClient(credentials=service_account.Credentials.from_service_account_info(creds))
++    database = "projects/%s/databases/(default)" % creds["project_id"]
++    point = index.checkpoint()
++    bootstrap = not point["readTime"] or point["tokens"].get("reset", False)
++    tokens = {} if bootstrap else point["tokens"].copy()
++    requests = []
++    for number, collection in enumerate(COLLECTIONS, 1):
++        target = Target(target_id=number, query={"parent": database + "/documents",
++                        "structured_query": {"from_": [{"collection_id": collection}]}})
++        if not bootstrap:
++            if str(number) in tokens:
++                target.resume_token = base64.b64decode(tokens[str(number)])
++            else:
++                stamp = Timestamp()
++                stamp.FromJsonString(point["readTime"])
++                target.read_time = stamp
++        requests.append(ListenRequest(database=database, add_target=target))
++    # Keep the bidirectional request stream open after adding the targets.
++    done = threading.Event()
++    def request_iter():
++        yield from requests
++        done.wait()
++    response = None
++    def cancel():
++        if response is not None:
++            response.cancel()
++        else:
++            client.transport.close()
++    index.cancel = cancel
++    def monitor():
++        while not done.wait(0.5):
++            if index.stopped or index.clock() >= index.lease_until:
++                cancel()
++                return
++    threading.Thread(target=monitor, daemon=True).start()
++    pending = []
++    known = {collection: set() if bootstrap else {name for name, _ in index.documents(collection)} for collection in COLLECTIONS}
++    current = set()
++    try:
++        response = client.listen(requests=request_iter(), retry=None,
++                                 metadata=(("google-cloud-resource-prefix", database),))
++        for change in response:
++            kind = change._pb.WhichOneof("response_type")
++            if kind == "document_change":
++                doc = change.document_change.document
++                collection, name = doc.name.rsplit("/", 2)[-2:]
++                known[collection].add(name)
++                pending.append((collection, name, MessageToDict(doc._pb).get("fields", {})))
++                index.counters["syncDocuments"] += 1
++            elif kind in ("document_delete", "document_remove"):
++                # An unfiltered collection target has no legitimate remove-only
++                # event except a reset; a reset rebuilds the entire generation.
++                document = getattr(change, kind).document
++                collection, name = document.rsplit("/", 2)[-2:]
++                known[collection].discard(name)
++                pending.append((collection, name, None))
++            elif kind == "filter":
++                number = change.filter.target_id
++                if not 1 <= number <= len(COLLECTIONS) or len(known[COLLECTIONS[number - 1]]) != change.filter.count:
++                    # Only a mismatch requires a rebuild; normal existence
++                    # filters must never trigger a repeat collection bootstrap.
++                    raise ResetRequired()
++            elif kind == "target_change":
++                target = change.target_change
++                ids = list(target.target_ids) or list(range(1, len(COLLECTIONS) + 1))
++                state = int(target.target_change_type)
++                if state == 2:
++                    raise config.ConfigUnavailable("index target refused")
++                if state == 4:
++                    raise ResetRequired()
++                if state == 3:
++                    current.update(ids)
++                if target.resume_token:
++                    for number in ids:
++                        tokens[str(number)] = base64.b64encode(target.resume_token).decode()
++                if target.read_time and not target.target_ids and current == set(range(1, len(COLLECTIONS) + 1)):
++                    stamp = target._pb.read_time.ToJsonString()
++                    index.publish(pending, stamp, tokens, reset=bootstrap)
++                    pending = []
++                    bootstrap = False
++                    index.connected = True
++    except (ResetRequired, InvalidArgument, FailedPrecondition):
++        # Forget resume positions only. Keep the published generation readable
++        # until a replacement has reached CURRENT for every collection.
++        with index.db() as db:
++            db.execute("UPDATE meta SET tokens=? WHERE id=1", (json.dumps({"reset": True}),))
++        raise
++    except Exception:
++        if not index.stopped and index.clock() < index.lease_until:
++            raise
++    finally:
++        done.set()
++        cancel()
++        index.cancel = None
++        index.connected = False
++        client.transport.close()
++
++
++class ResetRequired(Exception):
++    pass
+diff --git a/workspace/lib/group_metrics.py b/workspace/lib/group_metrics.py
+index 5e9e0f5..4f65793 100644
+--- a/workspace/lib/group_metrics.py
++++ b/workspace/lib/group_metrics.py
+@@ -57,7 +57,7 @@ def bot_hashes(membership):
+     return result
+ 
+ 
+-def activity_observations(root, membership, now, live_enabled=True):
++def activity_observations(root, membership, now, live_enabled=True, group_ids=None):
+     """One SQLite read snapshot; missing/corrupt telemetry never fails a roster."""
+     filename = root / "runtime/whatsapp-activity.sqlite"
+     start = now - WINDOW_MS
+@@ -72,11 +72,15 @@ def activity_observations(root, membership, now, live_enabled=True):
+                 exclusions = (f" AND (sender_hash IS NULL OR sender_hash NOT IN ({placeholders}))"
+                               f" AND (sender_alt_hash IS NULL OR sender_alt_hash NOT IN ({placeholders}))")
+                 args += hashes + hashes
++            selection = ""
++            if group_ids is not None:
++                selection = " AND jid IN (%s)" % (",".join("?" for _ in group_ids) or "NULL")
++                args += list(group_ids)
+             counts = dict(db.execute("SELECT jid, COUNT(*) FROM events WHERE message_at > ? AND message_at <= ?"
+-                                     + exclusions + " GROUP BY jid", args))
++                                     + exclusions + selection + " GROUP BY jid", args))
+             intervals = {}
+             for jid, first, last, live in db.execute(
+-                    "SELECT jid, started_at, through_at, live FROM coverage WHERE through_at >= ? ORDER BY started_at", (start,)):
++                    "SELECT jid, started_at, through_at, live FROM coverage WHERE through_at >= ?" + selection + " ORDER BY started_at", [start] + (list(group_ids) if group_ids is not None else [])):
+                 if not (isinstance(first, int) and isinstance(last, int) and first <= last <= now):
+                     continue
+                 end = now if live_enabled and live == 1 and now - last <= MAX_HEARTBEAT_GAP_MS else last
+@@ -86,13 +90,13 @@ def activity_observations(root, membership, now, live_enabled=True):
+         return {}, {}
+ 
+ 
+-def attach(payload, membership, env=None, now=None):
++def attach(payload, membership, env=None, now=None, group_ids=None):
+     """Enrich only Groups API rows, keeping both console adapters identical."""
+     env = os.environ if env is None else env
+     now = int(time.time() * 1000) if now is None else int(now)
+     root = Path(env.get("OPENCLAW_STATE_DIR") or "/home/joseph/.openclaw")
+     members = member_observations(root, now)
+-    counts, intervals = activity_observations(root, membership, now, env.get("GENAIE_GROUP_ACTIVITY") != "0")
++    counts, intervals = activity_observations(root, membership, now, env.get("GENAIE_GROUP_ACTIVITY") != "0", group_ids)
+     start = now - WINDOW_MS
+     for row in payload.get("groups", []) + payload.get("discoveredGroups", []):
+         jid = row["jid"]
+diff --git a/workspace/lib/test_console_config.py b/workspace/lib/test_console_config.py
+index 7cc719f..1873b31 100644
+--- a/workspace/lib/test_console_config.py
++++ b/workspace/lib/test_console_config.py
+@@ -11,7 +11,7 @@ import urllib.error
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ import console_config as cache
+ import operator_config as config
+-from test_operator_config import Harness, FakeFirestore, JID_A, creds_b64
++from test_operator_config import Harness, FakeFirestore, JID_A, JID_B, creds_b64
+ 
+ 
+ def process_read(env, count, results):
+@@ -38,6 +38,46 @@ class ConsoleCacheTests(Harness):
+     def path(self):
+         return os.path.join(config.state_dir(self.env), cache.CACHE_FILE)
+ 
++    def test_full_directory_seeds_campaign_picker_and_settings_with_zero_reads(self):
++        full = self.display()
++        requests = len(self.firestore.requests)
++        for scope, expected_ids in (({"campaign": "cv"}, {JID_B}),
++                                    ({"campaign": "genaie"}, {JID_A, JID_B}),
++                                    ({"group_ids": [JID_A]}, {JID_A}),
++                                    ({"include_groups": False, "include_campaigns": False}, set())):
++            result = self.display(**scope)
++            self.assertEqual(set(result["membership"]["groups"]), expected_ids)
++            self.assertEqual(result["membership"]["defaults"], full["membership"]["defaults"])
++            if scope.get("include_campaigns") is False:
++                self.assertEqual(result["enabled"], {})
++                self.assertEqual(result["membership"]["promos"], {})
++            self.assertEqual(result["fetchedAt"], full["fetchedAt"])
++            self.assertEqual(len(self.firestore.requests), requests)
++        self.assertEqual(self.display()["membership"], full["membership"])
++
++    def test_broader_cache_does_not_bypass_fresh_expiry_or_mutation(self):
++        self.display()
++        for change in (lambda: None, lambda: self.clock.__setitem__(0, self.clock[0] + cache.TTL_SECONDS),
++                       lambda: cache.invalidate(self.env)):
++            change()
++            before = len(self.firestore.requests)
++            self.display(group_ids=[JID_A], fresh=True)
++            self.assertGreater(len(self.firestore.requests), before)
++        self.display()
++        self.clock[0] += cache.TTL_SECONDS
++        before = len(self.firestore.requests)
++        self.display(campaign="cv")
++        self.assertGreater(len(self.firestore.requests), before)
++
++    def test_mutation_fences_broader_display_cache_for_normal_scoped_reads(self):
++        self.display()
++        self.firestore.store["groups"][JID_A]["name"] = config.encode_value("Changed")
++        cache.invalidate(self.env)
++        before = len(self.firestore.requests)
++        result = self.display(group_ids=[JID_A])
++        self.assertGreater(len(self.firestore.requests), before)
++        self.assertEqual(result["membership"]["groups"][JID_A]["name"], "Changed")
++
+     def test_display_reuses_config_until_expiry_but_runtime_load_is_live(self):
+         first = self.display()
+         requests = len(self.firestore.requests)
+diff --git a/workspace/lib/test_console_live.py b/workspace/lib/test_console_live.py
+new file mode 100644
+index 0000000..5226db9
+--- /dev/null
++++ b/workspace/lib/test_console_live.py
+@@ -0,0 +1,232 @@
++"""Live display budgets and durable synchronization behavior, without network."""
++import datetime
++import importlib.machinery
++import json
++import os
++from pathlib import Path
++import sys
++import threading
++import time
++import unittest
++from unittest.mock import Mock, patch
++
++sys.path.insert(0, os.path.dirname(__file__))
++import console_live_index as live
++import console_live_api as api
++import operator_config as config
++from test_operator_config import Harness, JID_A, JID_B, JID_C
++
++
++class LiveIndexTests(Harness):
++    def setUp(self):
++        super().setUp()
++        self.env["GENAIE_CONFIG_SOURCE"] = "firestore"
++        self.index = live.Index(self.env, clock=lambda: self.clock[0])
++        self.addCleanup(self.index.close)
++        self.index.touch = Mock()
++
++    def seed(self):
++        changes = [(collection, name, fields) for collection, docs in self.firestore.store.items()
++                   if collection in live.COLLECTIONS for name, fields in docs.items()]
++        self.index.publish(changes, "2026-11-10T10:00:00Z", {"1": "resume"}, reset=True)
++
++    def service(self):
++        self.seed()
++        view = api.LiveViews(Path(__file__).resolve().parents[1] / "bin/console-read", self.env, index=self.index)
++        self.addCleanup(view.close)
++        return view
++
++    def test_bootstrap_is_unavailable_until_atomic_publish_and_survives_restart(self):
++        with self.assertRaises(live.NotReady):
++            self.index.snapshot()
++        self.seed()
++        restarted = live.Index(self.env)
++        self.addCleanup(restarted.close)
++        self.assertEqual(restarted.snapshot()[0]["membership"]["groups"][JID_A]["name"], "Alpha")
++        self.assertEqual(restarted.checkpoint()["tokens"], {"1": "resume"})
++
++    def test_incremental_change_delete_and_resume_position_publish_together(self):
++        self.seed()
++        self.index.publish([("groups", JID_C, None)], "2026-11-10T10:01:00Z", {"1": "next"})
++        self.assertNotIn(JID_C, self.index.snapshot()[0]["membership"]["groups"])
++        self.assertEqual(self.index.checkpoint()["tokens"], {"1": "next"})
++        before = self.index.checkpoint()
++        with self.assertRaises(config.ConfigInvalid):
++            self.index.publish([("settings", "defaults", None)], "2026-11-10T10:02:00Z", {"1": "bad"})
++        self.assertEqual(self.index.checkpoint(), before)
++        self.assertIn(JID_A, self.index.snapshot()[0]["membership"]["groups"])
++
++    def test_retired_campaign_does_not_reappear_in_stale_schedule_or_lists(self):
++        self.seed()
++        self.index.publish([("campaigns", "cv", config.encode_fields({"deleted": True, "enabled": False}))],
++                           "2026-11-10T10:01:00Z", {})
++        result, _ = self.index.snapshot()
++        self.assertIn("cv", result["deleted"])
++        self.assertNotIn("cv", result["membership"]["promos"])
++
++    def test_reset_replaces_generation_without_old_documents_or_resume_tokens(self):
++        self.seed()
++        changes = [(collection, name, fields) for collection, docs in self.firestore.store.items()
++                   if collection in live.COLLECTIONS for name, fields in docs.items() if name != JID_C]
++        self.index.publish(changes, "2026-11-10T10:03:00Z", {"2": "reset"}, reset=True)
++        self.assertNotIn(JID_C, self.index.snapshot()[0]["membership"]["groups"])
++        self.assertEqual(self.index.checkpoint()["generation"], 2)
++
++    def test_unchanged_heartbeat_does_not_increment_content_revision(self):
++        self.seed()
++        old = self.index.checkpoint()["revision"]
++        self.index.publish([], "2026-11-10T10:01:00Z", {"1": "heartbeat"})
++        self.assertEqual(self.index.checkpoint()["revision"], old)
++        self.assertEqual(self.index.checkpoint()["readTime"], "2026-11-10T10:01:00Z")
++
++    def test_incompatible_schema_rebuilds_instead_of_serving_an_unknown_layout(self):
++        self.seed()
++        with self.index.db() as db:
++            db.execute("PRAGMA user_version=999")
++        reopened = live.Index(self.env)
++        self.addCleanup(reopened.close)
++        with self.assertRaises(live.NotReady):
++            reopened.snapshot()
++
++    def test_identity_change_discards_other_credentials_index(self):
++        self.seed()
++        from test_operator_config import creds_b64
++        other = live.Index(dict(self.env, GCP_SERVICE_ACCOUNT_B64=creds_b64(project_id="other")))
++        self.addCleanup(other.close)
++        with self.assertRaises(live.NotReady):
++            other.snapshot()
++
++    def test_warm_pages_search_scroll_schedule_and_metrics_have_zero_firestore_calls(self):
++        view = self.service()
++        # Inject enough indexed rows to force pagination; no Firestore request.
++        changes = [("groups", "%s@g.us" % n, config.encode_fields({"name": "Market %s" % n,
++                    "status": "active", "account": "default", "promos": ["cv"]})) for n in range(10000, 10025)]
++        self.index.publish(changes, "2026-11-10T10:01:00Z", {})
++        with patch.object(config, "fetch", side_effect=AssertionError("Firestore fetch")), \
++             patch.object(config, "get_document", side_effect=AssertionError("Firestore point read")), \
++             patch.object(config, "list_documents", side_effect=AssertionError("Firestore scan")):
++            first = view.handle("groups", "")
++            self.assertEqual(len(first["rows"]), 10)
++            second = view.handle("groups", "cursor=" + first["nextCursor"])
++            self.assertEqual(len(second["rows"]), 10)
++            self.assertFalse(set(row["jid"] for row in first["rows"]) & set(row["jid"] for row in second["rows"]))
++            search = view.handle("groups", "q=Market+10024&status=active&line=default")
++            self.assertEqual([row["jid"] for row in search["rows"]], ["10024@g.us"])
++            self.assertTrue(view.handle("groups", "since=" + first["revision"])["unchanged"])
++            schedule = view.handle("schedule", "")
++            self.assertNotIn("groups", schedule)
++            self.assertTrue(view.handle("schedule", "since=" + schedule["revision"])["unchanged"])
++            self.assertEqual(len(view.handle("metrics", "ids=" + JID_A)["rows"]), 1)
++            view.handle("discoveries", "")
++            view.handle("campaigns", "")
++
++    def test_observation_endpoints_do_not_load_full_indexed_config(self):
++        view = self.service()
++        with patch.object(self.index, "snapshot", side_effect=AssertionError("full membership read")):
++            self.assertEqual(len(view.handle("metrics", "ids=" + JID_A)["rows"]), 1)
++            self.assertEqual(view.handle("discoveries", "")["rows"], [])
++
++    def test_stale_cursor_resets_and_filter_bound_cursor_is_refused(self):
++        view = self.service()
++        rows = [{"jid": str(i), "name": "Group"} for i in range(25)]
++        first = view.page("groups", rows, {}, "v1", {}, {})
++        self.assertTrue(view.page("groups", rows, {"cursor": first["nextCursor"]}, "v2", {}, {})["reset"])
++        with self.assertRaises(ValueError):
++            view.page("groups", rows, {"cursor": first["nextCursor"], "q": "other"}, "v1", {}, {})
++        anchor = view.page("groups", rows, {"anchor": "12"}, "v1", {}, {})
++        self.assertEqual(anchor["rows"][0]["jid"], "12")
++
++    def test_post_write_fence_refuses_older_index_until_consistent_boundary(self):
++        view = self.service()
++        view.write_fence = "2026-11-10T10:01:00Z"
++        with self.assertRaises(live.NotReady):
++            view.handle("groups", "")
++        # Local metrics remain available while config waits for the commit.
++        self.assertEqual(view.handle("metrics", "ids=" + JID_A)["rows"][0]["jid"], JID_A)
++        self.index.publish([], "2026-11-10T10:02:00Z", {})
++        self.assertTrue(view.handle("groups", "")["rows"])
++
++    def test_request_validation_and_telemetry_are_bounded(self):
++        view = self.service()
++        for query in ("unknown=1", "q=a&q=b", "cursor=invalid", "ids=not-a-group"):
++            with self.assertRaises(ValueError):
++                view.handle("metrics" if query.startswith("ids") else "groups", query)
++
++
++class StreamProtocolTests(LiveIndexTests):
++    def test_sdk_initial_sync_resume_and_matching_existence_filter(self):
++        from google.cloud.firestore_v1.types import ListenResponse
++        from google.protobuf.timestamp_pb2 import Timestamp
++        from google.protobuf.json_format import ParseDict
++        from google.cloud.firestore_v1.types import Document
++        target_ids = list(range(1, len(live.COLLECTIONS) + 1))
++        events = []
++        for collection, docs in self.firestore.store.items():
++            if collection not in live.COLLECTIONS:
++                continue
++            for name, fields in docs.items():
++                document = Document()
++                ParseDict({"name": "projects/test/databases/(default)/documents/%s/%s" % (collection, name), "fields": fields}, document._pb)
++                events.append(ListenResponse(document_change={"document": document, "target_ids": [live.COLLECTIONS.index(collection) + 1]}))
++        events.append(ListenResponse(target_change={"target_change_type": 3, "target_ids": target_ids}))
++        events.append(ListenResponse(filter={"target_id": 4, "count": len(self.firestore.store["groups"])}))
++        events.append(ListenResponse(target_change={"target_change_type": 0, "read_time": datetime.datetime(2026, 11, 10, 10, tzinfo=datetime.timezone.utc), "resume_token": b"saved"}))
++        class Responses:
++            def __init__(self, values): self.values = values
++            def __iter__(self): return iter(self.values)
++            def cancel(self): pass
++        requests = []
++        client = Mock()
++        def listen(*, requests: object, metadata, retry):
++            self.assertEqual(metadata, (("google-cloud-resource-prefix", "projects/genaie-test/databases/(default)"),))
++            self.assertIsNone(retry)
++            iterator = iter(requests)
++            for _ in live.COLLECTIONS:
++                captured.append(next(iterator))
++            return Responses(events)
++        self.index.lease_until = self.clock[0] + 90
++        captured = []
++        client.listen.side_effect = listen
++        with patch("google.cloud.firestore_v1.services.firestore.FirestoreClient", return_value=client), \
++             patch("google.oauth2.service_account.Credentials.from_service_account_info", return_value=Mock()):
++            live.firestore_stream(self.index)
++            self.assertTrue(self.index.checkpoint()["readTime"])
++            self.assertFalse(any(request.add_target.resume_token for request in captured))
++            captured.clear()
++            events.clear()
++            live.firestore_stream(self.index)
++            self.assertTrue(all(request.add_target.resume_token == b"saved" for request in captured))
++        self.assertEqual(self.index.counters["rebuilds"], 1)
++
++
++
++class LeaseTests(Harness):
++    def test_many_consumers_share_one_stream_and_idle_disconnects(self):
++        entered = threading.Event()
++        calls = []
++        def stream(index):
++            calls.append(1)
++            index.connected = True
++            entered.set()
++            while not index.stopped and index.clock() < index.lease_until:
++                time.sleep(.01)
++        index = live.Index(self.env, clock=lambda: self.clock[0], stream=stream)
++        self.addCleanup(index.close)
++        for _ in range(20):
++            index.touch()
++        self.assertTrue(entered.wait(1))
++        self.assertEqual(len(calls), 1)
++        self.clock[0] += 91
++        deadline = time.time() + 1
++        while index.connected and time.time() < deadline:
++            time.sleep(.01)
++        self.assertFalse(index.connected)
++        index.touch()
++        deadline = time.time() + 1
++        while len(calls) < 2 and time.time() < deadline:
++            time.sleep(.01)
++        self.assertEqual(len(calls), 2)
++
++
++if __name__ == "__main__":
++    unittest.main()

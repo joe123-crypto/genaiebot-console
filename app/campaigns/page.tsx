@@ -1,76 +1,19 @@
 import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
-import { BotError, Empty, PageHead } from "@/app/_components/ui";
-import { BotUnavailableError, getCampaignsPayload } from "@/src/lib/bot-client";
-import { loadOverview, parseCampaignFilter } from "@/src/domains/console";
-import { plural } from "@/src/lib/format";
-import { canDeleteCampaign, canWrite } from "@/src/lib/write-capabilities";
+import { PageHead } from "@/app/_components/ui";
+import { LiveCampaigns } from "./_components/live-campaigns";
+import { getLiveView } from "@/src/lib/live-client";
+import { BotUnavailableError } from "@/src/lib/bot-client";
+import { parseCampaignFilter, campaignFilterQuery } from "@/src/domains/campaign-filter";
 import { WRITES_ENABLED } from "@/src/config";
-import { CampaignsTable } from "@/app/campaigns/_components/campaigns-table";
-import type { Campaign, CampaignDeletion } from "@/src/lib/types";
-
+import type { CampaignRow, LivePage } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
-
-/** Saying only "10 campaigns" would present a switched-off one as if it runs.
- *  This counts the record rather than the filtered view: how many campaigns
- *  there are does not change because someone searched, and the table reports
- *  its own count. */
-function subtitle(campaigns: Campaign[]) {
-  const off = campaigns.filter((campaign) => !campaign.enabled).length;
-  const all = `${plural(campaigns.length, "campaign")}, in the order they run through the day.`;
-  return off === 0 ? all : `${all} ${off} switched off and never posting.`;
-}
-
-export default async function CampaignsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  // Awaited before the read, so the error path below is untouched by it.
-  const initialFilter = parseCampaignFilter(await searchParams);
-
-  let campaigns: Campaign[];
-  let deletions: CampaignDeletion[];
-  try {
-    const payload = await getCampaignsPayload();
-    campaigns = payload.campaigns;
-    deletions = payload.deletions ?? [];
-  } catch (error) {
-    if (!(error instanceof BotUnavailableError)) throw error;
-    return (
-      <Shell>
-        <PageHead title="Campaigns" actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
-        <BotError detail={error.detail} />
-      </Shell>
-    );
-  }
-
-  // Already read for this request by the layout, so this costs nothing. A read
-  // that failed leaves `writes` undefined, which every gate reads as "cannot",
-  // never as "everything is writable".
-  const loaded = await loadOverview();
-  const writes = loaded.ok ? loaded.overview.writes : undefined;
-
-  return (
-    <Shell overview={loaded.ok ? loaded.overview : undefined}>
-      <PageHead title="Campaigns" subtitle={subtitle(campaigns)} actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
-
-      {deletions.map((deletion) => <div className="banner" role="status" key={deletion.slug}>
-        {deletion.name} deleted. {deletion.cleanup === "complete" ? "Cleanup complete." : "Schedule, assignment or picture cleanup is pending; the bot retries automatically."}
-        {deletion.detail ? ` ${deletion.detail}` : ""}
-      </div>)}
-
-      {campaigns.length === 0 ? (
-        <Empty>No campaigns are declared.</Empty>
-      ) : (
-        <CampaignsTable
-          campaigns={campaigns}
-          initialFilter={initialFilter}
-          writesEnabled={WRITES_ENABLED}
-          switchGate={canWrite(WRITES_ENABLED, writes, "campaigns", "enabled")}
-          deleteGate={canDeleteCampaign(WRITES_ENABLED, writes)}
-        />
-      )}
-    </Shell>
-  );
+export default async function CampaignsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const filter = parseCampaignFilter(await searchParams);
+  let initial: LivePage<CampaignRow> | null = null;
+  let initialError: string | undefined;
+  try { initial = await getLiveView("campaigns", campaignFilterQuery(filter)); }
+  catch (error) { if (!(error instanceof BotUnavailableError)) throw error; initialError = error.detail; }
+  return <Shell live><PageHead title="Campaigns" actions={<Link prefetch={false} className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
+    <LiveCampaigns initial={initial} initialError={initialError} filter={filter} writable={WRITES_ENABLED} /></Shell>;
 }
