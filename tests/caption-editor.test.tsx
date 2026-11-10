@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ save: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }) }));
 vi.mock("@/app/campaigns/actions", () => ({ saveCaptionsAction: mocks.save }));
-vi.mock("@/src/lib/caption-ai-demo", () => ({ demoCaptionReply: mocks.reply }));
+vi.mock("@/app/campaigns/caption-ai-actions", () => ({ suggestCaptionAction: mocks.reply }));
 import { CaptionEditor, CaptionEditorScreen } from "@/app/campaigns/_components/caption-editor";
 import { captionDraftKey } from "@/src/lib/caption-editor";
 import { healthy, failure, preview, success } from "./fixtures/campaign-detail";
@@ -19,7 +19,7 @@ async function chat() { await act(async () => { fireEvent.click(screen.getByRole
 beforeEach(() => {
   sessionStorage.clear(); vi.clearAllMocks();
   mocks.save.mockResolvedValue({ ok: true });
-  mocks.reply.mockResolvedValue({ message: "A shorter demo suggestion", suggestion: "Water $25\nCall {bot_number} {ref_link}" });
+  mocks.reply.mockResolvedValue({ ok: true, reply: { message: "A shorter suggestion", suggestion: "Water $25\nCall {bot_number} {ref_link}" } });
 });
 afterEach(cleanup);
 
@@ -93,6 +93,18 @@ describe("caption editing", () => {
     expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("uses the fresh caption snapshot returned by a save conflict when resetting", async () => {
+    const latest = ["Latest from the bot", props.captions[1]];
+    mocks.save.mockResolvedValueOnce({ ok: false, detail: "Captions changed since you started editing.", latestCaptions: latest });
+    mount(); edit(); await save();
+    expect(text().value).toContain("Edited");
+    expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Reset to latest" }));
+    expect(text().value).toBe("Latest from the bot");
+    edit("Latest edited"); await save();
+    expect(mocks.save).toHaveBeenLastCalledWith(props.slug, ["Latest edited", props.captions[1]], latest);
+  });
+
   it("restores drafts on remount, isolates variants, and keeps old baselines to detect conflicts", () => {
     const view = mount(); edit(); view.unmount();
     const other = mount({ variant: "2" }); expect(text().value).toBe(props.captions[1]); other.unmount();
@@ -160,11 +172,59 @@ describe("caption editing", () => {
   });
 });
 
-describe("AI demo chat", () => {
-  it("labels simulated AI and applies only on request, with undo and no automatic save", async () => {
+describe("OpenRouter AI chat", () => {
+  it("keeps manual editing and saving available when OpenRouter is not configured", () => {
+    mount({ aiUnavailableReason: "Configure OPENROUTER_API_KEY on the server." }); edit();
+    expect(text().disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Make it shorter" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Configure OPENROUTER_API_KEY on the server.")).toBeDefined();
+  });
+
+  it("shows provider errors with an explicit retry and leaves the caption unchanged", async () => {
+    mocks.reply.mockResolvedValueOnce({ ok: false, detail: "OpenRouter is busy." });
     mount(); await chat();
-    expect(screen.getByText("AI demo")).toBeDefined();
-    expect(mocks.reply).toHaveBeenCalledWith("Make it shorter", props.captions[0]);
+    expect(screen.getByRole("alert").textContent).toBe("OpenRouter is busy.");
+    expect(text().value).toBe(props.captions[0]);
+    expect(screen.queryByRole("button", { name: "Apply suggestion" })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry request" })); });
+    expect(screen.getByRole("button", { name: "Apply suggestion" })).toBeDefined();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps the original CTA request and rejection in context when the user follows up about placeholders", async () => {
+    const original = "I want there added a call to action with a link to the whatsapp bot number:+263785632943";
+    mocks.reply.mockResolvedValueOnce({ ok: false, detail: "The suggestion did not preserve template placeholders." });
+    mount();
+    const composer = screen.getByRole("textbox", { name: "Message the caption assistant" });
+    fireEvent.change(composer, { target: { value: original } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send message" })); });
+    fireEvent.change(composer, { target: { value: "keep all placeholders" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send message" })); });
+    const followup = mocks.reply.mock.calls[1][0];
+    expect(followup.prompt).toBe("keep all placeholders");
+    expect(followup.history[0]).toEqual({ role: "user", content: original });
+    expect(JSON.parse(followup.history[1].content)).toEqual({ message: "The suggestion did not preserve template placeholders.", suggestion: null, state: "rejected" });
+    expect(text().value).toBe(props.captions[0]);
+  });
+
+  it("sends recent conversation, application state and the current draft for follow-up requests", async () => {
+    mount(); await chat();
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+    edit("Manual follow-up {bot_number} {ref_link}");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message the caption assistant" }), { target: { value: "Make that friendlier" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send message" })); });
+    const request = mocks.reply.mock.calls[1][0];
+    expect(request.caption).toBe("Manual follow-up {bot_number} {ref_link}");
+    expect(request.prompt).toBe("Make that friendlier");
+    expect(request.history[0]).toEqual({ role: "user", content: "Make it shorter" });
+    expect(JSON.parse(request.history[1].content)).toMatchObject({ state: "applied", suggestion: "Water $25\nCall {bot_number} {ref_link}" });
+  });
+
+  it("labels the model and applies only on request, with undo and no automatic save", async () => {
+    mount(); await chat();
+    expect(screen.getByText("DeepSeek V4.1 Flash")).toBeDefined();
+    expect(mocks.reply).toHaveBeenCalledWith({ prompt: "Make it shorter", caption: props.captions[0], history: [] });
     expect(text().value).toBe(props.captions[0]);
     fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
     expect(text().value).toBe("Water $25\nCall {bot_number} {ref_link}");
@@ -191,20 +251,20 @@ describe("AI demo chat", () => {
   });
 
   it("marks suggestions stale when typing continued while the reply was pending", async () => {
-    let resolve!: (value: { message: string; suggestion: string }) => void;
+    let resolve!: (value: { ok: true; reply: { message: string; suggestion: string } }) => void;
     mocks.reply.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     mount(); await chat();
-    expect(screen.getByText("Preparing a demo suggestion…")).toBeDefined();
+    expect(screen.getByText("Thinking about your caption…")).toBeDefined();
     edit("While waiting");
     text().focus();
-    await act(async () => resolve({ message: "Done", suggestion: "Older text" }));
+    await act(async () => resolve({ ok: true, reply: { message: "Done", suggestion: "Older text" } }));
     expect(document.activeElement).toBe(text());
     expect(screen.queryByRole("button", { name: "Apply suggestion" })).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerate" })).toBeDefined();
   });
 
   it("supports typed prompts and Enter, preserves multiline composition, and prevents duplicate requests", async () => {
-    let resolve!: (value: { message: string }) => void;
+    let resolve!: (value: { ok: true; reply: { message: string } }) => void;
     mocks.reply.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     mount();
     const input = screen.getByRole("textbox", { name: "Message the caption assistant" });
@@ -212,11 +272,11 @@ describe("AI demo chat", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(mocks.reply).not.toHaveBeenCalled();
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
-    expect(mocks.reply).toHaveBeenCalledWith("Professional\nplease", props.captions[0]);
+    expect(mocks.reply).toHaveBeenCalledWith({ prompt: "Professional\nplease", caption: props.captions[0], history: [] });
     fireEvent.change(input, { target: { value: "Another request" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(mocks.reply).toHaveBeenCalledOnce();
-    await act(async () => resolve({ message: "Done" }));
+    await act(async () => resolve({ ok: true, reply: { message: "Done" } }));
     expect(document.activeElement).toBe(input);
   });
 

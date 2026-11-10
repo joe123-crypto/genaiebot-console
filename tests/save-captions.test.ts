@@ -39,8 +39,14 @@ describe("saveCaptionsAction", () => {
   it("refuses a stale draft rather than overwriting newer captions", async () => {
     const save = await load();
     preview.mockResolvedValue({ captions: ["Changed elsewhere"] });
-    expect((await save("borehole", ["Edited"], ["Original"])).ok).toBe(false);
+    expect(await save("borehole", ["Edited"], ["Original"])).toMatchObject({ ok: false, latestCaptions: ["Changed elsewhere"] });
     expect(update).not.toHaveBeenCalled();
+  });
+  it("validates the original snapshot before comparing or writing", async () => {
+    const save = await load();
+    expect((await save("borehole", ["Edited"], null as unknown as string[])).ok).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(preview).not.toHaveBeenCalled();
   });
   it("attributes the write, preserves templates, and refreshes affected screens", async () => {
     const save = await load();

@@ -14,8 +14,8 @@ import type { CampaignDetail } from "@/src/domains/campaign-detail";
 
 const UNAVAILABLE = "Saving is unavailable until the required campaign data refreshes successfully. Your draft is kept here.";
 
-export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnavailableReason }: {
-  slug: string; variant: string; detail: CampaignDetail; writable: boolean; saveUnavailableReason?: string;
+export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnavailableReason, aiUnavailableReason }: {
+  slug: string; variant: string; detail: CampaignDetail; writable: boolean; saveUnavailableReason?: string; aiUnavailableReason?: string;
 }) {
   // Retain successful reads across polling failures without leaving saves armed.
   const [lastPreview, setLastPreview] = useState(detail.preview.ok ? detail.preview : null);
@@ -37,15 +37,15 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
     </div> : null}
     {preview && campaign?.data ? <CaptionEditor key={`${slug}:${variant}`} slug={slug} variant={variant}
       name={campaign.data.source === "console" ? campaign.data.name : campaignTitle(slug)} captions={preview.data.captions}
-      writable={writable} saveUnavailableReason={reason} />
+      writable={writable} saveUnavailableReason={reason} aiUnavailableReason={aiUnavailableReason} />
       : <><PageHead title="Caption editor" subtitle="Load the campaign to edit its caption." />
         <section className="card card-pad"><p>Caption data is unavailable. Retry to load the editor.</p>
           <Link className="link" href={`/campaigns/${encodeURIComponent(slug)}`}>Back to campaign</Link></section></>}
   </>;
 }
 
-export function CaptionEditor({ slug, variant, name, captions, writable, saveUnavailableReason }: {
-  slug: string; variant: string; name: string; captions: string[]; writable: boolean; saveUnavailableReason?: string;
+export function CaptionEditor({ slug, variant, name, captions, writable, saveUnavailableReason, aiUnavailableReason }: {
+  slug: string; variant: string; name: string; captions: string[]; writable: boolean; saveUnavailableReason?: string; aiUnavailableReason?: string;
 }) {
   const router = useRouter();
   const index = variant === "new" ? captions.length : Number(variant) - 1;
@@ -58,12 +58,14 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
   const [undo, setUndo] = useState<string | null>(null);
   const [resetCount, setResetCount] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [conflict, setConflict] = useState<{ received: string[]; latest: string[] } | null>(null);
   const finished = useRef(false);
   const submitting = useRef(false);
   const initialCaptions = useRef(captions);
   const key = captionDraftKey(slug, variant);
   const back = `/campaigns/${encodeURIComponent(slug)}`;
-  const stale = JSON.stringify(draft.base) !== JSON.stringify(captions);
+  const latestCaptions = conflict && JSON.stringify(conflict.received) === JSON.stringify(captions) ? conflict.latest : captions;
+  const stale = JSON.stringify(draft.base) !== JSON.stringify(latestCaptions);
   const validVariant = variant === "new" || (index >= 0 && index < draft.base.length);
   const dirty = draft.text !== (variant === "new" ? "" : draft.base[index] ?? "");
   const locked = !ready || !writable || pending;
@@ -102,7 +104,7 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
   }
 
   function reset() {
-    setDraft({ version: 1, base: captions, text: variant === "new" ? "" : captions[index] ?? "" });
+    setDraft({ version: 1, base: latestCaptions, text: variant === "new" ? "" : latestCaptions[index] ?? "" });
     setRevision((previous) => previous + 1);
     setUndo(null);
     setError(null);
@@ -122,7 +124,11 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
     startTransition(async () => {
       try {
         const outcome = await saveCaptionsAction(slug, nextCaptions, draft.base);
-        if (!outcome.ok) { setError(outcome.detail); return; }
+        if (!outcome.ok) {
+          if (outcome.latestCaptions) setConflict({ received: captions, latest: outcome.latestCaptions });
+          setError(outcome.detail);
+          return;
+        }
         clearAndLeave();
       } catch {
         setError("Could not confirm the save. Your edits are still here; check the connection and try again.");
@@ -174,7 +180,7 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
         </div><p className="card-note caption-preview-note">Template preview. Each group’s reference and contact link are added when sent.</p></div>
       </section>
     </div>
-    <CaptionAssistant key={resetCount} text={draft.text} revision={revision} disabled={locked}
+    <CaptionAssistant key={resetCount} text={draft.text} revision={revision} disabled={locked} unavailableReason={aiUnavailableReason}
       onApply={(suggestion, sourceRevision) => {
         if (locked || sourceRevision !== revision) return;
         const previous = draft.text;

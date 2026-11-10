@@ -116,11 +116,24 @@ with a blank caption. Edit the template manually with a live preview, then use
 as `{bot_number}`, `{ref}` and `{ref_link}` remain editable; group-specific
 substitutions appear in the campaign's saved previews.
 
-The editor's bottom chat panel is an **AI demo**, with simulated suggestions for
-shortening, professional tone, and calls to action. Suggestions preserve factual
-details and placeholders, require **Apply suggestion**, and can be undone before
-further manual edits. Changing the caption makes previous suggestions stale.
-There is no AI backend, API key, or automatic save from chat.
+The editor's bottom chat panel uses **OpenRouter** with
+`deepseek/deepseek-v4.1-flash-1017`, matching the OpenClaw bot. Set
+`OPENROUTER_API_KEY` on the console server (in `.env.local` for development).
+The key stays server-side. AI is unavailable when it is missing; manual editing
+and saving continue to work.
+
+The assistant receives the current caption and up to ten recent chat messages.
+It supports follow-up edits and returns a complete suggestion or a clarifying
+question. **Apply suggestion** updates the draft and supports Undo; **Save caption**
+is the separate action that commits it through the bot's caption writer. The
+provider is instructed to preserve facts unless changes are requested, and the
+server rejects suggestions that change template placeholders. Added calls to
+action and links can be returned as append-only edits, which the server joins
+to the unchanged original caption.
+Rejected responses stay in the chat context so follow-up corrections retain the
+original request. Manual edits make previous suggestions stale. Provider
+failures keep the caption and conversation
+visible and offer a manual retry; paid calls are never retried automatically.
 
 Editor drafts survive navigation and reloads in the same tab using session
 storage, separately for each campaign and variant. **Back to campaign** keeps the
