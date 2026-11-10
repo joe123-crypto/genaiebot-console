@@ -67,6 +67,14 @@ export function canDeleteCampaign(consoleWrites: boolean, writes: WriteCapabilit
   return gate;
 }
 
+export function canEditSchedule(consoleWrites: boolean, writes: WriteCapabilities | undefined): WriteGate {
+  const gate = botGate(consoleWrites, writes);
+  if (!gate.allowed) return gate;
+  if (!writes?.affectsProduction) return { allowed: false, reason: "Schedule editing requires live Firestore configuration." };
+  if (!writes.scheduleEditing?.edit) return { allowed: false, reason: writes.scheduleEditing?.reason ?? "Deploy the companion bot update for schedule editing to save times here." };
+  return gate;
+}
+
 export const NO_ACTIONS_REASON =
   "This bot cannot act on WhatsApp groups from the console yet. Deploy genaebot with console group actions to use this.";
 export const ACTIONS_OFF_REASON =

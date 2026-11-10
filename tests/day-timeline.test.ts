@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+const mock = vi.hoisted(() => ({ save: vi.fn() }));
+vi.mock("@/app/schedule/actions", () => ({ saveScheduleAction: mock.save }));
 import { DayTimeline } from "@/app/schedule/_components/day-timeline";
 import type { DaySlot } from "@/src/domains/schedule";
 
@@ -35,7 +37,7 @@ beforeAll(() => {
   };
 });
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 /** Five groups is a 20-minute worst case, so 09:00 clears 10:00 but 09:45 does not. */
 function slot(slug: string, minutes: number, accounts: Record<string, number> = { default: 5 }): DaySlot {
@@ -46,6 +48,7 @@ function slot(slug: string, minutes: number, accounts: Record<string, number> = 
     minutes,
     targetCount: 5,
     accounts,
+    scheduleEdit: { revision: "a".repeat(64), editable: true, status: "ready", confirmedMinutes: minutes },
   };
 }
 
@@ -53,6 +56,7 @@ const props = {
   slots: [slot("alpha", 540), slot("beta", 600)],
   nowMinutes: 480,
   timezone: "Africa/Harare",
+  date: "2026-11-10",
 };
 
 function mount(overrides: Partial<typeof props> & { saveUnavailableReason?: string } = {}) {
@@ -162,6 +166,75 @@ describe("what a drafted time says about the day", () => {
 });
 
 describe("saving", () => {
+  it("saves only moved rows and adopts the confirmed times without waiting for a refresh", async () => {
+    mock.save.mockResolvedValue({ ok: true, campaigns: [{ slug: "alpha", minutes: 535, scheduleEdit: { revision: "b".repeat(64), editable: true, status: "ready", confirmedMinutes: 535 } }] });
+    mount();
+    drag(bar(), -5);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText("Times saved and confirmed by the scheduler.")).toBeDefined());
+    expect(mock.save).toHaveBeenCalledWith({ date: "2026-11-10", timezone: "Africa/Harare", changes: [{ slug: "alpha", time: "08:55", expectedRevision: "a".repeat(64) }] });
+    expect(screen.queryByRole("button", { name: "Reset" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(bar().getAttribute("aria-valuenow")).toBe("535");
+  });
+
+  it("disables edits, reset and duplicate submissions during save", async () => {
+    let finish!: (value: unknown) => void;
+    mock.save.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    mount(); drag(bar(), -5);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect((screen.getByRole("button", { name: "Saving…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Reset" }) as HTMLButtonElement).disabled).toBe(true);
+    drag(bar(), 30); fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    expect(bar().getAttribute("aria-valuenow")).toBe("535");
+    expect(mock.save).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ ok: false, detail: "Nothing was saved." }));
+    expect(screen.getByRole("alert").textContent).toBe("Nothing was saved.");
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("retains the draft on a lost server-action reply", async () => {
+    mock.save.mockRejectedValue(new Error("Disconnected"));
+    mount(); drag(bar(), -5);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("may have been saved"));
+    expect(bar().getAttribute("aria-valuenow")).toBe("535");
+    expect(screen.getByRole("button", { name: "Reset" })).toBeDefined();
+  });
+
+  it("shows the saved and confirmed times separately while gateway updates are pending", async () => {
+    mock.save.mockResolvedValue({ ok: true, campaigns: [{ slug: "alpha", minutes: 535, scheduleEdit: { revision: "b".repeat(64), editable: true, status: "pending", confirmedMinutes: 540 } }] });
+    mount(); drag(bar(), -5);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText(/Times saved\. Scheduler updates are pending/)).toBeDefined());
+    expect(screen.getByText(/Last confirmed: 09:00/)).toBeDefined();
+    expect(bar().getAttribute("aria-valuenow")).toBe("535");
+  });
+
+  it("preserves a draft across a clock refresh and detects revision changes even if the time matches", () => {
+    const view = mount(); drag(bar(), -5);
+    view.rerender(createElement(DayTimeline, { ...props, nowMinutes: 481 }));
+    expect(bar().getAttribute("aria-valuenow")).toBe("535");
+    const changed = { ...props.slots[0], scheduleEdit: { ...props.slots[0].scheduleEdit!, revision: "b".repeat(64) } };
+    view.rerender(createElement(DayTimeline, { ...props, slots: [changed, props.slots[1]] }));
+    expect(screen.getByRole("alert").textContent).toContain("schedule changed");
+  });
+
+  it("uses the last-confirmed time for the current-run status while applying an edit", () => {
+    const pendingSlot = { ...slot("alpha", 535), scheduleEdit: { revision: "b".repeat(64), editable: true, status: "pending" as const, confirmedMinutes: 540 } };
+    mount({ slots: [pendingSlot], nowMinutes: 537 });
+    expect(screen.queryByText("Running now")).toBeNull();
+    expect(screen.getByText(/Alpha is next at 09:00/)).toBeDefined();
+  });
+
+  it("keeps unsupported cron rows fixed with an explanation", () => {
+    const unsupported = { ...props.slots[0], scheduleEdit: { ...props.slots[0].scheduleEdit!, editable: false, reason: "Multiple daily start times cannot be dragged." } };
+    mount({ slots: [unsupported] });
+    drag(bar(), 30); fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    expect(bar().getAttribute("aria-valuenow")).toBe("540");
+    expect(bar().getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("Multiple daily start times cannot be dragged.")).toBeDefined();
+  });
   it("offers the save switched off, and says why", () => {
     mount({ saveUnavailableReason: "Not connected to the bot yet." });
     drag(bar(), 30);

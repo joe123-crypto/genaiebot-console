@@ -23,6 +23,7 @@ import type {
   WriteResult,
 } from "@/src/lib/types";
 import { canWrite } from "@/src/lib/write-capabilities";
+import { isScheduleSaveResult } from "@/src/domains/schedule";
 import { deduplicateRead, invalidateRemoteReads, withReadSlot } from "@/src/lib/remote-read";
 import { botErrorMetadata, type BotErrorMetadata } from "@/src/lib/bot-error-metadata";
 
@@ -666,4 +667,20 @@ export async function createCampaign(input: import("@/src/domains/campaign-creat
   if (!WRITES_ENABLED) throw new WritesDisabledError();
   if (WRITE_SOURCE === "remote") return writeRemote("campaigns/create", { ...input, actor: (await import("@/src/config")).OPERATOR_NAME });
   return runBridge(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-campaign-create"), [], { ...input, actor: (await import("@/src/config")).OPERATOR_NAME });
+}
+
+export async function saveSchedule(input: import("@/src/lib/types").ScheduleRequest, { by }: { by: string }): Promise<import("@/src/lib/types").ScheduleSaveResult> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  const unreadable = () => new BotUnavailableError("The bot returned an unreadable schedule result. Changes may have been saved; check the latest times before retrying.");
+  let result: import("@/src/lib/types").ScheduleSaveResult;
+  try {
+    result = WRITE_SOURCE === "remote"
+      ? await writeRemote("schedule", { ...input, actor: by })
+      : await runBridge(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-schedule"), ["--apply"], { ...input, actor: by });
+  } catch (error) {
+    if (error instanceof SyntaxError || (error instanceof BotUnavailableError && error.detail.startsWith("bridge returned non-JSON"))) throw unreadable();
+    throw error;
+  }
+  if (!isScheduleSaveResult(result, input)) throw unreadable();
+  return result;
 }

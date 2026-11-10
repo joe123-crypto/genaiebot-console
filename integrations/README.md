@@ -252,8 +252,8 @@ protection against reusing a pre-save read after a mutation.
 
 ## Campaign deletion
 
-`genaebot-campaign-deletion.patch` is based on **genaebot `ffee01e`**. That
-revision already includes campaign creation and caption overrides. Apply this
+`genaebot-campaign-deletion.patch` is based on **genaebot `44cc6a3`**. That
+revision already includes campaign creation, caption overrides and campaign conversion. Apply this
 patch to that base or check it against a newer checkout; do not reapply the older
 creation/caption patches on top.
 
@@ -352,3 +352,69 @@ Do not remove retirement markers or cleanup receipts as part of routine pruning.
 
 Validate using isolated fixtures and fake gateway/R2 services. Deployment does
 not delete any campaign, send test adverts, or change repository assets.
+
+## Recurring schedule editing
+
+`genaebot-schedule-editing.patch` adds the authenticated schedule writer, read
+metadata, recovery worker, and installer/drift support. It is based on bot commit
+`44cc6a37d33ae7b2fdaa876b6abe15b18cd606be` **with
+`genaebot-campaign-deletion.patch` applied first** (that commit already contains
+campaign creation, scoped Firestore reads and campaign conversion). The schedule patch does not
+include or reapply its dependency.
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-schedule-editing.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-schedule-editing.patch
+python3 -m pytest -q workspace/lib/test_console_schedule.py workspace/lib/test_console_campaigns.py workspace/lib/test_campaign_deletion.py deploy/test_console_schedule_api.py deploy/test_console_read.py deploy/test_console_write_api.py deploy/test_console_campaign_api.py deploy/test_promo_cron_reinstall.py deploy/test_retire_borehole_promos.py deploy/test_scoped_console_api.py
+```
+
+Deploy the **bot first**, using its existing bearer token, Firestore write key,
+and `GENAIE_CONFIG_SOURCE=firestore`, then deploy the console with
+`CONSOLE_WRITES=1`. No new credentials or environment flags are needed. The bot
+advertises `writes.scheduleEditing.edit`; old bots keep saving disabled with a
+companion-update explanation. File/shadow mode and missing write keys also keep
+saving disabled. Deploying these changes alone does not change any start time.
+
+The new route accepts only start-time changes, with the displayed campaign day
+and expected revisions:
+
+```text
+POST /internal/console/schedule
+{"date":"2026-11-10","timezone":"Africa/Harare","changes":[{"slug":"borehole-drilling","time":"07:10","expectedRevision":"<64-character revision from the read model>"}],"actor":"operator name"}
+```
+
+Local development sends the same JSON on stdin to `workspace/bin/console-schedule --apply`,
+which also attempts gateway reconciliation immediately. Run the bot console API
+worker for automatic retry of local pending updates; repeating the same request
+is also safe. Both return `campaigns: [{slug, minutes, scheduleEdit}]`. Campaign read records
+add normalized `scheduleMinutes` and `scheduleEdit: {revision, editable, reason?,
+status, confirmedMinutes}`. `status` is `pending` or `ready`; `confirmedMinutes`
+is the last verified time on that displayed day (or null when it had no run).
+
+An acceptance transaction saves every edited campaign and its audit record
+together. Manifest campaigns receive a durable `scheduleOverride`; console-created
+campaigns retain their existing schedule structure with an updated time. Existing
+weekdays, timezone, commands, enabled states, timeouts, and alerts are retained.
+Unsupported cron expressions remain uneditable; posting on the hour is refused
+to retain the bot's existing scheduling rule. Times shown in Harare are
+converted using the displayed date; edits that would leave the campaign's
+existing weekdays are refused. A revision conflict rejects the whole draft;
+repeating an already-saved time is a no-op.
+
+Acceptance returns promptly with pending status. The existing worker wakes after
+a write, verifies the gateway job by reading it back, and marks the schedule ready.
+Pending edits retry each minute, including after restart. The regular idle polling
+interval and existing gateway failure backoff remain unchanged. A timeout may mean
+the configuration was saved; the console checks live configuration before allowing
+an ordinary retry to be mistaken for a fresh edit. Failed or uncertain writes keep
+the draft. The timeline shows saved desired times separately from last-confirmed
+times while application is pending.
+
+Cron installers and the drift checker consult live saved overrides rather than
+restoring shipped defaults. Installers recheck the latest override under the shared
+scheduler lock after registration. Borehole legacy-job retirement also verifies
+against its saved time. Converted campaigns keep their existing job name; script
+installers refuse to take over their reconciler-owned jobs. Conversion and revert
+retain the latest saved time. Live config reseeding refuses to overwrite console schedule
+edits. Schedule editing never invokes `cron run` and does not interrupt an active
+broadcast or trigger a catch-up send when moved into the past.
