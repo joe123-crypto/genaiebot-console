@@ -227,6 +227,22 @@ describe("saving", () => {
     expect(screen.getByText(/Alpha is next at 09:00/)).toBeDefined();
   });
 
+  it.each([
+    { desired: 720, confirmed: 540, expected: "Alpha is next at 09:00", rowOrder: ["Beta start time", "Alpha start time"] },
+    { desired: 480, confirmed: 660, expected: "Beta is next at 10:00", rowOrder: ["Alpha start time", "Beta start time"] },
+  ])("selects the earliest confirmed occurrence after a pending move to $desired", ({ desired, confirmed, expected, rowOrder }) => {
+    const view = mount();
+    const pendingSlot = { ...slot("alpha", desired), scheduleEdit: {
+      revision: "b".repeat(64), editable: true, status: "pending" as const, confirmedMinutes: confirmed,
+    } };
+    // Refresh sorts rows by desired time, which can differ from confirmed order.
+    const refreshedSlots = [pendingSlot, slot("beta", 600)].sort((a, b) => a.minutes - b.minutes);
+    view.rerender(createElement(DayTimeline, { ...props, slots: refreshedSlots }));
+    expect(screen.getByText(new RegExp(expected))).toBeDefined();
+    // Ordering active occurrences must not reorder the displayed campaign rows.
+    expect(screen.getAllByRole("slider").map((element) => element.getAttribute("aria-label"))).toEqual(rowOrder);
+  });
+
   it("keeps unsupported cron rows fixed with an explanation", () => {
     const unsupported = { ...props.slots[0], scheduleEdit: { ...props.slots[0].scheduleEdit!, editable: false, reason: "Multiple daily start times cannot be dragged." } };
     mount({ slots: [unsupported] });

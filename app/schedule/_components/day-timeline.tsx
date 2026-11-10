@@ -85,7 +85,7 @@ export function DayTimeline({
     if (slot.scheduleEdit?.status !== "pending") return [slot];
     const minutes = slot.scheduleEdit.confirmedMinutes;
     return minutes === null ? [] : [{ ...slot, minutes, time: clockLabel(minutes) }];
-  });
+  }).sort((a, b) => a.minutes - b.minutes);
   const running = runningNow(activeView, nowMinutes);
   const runningSlugs = new Set(running.map((slot) => slot.slug));
   const upcoming = nextUp(activeView, nowMinutes);
