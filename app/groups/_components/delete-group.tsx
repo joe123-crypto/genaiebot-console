@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyLiveChange } from "@/app/_components/use-live";
+
 import { useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteGroupAction } from "@/app/groups/actions";
@@ -96,6 +98,7 @@ export function DeleteGroup({ jid, label, account, onIncomplete, gate = ALLOWED,
         account,
       });
       if (outcome.ok) {
+        notifyLiveChange();
         // Hand any warning to the table before closing: the revalidation this
         // action triggered is about to unmount this row, and with it the only
         // place that could have shown it.

@@ -1,4 +1,5 @@
 "use client";
+import { PaginatedPicker } from "@/app/_components/paginated-picker";
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -18,10 +19,12 @@ function Days({ value, onChange, allowed = ALL_WEEKDAYS, label }: {
     <label key={day}><input type="checkbox" checked={value.includes(index)} disabled={!allowed.includes(index)}
       onChange={(event) => onChange(event.target.checked ? [...value, index].sort() : value.filter((item) => item !== index))} />{day}</label>)}</div>;
 }
-export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string }) {
+export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean }) {
   const [lastGroups, setLastGroups] = useState(incomingGroups);
   if (!loadError && lastGroups !== incomingGroups) setLastGroups(incomingGroups);
-  const groups = loadError ? lastGroups : incomingGroups;
+  const [pickedGroups, setPickedGroups] = useState<GroupChoice[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const groups = paginated ? pickedGroups : loadError ? lastGroups : incomingGroups;
   const router = useRouter();
   const [name, setName] = useState("");
   const [captions, setCaptions] = useState([""]);
@@ -143,10 +146,10 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { g
   return <form className="new-campaign" onSubmit={submit}>
     {loadError ? <div className="banner" role="status">Could not refresh groups or save availability. Your form is kept. {loadError}</div> : null}
     {!gate.allowed ? <div className="banner" role="status">{gate.reason} You can prepare the form here.</div> : null}
-    {saved ? <div className="banner" role="status">{saved.warning} <Link href={`/campaigns/${saved.slug}`}>Open saved campaign</Link></div> : null}
+    {saved ? <div className="banner" role="status">{saved.warning} <Link prefetch={false} href={`/campaigns/${saved.slug}`}>Open saved campaign</Link></div> : null}
     {recovery ? <div className="banner" role="status">
       Creation may already have been saved. Editing is locked until its outcome is confirmed. Retry the original request to check its result.{" "}
-      <Link href={`/campaigns/${recovery.slug}`}>Check campaign</Link>
+      <Link prefetch={false} href={`/campaigns/${recovery.slug}`}>Check campaign</Link>
     </div> : null}
     <fieldset disabled={busy || Boolean(saved) || Boolean(recovery)} className="campaign-create-fields">
       <section className="card card-pad"><h2 className="card-title">Campaign</h2>
@@ -180,6 +183,14 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { g
         {cadence === "weekdays" ? <Days label="Campaign weekdays" value={days} onChange={setDays} /> : null}
       </section>
       <section className="card card-pad"><h2 className="card-title">Groups</h2><p className="card-note">Each group uses its existing sending line. {Object.keys(selected).length} selected.</p>
+        {paginated ? <><button type="button" className="btn" onClick={() => setPickerOpen(true)}>Add groups</button>
+          {pickerOpen ? <PaginatedPicker kind="groups" exclude={Object.keys(selected)} close={() => setPickerOpen(false)} choose={rows => {
+            setPickedGroups(previous => [...previous, ...rows.map(row => ({ jid: row.id, name: row.name, account: row.account ?? "default", status: row.status ?? "active" }))]);
+            setSelected(previous => ({ ...previous, ...Object.fromEntries(rows.map(row => [row.id, {}])) })); setPickerOpen(false);
+          }} /> : null}
+          <div className="campaign-create-groups">{groups.filter(group => selected[group.jid]).map(group => <div key={group.jid}>{group.name || group.jid}
+            <button type="button" className="row-action" aria-label={`Remove ${group.name || group.jid}`} onClick={() => setSelected(previous => { const next = { ...previous }; delete next[group.jid]; return next; })}>Remove</button></div>)}</div>
+        </> : <>
         <label className="modal-label" htmlFor="campaign-group-search">Search groups</label><input id="campaign-group-search" className="modal-input" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, group ID or line…" />
         <div className="campaign-create-group-actions"><button className="btn" type="button" onClick={() => setSelected((current) => ({ ...current, ...Object.fromEntries(matching.filter((group) => group.status === "active").map((group) => [group.jid, current[group.jid] ?? {}])) }))}>Select matching active groups</button>
           <button className="btn" type="button" onClick={() => setSelected({})}>Clear selection</button></div>
@@ -187,6 +198,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError }: { g
           <input type="checkbox" checked={Boolean(selected[group.jid])} disabled={group.status !== "active"} onChange={(event) => setSelected((current) => { const next = { ...current }; if (event.target.checked) next[group.jid] = {}; else delete next[group.jid]; return next; })} />
           <span><strong>{group.name ?? "Unnamed group"}</strong><small>{group.jid} · {group.account}{group.status !== "active" ? ` · ${group.status}` : ""}</small></span></label>)}
           {!matching.length ? <p className="card-note">No groups match.</p> : null}</div>
+        </>}
         {unavailable.length ? <p role="alert">Selected groups are unavailable: {unavailable.join(", ")} <button type="button" className="btn" onClick={() => setSelected((current) => Object.fromEntries(Object.entries(current).filter(([jid]) => !unavailable.includes(jid))))}>Remove unavailable groups</button></p> : null}
       </section>
       <details className="card card-pad campaign-create-advanced"><summary>Advanced settings <span className="card-note">Optional</span></summary>

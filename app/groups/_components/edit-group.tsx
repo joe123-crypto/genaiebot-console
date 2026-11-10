@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { notifyLiveChange } from "@/app/_components/use-live";
 import { Pencil } from "lucide-react";
 import { updateGroupAction } from "@/app/groups/actions";
 import {
@@ -58,10 +59,12 @@ type Props = {
   gate: WriteGate;
   /** The fields the bot accepts; anything else in the form is shown, disabled. */
   editable: string[];
+  initiallyOpen?: boolean;
+  onDismiss?: () => void;
 };
 
-export function EditGroup({ group, label, lines, tiers, gate, editable }: Props) {
-  const [open, setOpen] = useState(false);
+export function EditGroup({ group, label, lines, tiers, gate, editable, initiallyOpen = false, onDismiss }: Props) {
+  const [open, setOpen] = useState(initiallyOpen);
   // The group as it was when the dialog opened. The page refreshes every
   // minute; diffing the form against a refreshed `group` would mistake someone
   // else's change for this operator's edit, send it back with their value as
@@ -88,6 +91,7 @@ export function EditGroup({ group, label, lines, tiers, gate, editable }: Props)
   function close() {
     if (pending) return;
     setOpen(false);
+    onDismiss?.();
     setError(null);
   }
 
@@ -96,12 +100,14 @@ export function EditGroup({ group, label, lines, tiers, gate, editable }: Props)
   }
 
   function submit() {
-    if (!dirty || pending) return;
+    if (!dirty || pending || !gate.allowed) return;
     const { form: change, expected } = touchedFields(opened, draft);
     startTransition(async () => {
       const outcome = await updateGroupAction(group.jid, change, expected);
       if (outcome.ok) {
+        notifyLiveChange();
         setOpen(false);
+        onDismiss?.();
         setError(null);
         return;
       }
@@ -119,7 +125,7 @@ export function EditGroup({ group, label, lines, tiers, gate, editable }: Props)
     );
   }
 
-  const disabled = (field: GroupEditField) => pending || !accepts.has(field);
+  const disabled = (field: GroupEditField) => pending || !gate.allowed || !accepts.has(field);
 
   return (
     <>
@@ -199,7 +205,7 @@ export function EditGroup({ group, label, lines, tiers, gate, editable }: Props)
             <div className="modal-actions">
               <button type="button" className="btn" onClick={close} disabled={pending}>Cancel</button>
               <button type="button" className="btn btn-primary" onClick={submit}
-                      disabled={!dirty || pending}>
+                      disabled={!dirty || pending || !gate.allowed}>
                 {pending ? "Saving…" : "Save changes"}
               </button>
             </div>

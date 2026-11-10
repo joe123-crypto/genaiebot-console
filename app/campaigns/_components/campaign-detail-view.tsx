@@ -100,7 +100,7 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
         ? `Runs at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
         : `Not posting (${campaignOffLabel(campaign)}) — would run at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
       : "Campaign details are unavailable."}
-      actions={<Link className="link" href="/campaigns">All campaigns</Link>} />
+      actions={<Link prefetch={false} className="link" href="/campaigns">All campaigns</Link>} />
 
     {campaign?.scheduleStatus === "pending" ? <div className="banner" role="status">Campaign saved. Scheduling is pending; the bot will retry automatically.</div> : null}
     {notice("Campaign details", detail.campaign, campaignSnapshot?.receivedAt)}

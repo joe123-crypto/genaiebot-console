@@ -54,7 +54,7 @@ export function DiscoveredGroups({ groups, discovery, addGate }: {
             </thead>
             <tbody>
               {rows.map((group) => (
-                <tr key={group.jid}>
+                <tr data-live-id={group.jid} key={group.jid}>
                   <td>
                     <div className="cell-strong">{group.name || "Unnamed group"}</div>
                     <div className="cell-mono">{group.jid}</div>

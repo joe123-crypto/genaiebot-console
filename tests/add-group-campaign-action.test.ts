@@ -4,6 +4,7 @@ import type { Group, WriteCapabilities } from "@/src/lib/types";
 const getGroups = vi.fn();
 const getOverview = vi.fn();
 const updateGroup = vi.fn();
+const updateGroupBatch = vi.fn();
 const revalidate = vi.fn();
 const jid = "120363111@g.us";
 const slug = "fruit-trees";
@@ -23,6 +24,7 @@ const capabilities: WriteCapabilities = {
 
 async function loadAction(writes = true) {
   vi.resetModules();
+  updateGroupBatch.mockReset().mockResolvedValue(null);
   for (const fn of [getGroups, getOverview, updateGroup, revalidate]) fn.mockReset();
   vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
@@ -34,7 +36,7 @@ async function loadAction(writes = true) {
       constructor(detail: string, public problems: string[]) { super(detail); }
     }
     return {
-      getGroups, getOverview, updateGroup, deleteGroup: vi.fn(),
+      getGroups, getOverview, updateGroup, updateGroupBatch, deleteGroup: vi.fn(),
       getCapabilities: async () => (await getOverview()).writes,
       getCampaignState: async (id: string) => (await getOverview()).campaigns.find((row: { slug: string }) => row.slug === id) ?? null,
       BotUnavailableError, WriteRefusedError,
@@ -99,6 +101,38 @@ describe("addGroupCampaignAction", () => {
     const add = await loadAction();
     getGroups.mockResolvedValue({ groups: [group({ status })] });
     expect(await add(jid, slug)).toEqual({ ok: false, detail: `This group is ${status}, so it cannot be added to a campaign.` });
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
+  it("reuses fresh group context instead of rereading campaign and capabilities", async () => {
+    const add = await loadAction();
+    getGroups.mockResolvedValue({ groups: [group()], context: {
+      writes: capabilities, campaigns: [{ slug, enabled: true }],
+    } });
+    updateGroupBatch.mockResolvedValue({ done: [jid], changed: 1 });
+    expect(await add(jid, slug)).toEqual({ ok: true });
+    expect(getGroups).toHaveBeenCalledOnce();
+    expect(getOverview).not.toHaveBeenCalled();
+    expect(updateGroupBatch).toHaveBeenCalledOnce();
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
+  it("assigns with one transactional commit and no dry-run on a supporting bot", async () => {
+    const add = await loadAction();
+    updateGroupBatch.mockResolvedValue({ done: [jid], changed: 1 });
+    expect(await add(jid, slug)).toEqual({ ok: true });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
+      id: jid, fields: { promos: ["borehole-drilling", slug] }, expected: { promos: ["borehole-drilling"] },
+    }], { by: "Joseph" });
+    expect(updateGroup).not.toHaveBeenCalled();
+    expect(getGroups).toHaveBeenCalledExactlyOnceWith(undefined, { fresh: true, jid });
+  });
+
+  it("never falls back to another write after an uncertain batch failure", async () => {
+    const add = await loadAction();
+    const { BotUnavailableError } = await import("@/src/lib/bot-client");
+    updateGroupBatch.mockRejectedValue(new BotUnavailableError("Connection lost"));
+    expect((await add(jid, slug)).ok).toBe(false);
     expect(updateGroup).not.toHaveBeenCalled();
   });
 

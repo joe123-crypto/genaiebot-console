@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyLiveChange } from "@/app/_components/use-live";
+
 import { useState, useTransition } from "react";
 import { addDiscoveredGroupAction } from "@/app/groups/actions";
 import type { WriteGate } from "@/src/lib/write-capabilities";
@@ -26,6 +28,7 @@ export function AddDiscoveredGroup({ jid, label, gate }: {
     startTransition(async () => {
       const outcome = await addDiscoveredGroupAction(jid);
       // On success the revalidation moves the row into the groups table.
+      if (outcome.ok) notifyLiveChange();
       setError(outcome.ok ? null : { detail: outcome.detail, problems: outcome.problems });
     });
   }

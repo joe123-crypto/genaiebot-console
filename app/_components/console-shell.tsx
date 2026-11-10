@@ -51,7 +51,7 @@ export function ConsoleShell({
               // An item with a view that isolates it becomes the way to reach
               // it; one with nowhere to go stays the text it always was.
               return item.href ? (
-                <Link className="attention-item attention-link" key={item.label} href={item.href}>
+                <Link prefetch={false} className="attention-item attention-link" key={item.label} href={item.href}>
                   {body}
                 </Link>
               ) : (

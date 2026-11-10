@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyLiveChange } from "@/app/_components/use-live";
+
 import { useEffect, useId, useLayoutEffect, useRef, useState, useTransition, type RefObject } from "react";
 import { Plus, X } from "lucide-react";
 import { addGroupCampaignAction } from "@/app/groups/actions";
@@ -70,6 +72,7 @@ function CampaignSelector({ group, campaigns, gate, blockedReason, trigger, clos
       try {
         const outcome = await addGroupCampaignAction(group.jid, slug);
         if (outcome.ok) {
+        notifyLiveChange();
           returnToTable.current = campaigns.length === 1;
           close();
         } else setError(outcome);

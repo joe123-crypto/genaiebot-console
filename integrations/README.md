@@ -418,3 +418,57 @@ installers refuse to take over their reconciler-owned jobs. Conversion and rever
 retain the latest saved time. Live config reseeding refuses to overwrite console schedule
 edits. Schedule editing never invokes `cron run` and does not interrupt an active
 broadcast or trigger a catch-up send when moved into the past.
+
+## Indexed live views and request budgets
+
+`genaebot-live-views.patch` targets bot commit
+`2f30524ec5c64bd2804151ac7c89019d2071b076` (the production source checked during
+implementation). It includes the earlier display-cache projection optimization,
+plus the durable index, leased Listen stream, telemetry selection, live API routes,
+runtime dependency installation, CI coverage and documentation.
+
+```sh
+git apply --check /path/to/genaiebot_console/integrations/genaebot-live-views.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-live-views.patch
+python3 -m venv .venv-console
+.venv-console/bin/pip install -r deploy/railway/requirements-console.txt
+PATH="$PWD/.venv-console/bin:$PATH" ./deploy/ci-check.sh
+```
+
+Deploy the bot through its existing validated release pipeline first. Verify
+`/internal/console/live/status` and ten-row group/campaign pages with the existing
+console bearer token, then deploy the console. Local console development requires
+`BOT_API_BASE_URL` and its matching read token; indexed views deliberately refuse
+legacy full-directory fallbacks. Legacy endpoints remain available to older
+consoles. Roll back the frontend before rolling back the bot.
+
+Live routes use the same authentication and uncacheable responses as other console
+routes. The private SQLite database stores encoded documents, a published
+configuration generation, consistent resume positions and revisions. It watches
+settings, lines, campaigns, groups and deletion receipts. It is not a writer or a
+campaign targeting source. Fresh writer checks continue reading Firestore.
+
+List/search/picker requests return at most ten rows. Cursors bind the query and
+result revision; an invalidated cursor requests a visible-anchor reset. DMC and
+members query local telemetry only for visible IDs. Discoveries query local
+inventory against indexed membership. The schedule endpoint omits group payloads,
+caption text and assets. Unchanged polls return only freshness metadata. After
+writes, the API fences indexed config until a consistent stream boundary is newer
+than the write; uncertain writes are never replayed.
+
+A visible view renews a 90-second sync lease; browser resources poll every 30
+seconds and pause when hidden/offline. One stream is shared across tabs. The
+initial bootstrap, invalid resume/reset, changed credentials or changed index
+schema may read all indexed documents; ordinary browser requests do not. Stale
+results retain their age and drafts. The status endpoint reports sync lag,
+streamed document count, rebuild count, active streams, indexed requests and
+returned rows. Compare these and Firestore's read metrics during idle viewing,
+scrolling, searching and assignments after rollout; local request-budget tests
+are not a measured production reduction.
+
+Verified locally against an isolated HTTP bot/index fixture: Schedule at home,
+server search, ten campaign rows, lazy campaign sections, and no browser runtime
+errors. Fake-stream protocol tests cover consistent bootstrap, persisted resume,
+matching existence filters, incremental delete/update, atomic reset, retirement,
+lease expiry and multiple consumers. Telemetry tests preserve rolling-window
+coverage and member observation timestamps.

@@ -5,6 +5,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { clashes, nextUp, runEndsAt, runningNow, withTimes } from "@/src/domains/schedule";
 import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleAction } from "@/app/schedule/actions";
 import type { ScheduleSaveResult } from "@/src/lib/types";
 

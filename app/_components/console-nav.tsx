@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   CalendarClock,
-  LayoutDashboard,
   Megaphone,
   MessageCircle,
   ScrollText,
@@ -16,10 +15,9 @@ import type { LucideIcon } from "lucide-react";
 export type NavCounts = { groupsNeedingReview?: number; campaigns?: number };
 
 const items: ReadonlyArray<{ href: string; label: string; icon: LucideIcon }> = [
-  { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/", label: "Schedule", icon: CalendarClock },
   { href: "/groups", label: "Groups", icon: Users },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/schedule", label: "Schedule", icon: CalendarClock },
   { href: "/lines", label: "WhatsApp Lines", icon: MessageCircle },
   { href: "/activity", label: "Activity", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: SlidersHorizontal },
@@ -41,7 +39,7 @@ export function ConsoleNav({ counts }: { counts: NavCounts }) {
               : undefined;
 
         return (
-          <Link
+          <Link prefetch={false}
             key={href}
             href={href}
             className="console-nav-item"
