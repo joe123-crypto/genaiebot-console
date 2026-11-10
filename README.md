@@ -87,7 +87,7 @@ npm run build
 | Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
 | Campaigns | Live. Searchable and filterable, with New campaign creation when the companion bot support is deployed. Each row can switch its campaign off and on. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
-| Schedule | Live. Day timeline with the per-line overlap rule checked. |
+| Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
 
@@ -495,3 +495,22 @@ unavailable reason while the form remains usable as an in-memory draft. See
 [integrations/README.md](integrations/README.md#campaign-creation) for installation,
 CORS, API contracts and verification. No new authentication or deployment is
 introduced by this feature.
+
+## Saving timeline changes
+
+On Schedule, drag a bar or use its arrow keys, then choose **Save changes**.
+Only changed campaigns are saved. Edits change recurring start times and retain
+existing weekdays and timezone; overlap warnings remain advisory. Reset discards
+the draft. A refresh or failed save keeps unsaved edits, while a conflicting
+schedule change asks you to reset to the latest times.
+
+A saved change may show **Scheduler pending** until the bot verifies the gateway
+update. Its last-confirmed time stays visible, and the bot retries automatically.
+Moving a start into the past does not immediately run the campaign.
+
+Schedule writes require the companion bot update described in
+[integrations/README.md](integrations/README.md#recurring-schedule-editing),
+`GENAIE_CONFIG_SOURCE=firestore` and the bot's existing write credentials, plus
+`CONSOLE_WRITES=1` on the console. Older bots retain a disabled Save button with
+a specific explanation. Deploy the bot support first; installation alone does
+not change any campaign times.

@@ -95,6 +95,7 @@ export type Campaign = {
   /** Bot-normalized occurrence on the requested Schedule date. */
   scheduleMinutes?: number | null;
   scheduleStatus?: "ready" | "pending";
+  scheduleEdit?: ScheduleEdit;
   cron: string;
   hour: number | null;
   minute: number | null;
@@ -175,6 +176,21 @@ export type WriteCapabilities = {
   delete: string[];
   campaignCreation?: { create: boolean; images: boolean; scheduling: boolean };
   campaignDeletion?: { delete: boolean; reason?: string };
+  scheduleEditing?: { edit: boolean; reason?: string };
+};
+
+export type ScheduleEdit = {
+  revision: string;
+  editable: boolean;
+  reason?: string;
+  status: "ready" | "pending";
+  confirmedMinutes: number | null;
+};
+
+export type ScheduleChange = { slug: string; time: string; expectedRevision: string };
+export type ScheduleRequest = { date: string; timezone: string; changes: ScheduleChange[] };
+export type ScheduleSaveResult = {
+  campaigns: { slug: string; minutes: number; scheduleEdit: ScheduleEdit }[];
 };
 
 export type CampaignDeletion = {

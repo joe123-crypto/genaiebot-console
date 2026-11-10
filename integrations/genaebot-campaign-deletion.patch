@@ -40,6 +40,19 @@ index 2d1f107..7ab106a 100755
    printf '%s cron registered (%s, %s %s, timeout %ss).\n' \
      "$name" "$existing_id" "$cron_expr" "$tz" "$PROMO_CRON_TIMEOUT_SECONDS"
  }
+diff --git a/deploy/migrate-campaigns-to-firestore.py b/deploy/migrate-campaigns-to-firestore.py
+index 683449d..c6284be 100755
+--- a/deploy/migrate-campaigns-to-firestore.py
++++ b/deploy/migrate-campaigns-to-firestore.py
+@@ -243,6 +243,8 @@ def convert(entry, manifest, store, *, write, actor, workspace=WORKSPACE, out=sy
+         before = store.get("campaigns", slug)
+         if before is None:
+             raise MigrationError("campaigns/%s does not exist; seed the store first" % slug)
++        if before.get("deleted"):
++            raise MigrationError("campaign was deleted; conversion is refused")
+         if before.get("kind") == KIND:
+             out.write("%s: already converted; nothing to write\n" % slug)
+             return True
 diff --git a/deploy/promo-cron-drift.py b/deploy/promo-cron-drift.py
 index d1daaa5..89cae42 100755
 --- a/deploy/promo-cron-drift.py
@@ -394,6 +407,24 @@ index f1169cf..c3ad14c 100644
          self.assertEqual(set(payload["adAssets"]), AD_ASSET_KEYS)
          records = payload["campaigns"]
          self.assertTrue(records)
+diff --git a/deploy/test_migrate_campaigns.py b/deploy/test_migrate_campaigns.py
+index 42b9685..b36caaa 100644
+--- a/deploy/test_migrate_campaigns.py
++++ b/deploy/test_migrate_campaigns.py
+@@ -86,6 +86,13 @@ class Conversion(unittest.TestCase):
+         return TOOL.convert(self.entry, self.manifest, self.store, write=write, actor="tester",
+                             workspace=self.workspace, out=self.out)
+ 
++    def test_retired_campaign_cannot_be_converted_or_restored(self):
++        self.store.docs["campaigns"]["genaie"] = config.encode_fields({"deleted": True, "enabled": False})
++        with self.assertRaises(TOOL.MigrationError):
++            self.convert()
++        self.assertEqual(self.store.commits, [])
++        self.assertTrue(self.store.get("campaigns", "genaie")["deleted"])
++
+     def test_dry_run_reports_and_writes_nothing(self):
+         before = json.dumps(self.store.docs, sort_keys=True)
+         self.assertFalse(self.convert(write=False))
 diff --git a/deploy/test_promo_cron_reinstall.py b/deploy/test_promo_cron_reinstall.py
 index e14a009..e67a4d7 100644
 --- a/deploy/test_promo_cron_reinstall.py
@@ -409,26 +440,35 @@ index e14a009..e67a4d7 100644
    if [ -n "${FAKE_CRON_FAIL:-}" ]; then printf 'ssh: connect failed\\n' >&2; exit 1; fi
    cat "$FAKE_CRON_JOBS"; exit 0
 diff --git a/deploy/upload-ad-image.py b/deploy/upload-ad-image.py
-index 1354bd1..73f8651 100755
+index 8a2c881..61cd767 100755
 --- a/deploy/upload-ad-image.py
 +++ b/deploy/upload-ad-image.py
-@@ -532,10 +532,14 @@ def main(argv):
+@@ -553,15 +553,17 @@ def main(argv):
              campaigns_raw = operator_config.list_documents(
                  creds["project_id"], "campaigns", token,
                  opener=urllib.request.urlopen, sleep=time.sleep)
-+            deleted = {slug for slug, fields in campaigns_raw if operator_config.decode_fields(fields).get("deleted") is True}
+-            data_defined = dict((slug, operator_config.decode_fields(fields))
+-                                for slug, fields in campaigns_raw)
+-            data_defined = dict((slug, doc) for slug, doc in data_defined.items()
+-                                if doc.get("kind") == "console")
+-            # A campaign converted from this repo is data-defined too, but its
+-            # pictures are still the mirror's business until the mirror goes.
++            data_defined = {slug: operator_config.decode_fields(fields) for slug, fields in campaigns_raw}
++            deleted = {slug for slug, doc in data_defined.items() if doc.get("deleted") is True}
 +            if args.campaign in deleted:
 +                raise UploadError("this campaign has been deleted")
 +            campaigns = {slug: entries for slug, entries in campaigns.items() if slug not in deleted}
-             console_slugs = {slug for slug, fields in campaigns_raw
-                              if operator_config.decode_fields(fields).get("kind") == "console"}
++            data_defined = {slug: doc for slug, doc in data_defined.items()
++                            if doc.get("kind") == "console" and slug not in deleted}
++            # Converted repo campaigns remain part of the picture mirror.
+             console_slugs = set(data_defined) - set(dirs)
              rows = [(doc_id, fields) for doc_id, fields in rows
 -                    if operator_config.decode_fields(fields).get("campaign") not in console_slugs]
 +                    if operator_config.decode_fields(fields).get("campaign") not in console_slugs | deleted]
              indexed, quarantined = ad_assets._assemble(rows)
  
              if args.verify:
-@@ -585,14 +589,52 @@ def main(argv):
+@@ -615,17 +617,59 @@ def main(argv):
                  print("dry run: nothing uploaded or written (use --write)")
                  return 0
  
@@ -458,6 +498,9 @@ index 1354bd1..73f8651 100755
                  print("uploaded %s" % key)
 -            operator_writer.commit(creds["project_id"], token, writes,
 -                                   strays if args.prune else [])
+-            for slug in sorted(rotations):
+-                console_campaigns.set_images(creds["project_id"], token, slug,
+-                                             rotations[slug])
 -            write_mirror(campaigns)
 +            store.begin()
 +            try:
@@ -473,6 +516,13 @@ index 1354bd1..73f8651 100755
 +                               "currentDocument": {"exists": exists}}
 +                              for collection, key, fields, exists in writes]
 +                operations += [{"delete": "%s/%s/%s" % (store.base, collection, key)} for collection, key in (strays if args.prune else [])]
++                for slug, images in rotations.items():
++                    if current.get(slug, {}).get("kind") != "console":
++                        raise UploadError("campaign conversion changed during upload; refresh the plan")
++                    operations.append({"update": {"name": "%s/campaigns/%s" % (store.base, slug),
++                                                  "fields": operator_config.encode_fields({"images": images})},
++                                       "updateMask": {"fieldPaths": ["images"]},
++                                       "currentDocument": {"exists": True}})
 +                operations.append({"delete": "%s/campaign_asset_uploads/%s" % (store.base, receipt)})
 +                if len(operations) > 500:
 +                    raise UploadError("asset update exceeds the atomic write limit; upload fewer files")
@@ -535,7 +585,7 @@ index fb9e6fe..9c12fc0 100755
              with console_config.mutation():
                  result = campaigns.create(data, store)
 diff --git a/workspace/bin/console-read b/workspace/bin/console-read
-index 1c2bde1..4d5616a 100755
+index d442096..0c64272 100755
 --- a/workspace/bin/console-read
 +++ b/workspace/bin/console-read
 @@ -32,6 +32,8 @@ import io
@@ -547,16 +597,16 @@ index 1c2bde1..4d5616a 100755
  from datetime import date
  from functools import partial
  from pathlib import Path
-@@ -391,7 +393,7 @@ def campaign_records(day, only_slug=None, include_assets=True):
+@@ -394,7 +396,7 @@ def campaign_records(day, only_slug=None, include_assets=True):
      records = []
      for entry in declared.get("promos", []):
          slug = entry["slug"]
--        if only_slug is not None and slug != only_slug:
-+        if (only_slug is not None and slug != only_slug) or slug in resolved().get("deleted", []):
+-        if slug in converted or (only_slug is not None and slug != only_slug):
++        if slug in converted or (only_slug is not None and slug != only_slug) or slug in resolved().get("deleted", []):
              continue
          script = script_path(entry["script"])
          captions = []
-@@ -468,6 +470,8 @@ def preview(slug, day):
+@@ -471,6 +473,8 @@ def preview(slug, day):
      """
      m = membership()
      declared = manifest()
@@ -565,7 +615,7 @@ index 1c2bde1..4d5616a 100755
  
      entry = next((row for row in declared.get("promos", []) if row["slug"] == slug), None)
      custom = console_campaigns.definitions(m).get(slug)
-@@ -602,6 +606,28 @@ def ad_assets_status():
+@@ -605,6 +609,28 @@ def ad_assets_status():
              "note": catalogue["note"]}
  
  
@@ -594,7 +644,7 @@ index 1c2bde1..4d5616a 100755
  def write_capabilities():
      """What a console may offer to change, straight from the writer that will
      judge it, so no screen can present an edit the bot is going to refuse.
-@@ -619,6 +645,7 @@ def write_capabilities():
+@@ -622,6 +648,7 @@ def write_capabilities():
          "fields": dict((collection, list(names))
                         for collection, names in operator_writer.EDITABLE.items()),
          "delete": list(operator_writer.DELETABLE),
@@ -602,7 +652,7 @@ index 1c2bde1..4d5616a 100755
          "campaignCreation": {"create": current == promo_config.FIRESTORE,
                               "images": ad_assets.mode()[0] == "r2" and bool(ad_assets.base_url()),
                               "scheduling": True},
-@@ -678,6 +705,7 @@ def overview(day):
+@@ -681,6 +708,7 @@ def overview(day):
          "groupsByStatus": by_status,
          "groupTotal": len(groups),
          "campaignTotal": len(campaigns),
@@ -610,7 +660,7 @@ index 1c2bde1..4d5616a 100755
          "plannedSendsToday": planned,
          "accounts": accounts(m),
          "capsEnabled": bool((m.get("defaults") or {}).get("caps_enabled")),
-@@ -715,6 +743,10 @@ def campaign_edit_state(slug, captions_only=False):
+@@ -718,6 +746,10 @@ def campaign_edit_state(slug, captions_only=False):
          store_on = switch if isinstance(switch, bool) else False
      else:
          store_on = store_enabled(declared) if declared else False
@@ -621,22 +671,28 @@ index 1c2bde1..4d5616a 100755
      if declared is None and (not doc or doc.get("kind") != "console"):
          if captions_only:
              raise NotFound("unknown campaign %r" % slug)
-@@ -759,7 +791,13 @@ def navigation():
+@@ -765,10 +797,16 @@ def navigation():
                                             "value": operator_config.encode_value(value)}},
                      opener=urllib.request.urlopen, sleep=time.sleep)
              review = count("groups", "status", ["on-hold", "admin-only", "not-a-member"])
--            total = len(manifest().get("promos", [])) + count("campaigns", "kind", "console")
+-            # A converted campaign is both declared and kind=console; only it
+-            # carries its declared job name, so that is how to count it once.
+-            names = [row["name"] for row in manifest().get("promos", []) if row.get("name")]
+-            total = (len(manifest().get("promos", [])) + count("campaigns", "kind", "console")
 +            builtins = {entry["slug"] for entry in manifest().get("promos", [])}
 +            retired = []
 +            if __import__("campaign_deletion").enabled():
 +                retired = operator_config.query_documents(creds["project_id"], "campaigns",
 +                    {"fieldFilter": {"field": {"fieldPath": "deleted"}, "op": "EQUAL", "value": {"booleanValue": True}}},
 +                    token, opener=urllib.request.urlopen, sleep=time.sleep)
-+            total = len(builtins - {slug for slug, fields in retired}) + count("campaigns", "kind", "console")
++            retired_slugs = {slug for slug, fields in retired}
++            names = [row["name"] for row in manifest().get("promos", [])
++                     if row.get("name") and row["slug"] not in retired_slugs]
++            total = (len(builtins - retired_slugs) + count("campaigns", "kind", "console")
+                      - (count("campaigns", "jobName", names) if names else 0))
          return {"campaignTotal": total, "groupsNeedingReview": review}
      try:
-         return console_config.cached_summary("navigation", read)
-@@ -805,7 +843,7 @@ def main(argv):
+@@ -815,7 +853,7 @@ def main(argv):
              group_metrics.attach(payload, membership())
          elif command == "campaigns":
              payload = {"date": day.isoformat(), "adAssets": ad_assets_status(),
@@ -667,10 +723,10 @@ index 9414169..a93525b 100644
      The cached file is re-hashed on every call. That is a few milliseconds
 diff --git a/workspace/lib/campaign_deletion.py b/workspace/lib/campaign_deletion.py
 new file mode 100644
-index 0000000..ebbc167
+index 0000000..e2420fd
 --- /dev/null
 +++ b/workspace/lib/campaign_deletion.py
-@@ -0,0 +1,328 @@
+@@ -0,0 +1,334 @@
 +"""Permanent campaign retirement, with an audited barrier and resumable cleanup.
 +
 +Only the console API holds write/R2 credentials. Broadcasters use their read key
@@ -872,6 +928,12 @@ index 0000000..ebbc167
 +                            [{"argv": ["python3", str(Path(declared["script"]).parent.parent / legacy / Path(declared["script"]).name)]} for legacy in declared.get("legacyNames", [])])
 +                            if declared else [{"argv": ["python3", str(Path(__file__).resolve().parents[1] / "bin" / "run-console-campaign"), slug]}],
 +                         "audit": audit_id, "deletedAt": audit["at"], "picturesAfter": int(time.time()) + 600}
++            if campaign and campaign.get("kind") == "console":
++                import console_campaigns
++                operation["jobNames"] = list(dict.fromkeys(operation["jobNames"] + [console_campaigns.job_name(slug, campaign)]))
++                runner = ["python3", str(Path(__file__).resolve().parents[1] / "bin" / "run-console-campaign"), slug]
++                if not any(command["argv"] == runner for command in operation["commands"]):
++                    operation["commands"].append({"argv": runner})
 +            marker = {"deleted": True, "enabled": False, "deletedAt": audit["at"], "deletion": slug}
 +            with __import__("console_config").mutation(env):
 +                store.commit([("campaigns", slug, marker, campaign is not None),
@@ -1000,10 +1062,10 @@ index 0000000..ebbc167
 +    finally:
 +        store.rollback()
 diff --git a/workspace/lib/console_campaigns.py b/workspace/lib/console_campaigns.py
-index d259981..7e40f5d 100644
+index c0407ed..a2f17ea 100644
 --- a/workspace/lib/console_campaigns.py
 +++ b/workspace/lib/console_campaigns.py
-@@ -279,6 +279,7 @@ def create(data, store, env=None, verify=verify_image, reconcile=None):
+@@ -348,6 +348,7 @@ def create(data, store, env=None, verify=verify_image, reconcile=None):
  
  
  def finish(slug, store, reconcile):
@@ -1184,10 +1246,10 @@ index 6e4b279..48ba80e 100644
      doc = {}
 diff --git a/workspace/lib/test_campaign_deletion.py b/workspace/lib/test_campaign_deletion.py
 new file mode 100644
-index 0000000..eeb41b2
+index 0000000..3fb61c9
 --- /dev/null
 +++ b/workspace/lib/test_campaign_deletion.py
-@@ -0,0 +1,329 @@
+@@ -0,0 +1,343 @@
 +"""Campaign retirement is irreversible to readers, resumable to workers and safe to retry."""
 +import copy
 +import io
@@ -1292,6 +1354,20 @@ index 0000000..eeb41b2
 +        self.retire("cv")
 +        self.assertTrue(self.store.get("campaigns", "cv")["deleted"])
 +        self.assertEqual(self.store.get("campaign_deletions", "cv")["jobNames"], ["cv-promo", "old-cv-promo"])
++    def test_converted_campaign_keeps_its_job_name_and_runner_owned_for_cleanup(self):
++        doc = self.store.get("campaigns", "cv") or {}
++        doc.update(kind="console", jobName="cv-promo", enabled=True)
++        self.store.docs["campaigns"]["cv"] = config.encode_fields(doc)
++        self.retire("cv")
++        receipt = self.store.get("campaign_deletions", "cv")
++        runner = ["python3", str(Path(campaigns.__file__).resolve().parents[1] / "bin" / "run-console-campaign"), "cv"]
++        self.assertIn("cv-promo", receipt["jobNames"])
++        self.assertIn(runner, [entry["argv"] for entry in receipt["commands"]])
++        self.gateway.jobs = [{"id": "converted", "name": "cv-promo", "payload": {"argv": runner}}]
++        self.clean("cv")
++        self.assertEqual(self.gateway.jobs, [])
++        self.assertEqual(self.store.get("campaign_deletions", "cv")["cleanup"], "complete")
++
 +    def test_repeated_request_returns_receipt_and_does_not_duplicate_audit(self):
 +        first = self.retire(); commits = len(self.store.commits)
 +        self.assertEqual(first, self.retire())

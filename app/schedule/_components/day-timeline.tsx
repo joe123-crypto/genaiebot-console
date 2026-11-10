@@ -5,6 +5,8 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { clashes, nextUp, runEndsAt, runningNow, withTimes } from "@/src/domains/schedule";
 import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { saveScheduleAction } from "@/app/schedule/actions";
+import type { ScheduleSaveResult } from "@/src/lib/types";
 
 const DAY_MINUTES = 24 * 60;
 
@@ -22,7 +24,7 @@ type Times = Record<string, number>;
 /** The drafted times, plus the saved ones they were drafted against. Keeping
  *  `base` is what lets the 60s refresh land without erasing a drag, and what
  *  tells us afterwards that the schedule moved underneath it. */
-type Draft = { base: Times; times: Times };
+type Draft = { base: Times; times: Times; revision: string };
 
 function clamp(minutes: number) {
   return Math.min(LAST_START, Math.max(0, Math.round(minutes)));
@@ -38,16 +40,28 @@ function fingerprint(times: Times) {
 }
 
 export function DayTimeline({
-  slots, nowMinutes, timezone, saveUnavailableReason,
+  slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason,
 }: {
   slots: DaySlot[];
   nowMinutes: number;
   timezone: string;
+  date: string;
   saveUnavailableReason?: string;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const saving = useRef(false);
+  const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
+  const [accepted, setAccepted] = useState<{ base: string; result: ScheduleSaveResult } | null>(null);
   const drag = useRef<{ slug: string; startX: number; startMinutes: number; width: number } | null>(null);
+
+  const serverRevision = JSON.stringify([date, serverSlots.map((slot) => [slot.slug, slot.minutes, slot.scheduleEdit])]);
+  const slots = accepted?.base === serverRevision ? serverSlots.map((slot) => {
+    const updated = accepted.result.campaigns.find((row) => row.slug === slot.slug);
+    return updated ? { ...slot, ...updated, time: clockLabel(updated.minutes) } : slot;
+  }) : serverSlots;
+  const revision = JSON.stringify([date, slots.map((slot) => [slot.slug, slot.minutes, slot.scheduleEdit?.revision])]);
 
   const saved: Times = Object.fromEntries(slots.map((slot) => [slot.slug, slot.minutes]));
   const times = draft?.times ?? saved;
@@ -55,7 +69,7 @@ export function DayTimeline({
   const dirty = slots.some((slot) => (times[slot.slug] ?? slot.minutes) !== slot.minutes);
   // The schedule changed under the draft, so the times being edited are no
   // longer the ones that would be saved over.
-  const stale = draft !== null && fingerprint(draft.base) !== fingerprint(saved);
+  const stale = draft !== null && (draft.revision !== revision || fingerprint(draft.base) !== fingerprint(saved));
 
   /** The day as it would be if the draft were saved. Everything derived — the
    *  overlap rule, the running marker, what is next — reads this, so a dragged
@@ -63,9 +77,18 @@ export function DayTimeline({
   const view = draft ? withTimes(slots, times) : slots;
   const bySlug = new Map(view.map((slot) => [slot.slug, slot]));
 
-  const running = runningNow(view, nowMinutes);
+  const hasPendingUpdates = slots.some((slot) => slot.scheduleEdit?.status === "pending");
+  const saveFeedback = hasPendingUpdates
+    ? "Times saved. Scheduler updates are pending; the bot will retry automatically."
+    : "Times saved and confirmed by the scheduler.";
+  const activeView = dirty ? view : view.flatMap((slot) => {
+    if (slot.scheduleEdit?.status !== "pending") return [slot];
+    const minutes = slot.scheduleEdit.confirmedMinutes;
+    return minutes === null ? [] : [{ ...slot, minutes, time: clockLabel(minutes) }];
+  });
+  const running = runningNow(activeView, nowMinutes);
   const runningSlugs = new Set(running.map((slot) => slot.slug));
-  const upcoming = nextUp(view, nowMinutes);
+  const upcoming = nextUp(activeView, nowMinutes);
   const nowOffset = `${(nowMinutes / DAY_MINUTES) * 100}%`;
 
   const runningNames = running.map((slot) => campaignTitle(slot.slug));
@@ -75,19 +98,49 @@ export function DayTimeline({
       : runningNames[0];
 
   function move(slug: string, minutes: number) {
+    if (saving.current || slots.find((slot) => slot.slug === slug)?.scheduleEdit?.editable === false) return;
+    setFeedback(null);
     setDraft((current) => ({
       base: current?.base ?? saved,
       times: { ...(current?.times ?? saved), [slug]: minutes },
+      revision: current?.revision ?? revision,
     }));
   }
 
   function reset() {
+    if (saving.current) return;
     drag.current = null;
     setDragging(null);
     setDraft(null);
+    setFeedback(null);
+  }
+
+  async function save() {
+    if (saving.current || !dirty || stale || saveUnavailableReason || !date) return;
+    const changes = slots.filter((slot) => (times[slot.slug] ?? slot.minutes) !== slot.minutes)
+      .map((slot) => ({ slug: slot.slug, time: clockLabel(times[slot.slug]), expectedRevision: slot.scheduleEdit?.revision ?? "" }));
+    saving.current = true;
+    setPending(true);
+    setFeedback(null);
+    try {
+      const outcome = await saveScheduleAction({ date, timezone, changes });
+      if (!outcome.ok) {
+        setFeedback({ error: true, text: outcome.detail });
+        return;
+      }
+      setAccepted({ base: serverRevision, result: outcome });
+      setDraft(null);
+      setFeedback({ error: false, text: "Times saved." });
+    } catch {
+      setFeedback({ error: true, text: "Could not confirm the save. Changes may have been saved; retry to check the latest times. Your draft is still here." });
+    } finally {
+      saving.current = false;
+      setPending(false);
+    }
   }
 
   function onPointerDown(event: ReactPointerEvent<HTMLSpanElement>, slug: string, minutes: number) {
+    if (saving.current || slots.find((slot) => slot.slug === slug)?.scheduleEdit?.editable === false) return;
     if (event.button !== 0) return;
     // The bar's own width has a 6%-of-day floor, so it is not a usable scale.
     // The track it sits in is, and the drag is measured as a delta against it
@@ -169,21 +222,27 @@ export function DayTimeline({
           </div>
           <div className="timeline-actions">
             {draft ? (
-              <button type="button" className="btn" onClick={reset}>Reset</button>
+              <button type="button" className="btn" onClick={reset} disabled={pending}>Reset</button>
             ) : null}
             <button
               type="button"
               className="btn btn-primary"
               title={saveUnavailableReason}
-              disabled={!dirty || stale || Boolean(saveUnavailableReason)}
+              disabled={!dirty || stale || pending || Boolean(saveUnavailableReason) || !date}
+              onClick={save}
             >
-              Save changes
+              {pending ? "Saving…" : "Save changes"}
             </button>
           </div>
         </div>
 
         <div className="timeline-feedback">
           {saveUnavailableReason ? <p className="card-note">{saveUnavailableReason}</p> : null}
+          {feedback ? (
+            <p className={feedback.error ? "caption-error" : "card-note"} role={feedback.error ? "alert" : "status"}>
+              {feedback.error ? feedback.text : saveFeedback}
+            </p>
+          ) : null}
           {stale ? (
             <p className="caption-error" role="alert">
               The schedule changed while you were editing. Reset to load the latest times.
@@ -192,7 +251,9 @@ export function DayTimeline({
           <p className="card-note" role="status">
             {dirty
               ? "Unsaved times. The bot still runs the saved ones until you save."
-              : "Times are as the bot runs them."}
+              : hasPendingUpdates
+                ? "Saved times have pending scheduler updates. Confirmed times are shown beside each affected campaign."
+                : "Times are as the bot runs them."}
           </p>
         </div>
 
@@ -238,11 +299,12 @@ export function DayTimeline({
               const slot = bySlug.get(base.slug) ?? base;
               const runMinutes = worstCaseRunSeconds(slot.targetCount) / 60;
               const onAds = (slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0);
-              const isRunning = runningSlugs.has(slot.slug);
+              const isRunning = runningSlugs.has(slot.slug) && slot.scheduleEdit?.status !== "pending";
               const isDone = runEndsAt(slot) <= nowMinutes;
               const moved = slot.minutes !== base.minutes;
               const endsAt = clockLabel(runEndsAt(slot));
               const title = campaignTitle(slot.slug);
+              const editable = !pending && slot.scheduleEdit?.editable !== false;
               return (
                 <div key={slot.slug} style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "center" }}>
                   <span>
@@ -258,6 +320,16 @@ export function DayTimeline({
                       )}{" "}
                       · {plural(slot.targetCount, "group")}
                     </span>
+                    {slot.scheduleEdit?.status === "pending" ? (
+                      <><br /><span className="card-note">
+                        Scheduler pending. {slot.scheduleEdit.confirmedMinutes === null
+                          ? "No confirmed run on this day."
+                          : `Last confirmed: ${clockLabel(slot.scheduleEdit.confirmedMinutes)}.`}
+                      </span></>
+                    ) : null}
+                    {slot.scheduleEdit?.editable === false ? (
+                      <><br /><span className="card-note">{slot.scheduleEdit.reason}</span></>
+                    ) : null}
                     {isRunning ? (
                       <>
                         <br />
@@ -300,13 +372,14 @@ export function DayTimeline({
                         `${moved ? " is-moved" : ""}${dragging === slot.slug ? " is-dragging" : ""}`
                       }
                       role="slider"
-                      tabIndex={0}
+                      tabIndex={editable ? 0 : -1}
+                      aria-disabled={!editable}
                       aria-label={`${title} start time`}
                       aria-valuemin={0}
                       aria-valuemax={LAST_START}
                       aria-valuenow={slot.minutes}
                       aria-valuetext={`${slot.time}, to ${endsAt} at worst`}
-                      title={`${slot.time} to ${endsAt} at worst — drag to change`}
+                      title={slot.scheduleEdit?.editable === false ? slot.scheduleEdit.reason : `${slot.time} to ${endsAt} at worst — drag to change`}
                       onPointerDown={(event) => onPointerDown(event, slot.slug, slot.minutes)}
                       onPointerMove={onPointerMove}
                       onPointerUp={onPointerUp}

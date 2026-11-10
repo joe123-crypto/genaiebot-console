@@ -1,5 +1,5 @@
 import { clockLabel, slotLabel, worstCaseRunSeconds } from "@/src/lib/format";
-import type { Overview } from "@/src/lib/types";
+import type { Overview, ScheduleRequest, ScheduleSaveResult } from "@/src/lib/types";
 
 /**
  * The campaign day: the slots, where each run ends, what is running, and the
@@ -30,11 +30,32 @@ export function daySlots(overview: Overview) {
       minutes: campaign.scheduleMinutes ?? (campaign.hour ?? 0) * 60 + (campaign.minute ?? 0),
       targetCount: campaign.targetCount,
       accounts: campaign.accounts,
+      ...(campaign.scheduleEdit ? { scheduleEdit: campaign.scheduleEdit } : {}),
     }))
     .sort((a, b) => a.minutes - b.minutes);
 }
 
 export type DaySlot = ReturnType<typeof daySlots>[number];
+
+/** Unreadable acknowledgements must not clear a draft, including acknowledgements
+ * reconstructed from a fresh read after a timeout. */
+export function isScheduleSaveResult(value: unknown, input: ScheduleRequest): value is ScheduleSaveResult {
+  const rows = (value as ScheduleSaveResult | null)?.campaigns;
+  const validMinute = (minute: unknown) => Number.isInteger(minute) && Number(minute) >= 0 && Number(minute) < 1440;
+  return Array.isArray(rows) && rows.length === input.changes.length &&
+    new Set(rows.map((row) => row?.slug)).size === rows.length && rows.every((row) => {
+      if (!row || !validMinute(row.minutes)) return false;
+      const change = input.changes.find(({ slug }) => slug === row.slug);
+      if (!change) return false;
+      const [hour, minute] = change.time.split(":").map(Number);
+      const edit = row.scheduleEdit;
+      return row.minutes === hour * 60 + minute && Boolean(edit) &&
+        typeof edit.revision === "string" && /^[a-f0-9]{64}$/.test(edit.revision) &&
+        typeof edit.editable === "boolean" && ["ready", "pending"].includes(edit.status) &&
+        (edit.confirmedMinutes === null || validMinute(edit.confirmedMinutes)) &&
+        (edit.status !== "ready" || edit.confirmedMinutes === row.minutes);
+    });
+}
 
 /**
  * When a slot's worst case is over, in minutes since midnight. The overlap rule
