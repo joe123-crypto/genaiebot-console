@@ -119,6 +119,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
   const [adding, setAdding] = useState(false);
   const [newId, setNewId] = useState('');
   const [unlinking, setUnlinking] = useState<WhatsAppAccount | null>(null);
+  const [relinking, setRelinking] = useState<string | null>(null);
   const [session, setSession] = useState<LinkSession | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const sessionId = session?.id;
@@ -156,7 +157,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
       await refresh();
     }
   }, [sessionId, refresh]);
-  usePolling(refresh, 5000);
+  usePolling(refresh, 5000, !busy);
   usePolling(refreshMembership, 60_000);
   usePolling(pollSession, 2000, Boolean(sessionWaiting && !pairingError));
   useEffect(() => {
@@ -172,12 +173,37 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
     };
   }, []);
 
-  async function act(id: string, action: 'link' | 'unlink' | 'pause' | 'start', create = false) {
-    if (!writesEnabled || actionRunning.current) return;
+  async function act(id: string, action: 'link' | 'relink' | 'unlink' | 'pause' | 'start', create = false) {
+    if (!writesEnabled || !available || readError || actionRunning.current) return;
     actionRunning.current = true;
     setBusy(id); setActionError(null); setNotice(null);
+    let loginCleared = false;
     try {
-      if (action === 'link') {
+      // Let any earlier status read finish before checking or changing the login.
+      await reading.current;
+      if (action === 'relink') {
+        let current: AccountsPayload;
+        try { current = await request<AccountsPayload>('/api/accounts'); }
+        catch (error) { setReadError(message(error)); throw error; }
+        setData(current); setReadError(null);
+        const account = current.accounts.find((entry) => entry.id === id);
+        if (!account) throw new Error('This account is no longer available. Refresh status before trying again.');
+        if (account.startBlockedReason) throw new Error(account.startBlockedReason);
+        // A gateway pairing attempt takes precedence over replacing credentials.
+        if (!account.pairingSessionId) {
+          if (account.connected === true) {
+            setRelinking(null);
+            setNotice(`${id}: WhatsApp is already connected. Saved login retained.`);
+            return;
+          }
+          if (account.linked !== false) {
+            setData(await request<AccountsPayload>(`/api/accounts/${id}/unlink`, {}));
+            loginCleared = true;
+          }
+        }
+        setRelinking(null);
+      }
+      if (action === 'link' || action === 'relink') {
         const result = await request<LinkSession>(create ? '/api/accounts' : `/api/accounts/${id}/link`, create ? { id } : {});
         setSession(result); setPairingError(null); setAdding(false); setNewId('');
       } else {
@@ -185,13 +211,23 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
         setUnlinking(null);
         setNotice(`${id}: ${action === 'unlink' ? 'WhatsApp login cleared. Configuration and assignments retained.' : action === 'pause' ? 'Paused. Saved login retained.' : 'Started.'}`);
       }
-    } catch (error) { setActionError(message(error)); }
+    } catch (error) {
+      setActionError(loginCleared
+        ? `Saved login cleared, but the QR code could not be generated. Use Link to try again. ${message(error)}`
+        : message(error));
+    }
     finally {
       // A read begun before the action must not overwrite its outcome afterward.
       await reading.current;
       await refresh();
       actionRunning.current = false; setBusy(null);
     }
+  }
+  function link(account: WhatsAppAccount) {
+    if (disabled || account.startBlockedReason || account.connected === true && !account.pairingSessionId) return;
+    setActionError(null);
+    if (account.pairingSessionId || account.linked === false) void act(account.id, 'link');
+    else setRelinking(account.id);
   }
   function add(event: FormEvent) {
     event.preventDefault();
@@ -281,10 +317,10 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
                     </div>
                   );
                 })() : null}
-                {account?.hasError && !unavailable ? <p className="card-note">The gateway reported a connection error. Refresh status; Unlink, then Link, if the saved login is invalid.</p> : null}
+                {account?.hasError && !unavailable ? <p className="card-note">The gateway reported a connection error. Use Link to reconnect with a QR code if the saved login is invalid.</p> : null}
                 <div className="account-actions" aria-busy={busy === id}>
-                  <button className="account-button" disabled={blocked || Boolean(account?.startBlockedReason) || account?.linked === true && !account.pairingSessionId}
-                    onClick={() => void act(id, 'link')}><Link2 size={15} />{account?.pairingSessionId ? 'Continue linking' : 'Link'}</button>
+                  <button className="account-button" disabled={blocked || Boolean(account?.startBlockedReason) || account?.connected === true && !account.pairingSessionId}
+                    onClick={() => account && link(account)}><Link2 size={15} />{account?.pairingSessionId ? 'Continue linking' : 'Link'}</button>
                   {account?.enabled ? <button className="account-button" disabled={blocked || Boolean(account.pairingSessionId)} onClick={() => void act(id, 'pause')}><Pause size={15} /> Pause</button> :
                     <button className="account-button" disabled={blocked || account?.linked !== true || Boolean(account?.startBlockedReason) || Boolean(account?.pairingSessionId)} onClick={() => void act(id, 'start')}><Play size={15} /> Start</button>}
                   <button className="account-button account-button-danger" disabled={blocked || account?.linked === false || Boolean(account?.pairingSessionId)} onClick={() => { setUnlinking(account!); setActionError(null); }}><Unplug size={15} /> Unlink</button>
@@ -322,6 +358,14 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
           {actionError ? <p role="alert">{actionError}</p> : null}
           <button className="account-button account-button-primary" disabled={disabled || !newId}>Generate QR code</button>
         </form>
+      </Modal> : null}
+      {relinking ? <Modal title={`Relink ${relinking}?`} close={() => !actionRunning.current && setRelinking(null)}>
+        <p>This replaces the saved WhatsApp login and stops this line until you scan the new QR code. Configuration, group assignments, contact references and automated reply policies stay in place.</p>
+        {actionError ? <p role="alert">{actionError}</p> : null}
+        <div className="account-actions">
+          <button className="account-button" autoFocus disabled={Boolean(busy)} onClick={() => !actionRunning.current && setRelinking(null)}>Cancel</button>
+          <button className="account-button account-button-primary" disabled={disabled} onClick={() => void act(relinking, 'relink')}>{busy ? 'Preparing QR code…' : 'Replace login and show QR'}</button>
+        </div>
       </Modal> : null}
       {unlinking ? <Modal title={`Unlink ${unlinking.id}?`} close={() => !busy && setUnlinking(null)}>
         <p>This stops sends and replies and clears the saved WhatsApp login. Configuration, group assignments and contact references stay in place. Connecting again requires a QR scan.</p>
