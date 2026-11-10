@@ -8,6 +8,8 @@ import {
   WritesDisabledError,
   getCampaignPreview,
   getCampaignState,
+  getOverview,
+  deleteCampaign,
   getGroups,
   updateCampaign,
   updateCampaignCaptions,
@@ -22,7 +24,7 @@ import {
   type KnownCampaignGroup,
 } from "@/src/lib/campaign-group-draft";
 import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
-import { READ_ONLY_REASON } from "@/src/lib/write-capabilities";
+import { canDeleteCampaign, READ_ONLY_REASON } from "@/src/lib/write-capabilities";
 
 /**
  * Every action here is guarded twice: in the UI, and again here. A server
@@ -38,6 +40,24 @@ export async function loadCampaignGroupChoices(jids?: string[]): Promise<KnownCa
     jids.some((jid) => typeof jid !== "string" || !/^\d+(?:-\d+)?@g\.us$/.test(jid)))) throw new Error("Invalid group selection.");
   const { groups } = await getGroups(undefined, { jids });
   return groups.map(({ jid, name, account, status }) => ({ jid, name, account, status }));
+}
+
+export async function deleteCampaignAction(slug: string): Promise<WriteOutcome> {
+  if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
+  if (typeof slug !== "string" || !SLUG.test(slug) || slug.length > 64 || slug === "new") {
+    return { ok: false, detail: "No valid campaign was named." };
+  }
+  try {
+    const overview = await getOverview(undefined, { fresh: true });
+    const gate = canDeleteCampaign(WRITES_ENABLED, overview.writes);
+    if (!gate.allowed) return { ok: false, detail: gate.reason };
+    await deleteCampaign(slug, { by: OPERATOR_NAME });
+  } catch (error) {
+    return failedWrite(error);
+  }
+  refreshCampaign(slug);
+  revalidatePath("/schedule");
+  return { ok: true };
 }
 
 function refreshCampaign(slug: string) {

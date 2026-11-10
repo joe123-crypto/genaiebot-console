@@ -256,19 +256,25 @@ question in the same words -- stopping a campaign should not require opening
 it first. A campaign posts only when this switch is on *and* a cron is
 registered for it, and the confirm dialog says so when there is no cron.
 
-**Delete is shown, disabled, with the reason.** A campaign cannot be deleted
-from here, and the button says why rather than being left out. The bot refuses
-it outright: its writer removes groups and nothing else, and the companion
-campaign-creation update does not change that. For a campaign declared in the
-manifest the refusal is the whole story -- it is a script, a cron and an
-installer run rather than a record, and deleting its Firestore document would
-not take the row off this table, because the row comes from the manifest and
-the document only carries the operator's switch. A campaign created from the
-console is a record and could be removed one day, but until the bot will, the
-button stays switched off rather than offering something that would be refused.
+**Delete permanently removes a campaign**, after confirmation, when the bot
+advertises `writes.campaignDeletion.delete=true`. Both manifest campaigns and
+console-created campaigns are supported by the companion
+[`genaebot-campaign-deletion.patch`](integrations/genaebot-campaign-deletion.patch).
+Older or unconfigured bots keep the button disabled with the reason.
 
-Turning a campaign off is the operation that actually stops it, which is why
-the switch sits beside the delete rather than behind it.
+Deletion commits a durable retirement marker and audit record before background
+cleanup. It removes the campaign from active views and cap allocation, bars
+remaining sends in a run, and removes group assignments, owned cron jobs and
+exclusive R2 picture objects and runtime caches. A message already being
+submitted may finish. Shared objects, historical activity, audits, source files
+and existing container images are kept. The campaign ID stays reserved.
+
+The Campaigns screen shows durable pending/complete cleanup notices, including
+after reload. A failed gateway or picture cleanup is retried by the bot, without
+restoring the campaign. Timeouts say the result is unknown; repeating deletion
+returns the same receipt. Turning a campaign off remains the reversible option.
+See [deployment and compatibility instructions](integrations/README.md#campaign-deletion)
+before enabling this capability.
 
 With ten campaigns the search box earns less than it does on Groups. The
 status views are the point, which is why the **Needs attention** card now links

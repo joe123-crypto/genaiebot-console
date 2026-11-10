@@ -55,3 +55,15 @@ describe("campaign upload origin boundary", () => {
     expect(mock.sign).not.toHaveBeenCalled();
   });
 });
+
+describe("campaign ID retirement boundary", () => {
+  it.each([false, true])("refuses upload URLs for an already used ID (deleted=%s)", async (deleted) => {
+    const { slug } = validCampaign();
+    const current = await mock.overview();
+    mock.overview.mockClear();
+    mock.overview.mockResolvedValue({ ...current, campaigns: deleted ? [] : [{ slug }], deletedCampaigns: deleted ? [slug] : [] });
+    expect((await POST(request({ origin: "http://localhost:3000" }))).status).toBe(409);
+    expect(mock.overview).toHaveBeenCalledWith(undefined, { fresh: true });
+    expect(mock.sign).not.toHaveBeenCalled();
+  });
+});

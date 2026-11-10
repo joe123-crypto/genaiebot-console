@@ -38,9 +38,7 @@ type Props = {
    *  not. Defaulting to denied means a caller that forgets these can only ever
    *  make the table more read-only, never less. */
   switchGate?: WriteGate;
-  /** Why the delete button is switched off, in the bot's own words where it
-   *  has any. See `campaignDeleteReason`. */
-  deleteReason?: string;
+  deleteGate?: WriteGate;
 };
 
 const STATUSES: CampaignStatusChoice[] = ["all", "running", "off", "failing", "no-groups"];
@@ -49,7 +47,7 @@ const NO_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
 
 export function CampaignsTable({
   campaigns, initialFilter, writesEnabled = false,
-  switchGate = NO_WRITES, deleteReason = READ_ONLY_REASON,
+  switchGate = NO_WRITES, deleteGate = NO_WRITES,
 }: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
@@ -242,7 +240,7 @@ export function CampaignsTable({
                       storeEnabled={campaign.storeEnabled ?? campaign.enabled}
                       cronEnabled={campaign.cronEnabled}
                       gate={switchGate}
-                      deleteReason={deleteReason}
+                      deleteGate={deleteGate}
                     />
                   </td>
                 ) : null}

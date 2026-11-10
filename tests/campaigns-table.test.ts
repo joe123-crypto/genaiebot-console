@@ -3,11 +3,10 @@
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const { setEnabled } = vi.hoisted(() => ({ setEnabled: vi.fn() }));
-vi.mock("@/app/campaigns/actions", () => ({ setCampaignEnabledAction: setEnabled }));
+const { setEnabled, removeCampaign } = vi.hoisted(() => ({ setEnabled: vi.fn(), removeCampaign: vi.fn() }));
+vi.mock("@/app/campaigns/actions", () => ({ setCampaignEnabledAction: setEnabled, deleteCampaignAction: removeCampaign }));
 
 import { CampaignsTable } from "@/app/campaigns/_components/campaigns-table";
-import { CAMPAIGN_DELETE_NOT_BUILT } from "@/src/lib/write-capabilities";
 import { DEFAULT_CAMPAIGN_FILTER } from "@/src/domains/campaign-filter";
 import type { Campaign } from "@/src/lib/types";
 
@@ -312,7 +311,7 @@ describe("row actions", () => {
   const armed = {
     writesEnabled: true,
     switchGate: { allowed: true } as const,
-    deleteReason: CAMPAIGN_DELETE_NOT_BUILT,
+    deleteGate: { allowed: false, reason: "Deletion unavailable" },
   };
 
   it("leaves the table alone when the console cannot write", () => {
@@ -342,7 +341,7 @@ describe("row actions", () => {
   });
 
   it("shows the delete switched off, with the reason it was given", () => {
-    mount({ ...armed, deleteReason: "The bot does not delete campaigns." });
+    mount({ ...armed, deleteGate: { allowed: false, reason: "The bot does not delete campaigns." } });
     const button = screen.getByRole("button", { name: "Delete CV" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.title).toBe("The bot does not delete campaigns.");

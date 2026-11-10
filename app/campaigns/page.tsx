@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
-import { BotUnavailableError, getCampaigns } from "@/src/lib/bot-client";
+import { BotUnavailableError, getCampaignsPayload } from "@/src/lib/bot-client";
 import { loadOverview, parseCampaignFilter } from "@/src/domains/console";
 import { plural } from "@/src/lib/format";
-import { campaignDeleteReason, canDelete, canWrite } from "@/src/lib/write-capabilities";
+import { canDeleteCampaign, canWrite } from "@/src/lib/write-capabilities";
 import { WRITES_ENABLED } from "@/src/config";
 import { CampaignsTable } from "@/app/campaigns/_components/campaigns-table";
-import type { Campaign } from "@/src/lib/types";
+import type { Campaign, CampaignDeletion } from "@/src/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +30,11 @@ export default async function CampaignsPage({
   const initialFilter = parseCampaignFilter(await searchParams);
 
   let campaigns: Campaign[];
+  let deletions: CampaignDeletion[];
   try {
-    campaigns = await getCampaigns();
+    const payload = await getCampaignsPayload();
+    campaigns = payload.campaigns;
+    deletions = payload.deletions ?? [];
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
     return (
@@ -52,6 +55,11 @@ export default async function CampaignsPage({
     <Shell overview={loaded.ok ? loaded.overview : undefined}>
       <PageHead title="Campaigns" subtitle={subtitle(campaigns)} actions={<Link className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
 
+      {deletions.map((deletion) => <div className="banner" role="status" key={deletion.slug}>
+        {deletion.name} deleted. {deletion.cleanup === "complete" ? "Cleanup complete." : "Schedule, assignment or picture cleanup is pending; the bot retries automatically."}
+        {deletion.detail ? ` ${deletion.detail}` : ""}
+      </div>)}
+
       {campaigns.length === 0 ? (
         <Empty>No campaigns are declared.</Empty>
       ) : (
@@ -60,7 +68,7 @@ export default async function CampaignsPage({
           initialFilter={initialFilter}
           writesEnabled={WRITES_ENABLED}
           switchGate={canWrite(WRITES_ENABLED, writes, "campaigns", "enabled")}
-          deleteReason={campaignDeleteReason(canDelete(WRITES_ENABLED, writes, "campaigns"))}
+          deleteGate={canDeleteCampaign(WRITES_ENABLED, writes)}
         />
       )}
     </Shell>
