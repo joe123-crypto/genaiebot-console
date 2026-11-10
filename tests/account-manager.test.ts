@@ -17,6 +17,8 @@ let pairingAccount: string;
 let failUnlink: boolean;
 let failLink: boolean;
 let waitForUnlink: Promise<void> | null;
+let deferUnlink: boolean;
+let configApplying: boolean;
 const payload = () => ({ observedAt: '2026-11-06T00:00:00Z', accounts });
 const mutations = () => calls.filter((call) => call.method === 'POST').map((call) => call.url);
 const confirmRelink = () => fireEvent.click(screen.getByRole('button', { name: 'Replace login and show QR' }));
@@ -27,6 +29,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   accounts = [{ ...account }]; calls = []; failRead = false; scans = false; pairingBusy = false;
   pairingAccount = 'sales'; failUnlink = false; failLink = false; waitForUnlink = null;
+  deferUnlink = false; configApplying = false;
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
@@ -49,7 +52,10 @@ beforeEach(() => {
       else if (url.endsWith('/start')) { accounts[0] = { ...accounts[0], enabled: true, running: true, connected: true }; data = payload(); }
       else if (url.endsWith('/unlink')) {
         await waitForUnlink;
-        if (failUnlink) { status = 502; data = { error: 'Logout could not be confirmed' }; }
+        if (deferUnlink) {
+          configApplying = true; status = 409;
+          data = { error: 'Account setting is saved; gateway configuration is still being applied. Refresh status before retrying.' };
+        } else if (failUnlink) { status = 502; data = { error: 'Logout could not be confirmed' }; }
         else { accounts[0] = { ...accounts[0], enabled: false, linked: false, running: false, connected: false }; data = payload(); }
       } else if (url.endsWith('/link')) {
         if (failLink) { status = 502; data = { error: 'QR generation failed' }; }
@@ -59,7 +65,8 @@ beforeEach(() => {
           data = { id: sessionId, accountId: pairingAccount, state: 'waiting', qrDataUrl: 'data:image/png;base64,YQ==', expiresAt: '2026-11-06T00:02:00Z' };
         }
       }
-    } else if (failRead) { status = 503; data = { error: 'Gateway unavailable' }; }
+    } else if (configApplying) { status = 503; data = { error: 'Gateway configuration is still being applied. Refresh account status shortly.' }; }
+    else if (failRead) { status = 503; data = { error: 'Gateway unavailable' }; }
     return new Response(JSON.stringify(data), { status });
   }));
 });
@@ -154,6 +161,69 @@ describe('WhatsApp account management', () => {
     confirmRelink(); await settle(); await advance(5000);
     expect(mutations()).toEqual(['/api/accounts/ads/unlink']);
     expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toContain('Logout could not be confirmed');
+  });
+
+  it('shows pending configuration as waiting and continues only after the operator chooses to', async () => {
+    accounts[0] = { ...account, connected: null, hasError: true }; deferUnlink = true;
+    render(createElement(AccountManager, { writesEnabled: true })); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    confirmRelink(); await settle();
+    const dialog = screen.getByRole('dialog', { name: 'Relink ads?' });
+    expect(within(dialog).getByRole('status').textContent).toContain('Waiting for the gateway');
+    expect((within(dialog).getByRole('button', { name: 'Continue relinking' }) as HTMLButtonElement).disabled).toBe(true);
+    const check = within(dialog).getByRole('button', { name: 'Check status' }) as HTMLButtonElement;
+    expect(check.disabled).toBe(false);
+    fireEvent.click(check); await settle(); await advance(5000);
+    expect(mutations()).toEqual(['/api/accounts/ads/unlink']);
+    configApplying = false; deferUnlink = false;
+    accounts[0] = { ...accounts[0], enabled: false, running: false };
+    await advance(5000);
+    expect(within(dialog).getByRole('status').textContent).toContain('The gateway is ready');
+    expect(mutations()).toEqual(['/api/accounts/ads/unlink']);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Continue relinking' })); await settle();
+    expect(mutations()).toEqual(['/api/accounts/ads/unlink', '/api/accounts/ads/unlink', '/api/accounts/ads/link']);
+    expect(screen.getByRole('img', { name: /pairing QR code for ads/ })).toBeTruthy();
+  });
+
+  it('recovers a failed confirmation status read using Check status inside the dialog', async () => {
+    accounts[0] = { ...account, connected: false };
+    render(createElement(AccountManager, { writesEnabled: true })); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    failRead = true;
+    confirmRelink(); await settle();
+    const dialog = screen.getByRole('dialog');
+    expect((within(dialog).getByRole('button', { name: 'Replace login and show QR' }) as HTMLButtonElement).disabled).toBe(true);
+    failRead = false;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Check status' })); await settle();
+    expect((within(dialog).getByRole('button', { name: 'Replace login and show QR' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(mutations()).toEqual([]);
+    confirmRelink(); await settle();
+    expect(screen.getByRole('img', { name: /pairing QR code for ads/ })).toBeTruthy();
+  });
+
+  it('keeps cancellation available while a saved configuration is waiting to apply', async () => {
+    accounts[0] = { ...account, connected: false }; deferUnlink = true;
+    render(createElement(AccountManager, { writesEnabled: true })); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    confirmRelink(); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await advance(10_000);
+    expect(mutations()).toEqual(['/api/accounts/ads/unlink']);
+  });
+
+  it('waits without mutations when configuration is already applying at confirmation', async () => {
+    accounts[0] = { ...account, connected: false };
+    render(createElement(AccountManager, { writesEnabled: true })); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }));
+    configApplying = true;
+    confirmRelink(); await settle();
+    expect(within(screen.getByRole('dialog')).getByRole('status').textContent).toContain('Waiting for the gateway');
+    expect(mutations()).toEqual([]);
+    configApplying = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Check status' })); await settle();
+    expect((screen.getByRole('button', { name: 'Continue relinking' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(mutations()).toEqual([]);
   });
 
   it('allows direct QR retry if logout succeeded but pairing failed', async () => {

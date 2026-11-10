@@ -441,6 +441,9 @@ when writes are disabled. Permanent removal and console sign-in are deferred.
   checks status again before replacing a login and retains it if the line has
   reconnected. Active pairing sessions resume without clearing the login. New
   accounts have replies disabled and no group assignments.
+  If the gateway defers applying a line change while current work finishes, the
+  dialog checks status and offers **Check status**. Once ready, choose
+  **Continue relinking**; mutations are never retried automatically.
 - **Unlink** stops sends/replies and clears the saved WhatsApp login after
   confirmation. Configuration, assignments, contact references and history stay.
 - **Pause** stops sends/replies and retains login. It survives gateway restart.

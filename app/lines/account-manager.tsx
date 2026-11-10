@@ -30,6 +30,8 @@ async function request<T>(url: string, body?: Record<string, unknown>): Promise<
   return value as T;
 }
 const message = (error: unknown) => error instanceof Error ? error.message : 'Account controls are unavailable.';
+const configPending = (error: unknown) => error instanceof AccountRequestError &&
+  [409, 503].includes(error.status) && /gateway configuration is still being applied/i.test(error.message);
 
 /** Poll after each completed read; hidden/offline tabs do no background work. */
 function usePolling(read: () => Promise<void>, interval: number, enabled = true) {
@@ -120,6 +122,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
   const [newId, setNewId] = useState('');
   const [unlinking, setUnlinking] = useState<WhatsAppAccount | null>(null);
   const [relinking, setRelinking] = useState<string | null>(null);
+  const [relinkDeferred, setRelinkDeferred] = useState(false);
   const [session, setSession] = useState<LinkSession | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const sessionId = session?.id;
@@ -178,6 +181,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
     actionRunning.current = true;
     setBusy(id); setActionError(null); setNotice(null);
     let loginCleared = false;
+    let preparingRelink = action === 'relink';
     try {
       // Let any earlier status read finish before checking or changing the login.
       await reading.current;
@@ -202,6 +206,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
           }
         }
         setRelinking(null);
+        preparingRelink = false;
       }
       if (action === 'link' || action === 'relink') {
         const result = await request<LinkSession>(create ? '/api/accounts' : `/api/accounts/${id}/link`, create ? { id } : {});
@@ -212,9 +217,15 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
         setNotice(`${id}: ${action === 'unlink' ? 'WhatsApp login cleared. Configuration and assignments retained.' : action === 'pause' ? 'Paused. Saved login retained.' : 'Started.'}`);
       }
     } catch (error) {
-      setActionError(loginCleared
-        ? `Saved login cleared, but the QR code could not be generated. Use Link to try again. ${message(error)}`
-        : message(error));
+      if (preparingRelink && configPending(error)) {
+        // Configuration is still applying and logout is unconfirmed. Poll status only;
+        // the operator explicitly continues once the gateway has applied it.
+        setRelinkDeferred(true); setActionError(null);
+      } else {
+        setActionError(loginCleared
+          ? `Saved login cleared, but the QR code could not be generated. Use Link to try again. ${message(error)}`
+          : message(error));
+      }
     }
     finally {
       // A read begun before the action must not overwrite its outcome afterward.
@@ -227,7 +238,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
     if (disabled || account.startBlockedReason || account.connected === true && !account.pairingSessionId) return;
     setActionError(null);
     if (account.pairingSessionId || account.linked === false) void act(account.id, 'link');
-    else setRelinking(account.id);
+    else { setRelinkDeferred(false); setRelinking(account.id); }
   }
   function add(event: FormEvent) {
     event.preventDefault();
@@ -361,10 +372,15 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
       </Modal> : null}
       {relinking ? <Modal title={`Relink ${relinking}?`} close={() => !actionRunning.current && setRelinking(null)}>
         <p>This replaces the saved WhatsApp login and stops this line until you scan the new QR code. Configuration, group assignments, contact references and automated reply policies stay in place.</p>
+        {relinkDeferred ? <p role="status">{readError || !available
+          ? 'Waiting for the gateway to finish its current work and apply the line change. Status checks run every 5 seconds while this page is visible and online. Continue relinking when it is ready.'
+          : busy ? 'Checking the line and preparing its QR code…' : 'The gateway is ready. Continue relinking to generate the QR code.'}</p> : null}
         {actionError ? <p role="alert">{actionError}</p> : null}
+        {readError && actionError !== readError ? <p role="alert">{readError}</p> : null}
         <div className="account-actions">
           <button className="account-button" autoFocus disabled={Boolean(busy)} onClick={() => !actionRunning.current && setRelinking(null)}>Cancel</button>
-          <button className="account-button account-button-primary" disabled={disabled} onClick={() => void act(relinking, 'relink')}>{busy ? 'Preparing QR code…' : 'Replace login and show QR'}</button>
+          {relinkDeferred || readError || actionError ? <button className="account-button" disabled={!available || Boolean(busy)} onClick={() => void refresh()}>Check status</button> : null}
+          <button className="account-button account-button-primary" disabled={disabled} onClick={() => void act(relinking, 'relink')}>{busy ? 'Preparing QR code…' : relinkDeferred ? 'Continue relinking' : 'Replace login and show QR'}</button>
         </div>
       </Modal> : null}
       {unlinking ? <Modal title={`Unlink ${unlinking.id}?`} close={() => !busy && setUnlinking(null)}>
