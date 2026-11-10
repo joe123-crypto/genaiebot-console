@@ -176,7 +176,7 @@ export type WriteCapabilities = {
   delete: string[];
   campaignCreation?: { create: boolean; images: boolean; scheduling: boolean };
   campaignDeletion?: { delete: boolean; reason?: string };
-  scheduleEditing?: { edit: boolean; reason?: string };
+  scheduleEditing?: { edit: boolean; entries?: boolean; reason?: string };
 };
 
 export type ScheduleEdit = {
@@ -191,6 +191,37 @@ export type ScheduleChange = { slug: string; time: string; expectedRevision: str
 export type ScheduleRequest = { date: string; timezone: string; changes: ScheduleChange[] };
 export type ScheduleSaveResult = {
   campaigns: { slug: string; minutes: number; scheduleEdit: ScheduleEdit }[];
+};
+
+export type ScheduleEntryState = { minutes: number; paused: boolean; skipped: boolean; deleted: boolean };
+export type ScheduleEntry = {
+  entryId: string;
+  paused: boolean;
+  skipped: boolean;
+  deleted: boolean;
+  campaignEnabled: boolean;
+  recurrence: { timezone: string; weekdays: number[] };
+  confirmed: ScheduleEntryState | null;
+};
+export type ScheduleEntryChange = {
+  slug: string;
+  entryId: string;
+  expectedRevision: string;
+  create: boolean;
+  time: string;
+  paused: boolean;
+  skipped: boolean;
+  deleted: boolean;
+};
+export type ScheduleEntriesRequest = {
+  operationId: string;
+  date: string;
+  timezone: string;
+  changes: ScheduleEntryChange[];
+};
+export type ScheduleEntriesResult = {
+  operationId: string;
+  entries: (Pick<import("@/src/domains/schedule").DaySlot, "slug" | "minutes" | "time" | "scheduleEdit"> & ScheduleEntry)[];
 };
 
 export type CampaignDeletion = {

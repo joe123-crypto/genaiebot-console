@@ -75,6 +75,12 @@ export function canEditSchedule(consoleWrites: boolean, writes: WriteCapabilitie
   return gate;
 }
 
+export function canEditScheduleEntries(consoleWrites: boolean, writes: WriteCapabilities | undefined): WriteGate {
+  const gate = canEditSchedule(consoleWrites, writes);
+  if (!gate.allowed) return gate;
+  return writes?.scheduleEditing?.entries ? gate : { allowed: false, reason: "Deploy the companion bot update for repeat, pause, skip and delete controls." };
+}
+
 export const NO_ACTIONS_REASON =
   "This bot cannot act on WhatsApp groups from the console yet. Deploy genaebot with console group actions to use this.";
 export const ACTIONS_OFF_REASON =

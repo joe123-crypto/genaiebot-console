@@ -684,3 +684,13 @@ export async function saveSchedule(input: import("@/src/lib/types").ScheduleRequ
   if (!isScheduleSaveResult(result, input)) throw unreadable();
   return result;
 }
+
+export async function saveScheduleEntries(input: import("@/src/lib/types").ScheduleEntriesRequest, { by }: { by: string }): Promise<import("@/src/lib/types").ScheduleEntriesResult> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  const { isScheduleEntriesResult } = await import("@/src/domains/schedule-entries");
+  const result = WRITE_SOURCE === "remote"
+    ? await writeRemote("schedule", { ...input, actor: by })
+    : await runBridge(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-schedule"), ["--apply"], { ...input, actor: by });
+  if (!isScheduleEntriesResult(result, input)) throw new BotUnavailableError("The bot returned an unreadable schedule result. Retry the original request to check its receipt.");
+  return result;
+}

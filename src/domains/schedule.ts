@@ -1,5 +1,5 @@
 import { clockLabel, slotLabel, worstCaseRunSeconds } from "@/src/lib/format";
-import type { Overview, ScheduleRequest, ScheduleSaveResult } from "@/src/lib/types";
+import type { Overview, ScheduleRequest, ScheduleSaveResult, ScheduleEntry } from "@/src/lib/types";
 
 /**
  * The campaign day: the slots, where each run ends, what is running, and the
@@ -35,7 +35,15 @@ export function daySlots(overview: Overview) {
     .sort((a, b) => a.minutes - b.minutes);
 }
 
-export type DaySlot = ReturnType<typeof daySlots>[number];
+export type DaySlot = ReturnType<typeof daySlots>[number] & Partial<ScheduleEntry>;
+
+export function slotKey(slot: Pick<DaySlot, "slug" | "entryId">) {
+  return `${slot.slug}:${slot.entryId ?? "primary"}`;
+}
+
+export function activeSlot(slot: DaySlot) {
+  return !slot.paused && !slot.skipped && !slot.deleted && slot.campaignEnabled !== false;
+}
 
 /** Unreadable acknowledgements must not clear a draft, including acknowledgements
  * reconstructed from a fresh read after a timeout. */
@@ -72,12 +80,12 @@ export function runEndsAt(slot: DaySlot) {
  * the Schedule banner warns about, and hiding it here would contradict it.
  */
 export function runningNow(slots: DaySlot[], nowMinutes: number) {
-  return slots.filter((slot) => slot.minutes <= nowMinutes && nowMinutes < runEndsAt(slot));
+  return slots.filter((slot) => activeSlot(slot) && slot.minutes <= nowMinutes && nowMinutes < runEndsAt(slot));
 }
 
 /** The first slot still to start, or undefined once the day's last one has. */
 export function nextUp(slots: DaySlot[], nowMinutes: number) {
-  return slots.find((slot) => slot.minutes > nowMinutes);
+  return slots.filter(activeSlot).filter((slot) => slot.minutes > nowMinutes).sort((first, second) => first.minutes - second.minutes)[0];
 }
 
 /**
@@ -116,7 +124,7 @@ export type Clash = {
  */
 export function clashes(slots: DaySlot[]): Clash[] {
   const perAccount = new Map<string, DaySlot[]>();
-  for (const slot of [...slots].sort((a, b) => a.minutes - b.minutes)) {
+  for (const slot of slots.filter(activeSlot).sort((a, b) => a.minutes - b.minutes)) {
     const accounts = Object.entries(slot.accounts).filter(([, count]) => count > 0).map(([account]) => account);
     for (const account of accounts.length ? accounts : ["default"]) {
       perAccount.set(account, [...(perAccount.get(account) ?? []), slot]);
