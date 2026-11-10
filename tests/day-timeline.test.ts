@@ -78,6 +78,15 @@ function overlapWarning() {
 }
 
 describe("dragging a run to a new time", () => {
+  it("draws duration to scale instead of a shared minimum and labels midnight spillover", () => {
+    mount({ slots: [{ ...slot("alpha", 1430), targetCount: 5 }, { ...slot("beta", 600), targetCount: 20 }, { ...slot("empty", 500), targetCount: 0 }] });
+    expect((bar() as HTMLElement).style.width).toBe(`${10 / 1440 * 100}%`);
+    expect((bar("Beta start time") as HTMLElement).style.width).toBe(`${38 / 1440 * 100}%`);
+    expect((bar("Empty start time") as HTMLElement).style.width).toBe("0%");
+    expect(screen.getByText("Ends 00:10 (+1 day) · 20m at worst")).toBeDefined();
+    expect(screen.getAllByText("02:00").length).toBeGreaterThan(0);
+  });
+
   it("keeps campaign rows fixed across crossing times, refreshes and remounts", () => {
     const view = mount();
     const order = () => screen.getAllByRole("slider").map((element) => element.getAttribute("aria-label"));

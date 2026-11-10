@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { clashes, nextUp, runEndsAt, runningNow, withTimes } from "@/src/domains/schedule";
 import type { DaySlot } from "@/src/domains/schedule";
-import { campaignTitle, clockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { campaignTitle, clockLabel, timelineClockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
 import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleAction } from "@/app/schedule/actions";
 import type { ScheduleSaveResult } from "@/src/lib/types";
@@ -277,6 +277,8 @@ export function DayTimeline({
             </span>
           </div>
 
+          <div className="timeline-scroll">
+          <div className="timeline-canvas">
           <div
             style={{
               display: "grid",
@@ -285,10 +287,13 @@ export function DayTimeline({
               marginBottom: 2,
             }}
           >
-            <span />
-            <div style={{ position: "relative", height: 14 }} className="cell-mono">
+            <strong className="cell-mono">Time · {timezone}</strong>
+            <div className="timeline-axis timeline-ruler cell-mono">
+              {Array.from({ length: 13 }, (_, index) => index * 2).map((hour) => (
+                <span key={hour} style={{ left: `${(hour / 24) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>
+              ))}
               <span className="timeline-now-label" style={{ left: nowOffset }}>
-                now
+                {clockLabel(nowMinutes)} now
               </span>
             </div>
           </div>
@@ -303,7 +308,7 @@ export function DayTimeline({
               const isRunning = runningSlugs.has(slot.slug) && slot.scheduleEdit?.status !== "pending";
               const isDone = runEndsAt(slot) <= nowMinutes;
               const moved = slot.minutes !== base.minutes;
-              const endsAt = clockLabel(runEndsAt(slot));
+              const endsAt = timelineClockLabel(runEndsAt(slot));
               const title = campaignTitle(slot.slug);
               const editable = !pending && slot.scheduleEdit?.editable !== false;
               return (
@@ -321,6 +326,7 @@ export function DayTimeline({
                       )}{" "}
                       · {plural(slot.targetCount, "group")}
                     </span>
+                    <br /><span className="timeline-range">Ends {endsAt} · {Math.round(runMinutes)}m at worst</span>
                     {slot.scheduleEdit?.status === "pending" ? (
                       <><br /><span className="card-note">
                         Scheduler pending. {slot.scheduleEdit.confirmedMinutes === null
@@ -350,11 +356,11 @@ export function DayTimeline({
                     ) : null}
                   </span>
                   <div
+                    className="timeline-track"
                     style={{
                       position: "relative",
-                      height: 26,
+                      height: 34,
                       borderRadius: 7,
-                      background: "var(--surface-muted)",
                       border: "1px solid var(--border)",
                     }}
                   >
@@ -389,13 +395,13 @@ export function DayTimeline({
                       style={{
                         left: `${(slot.minutes / DAY_MINUTES) * 100}%`,
                         right: "auto",
-                        width: `${Math.max(6, (runMinutes / DAY_MINUTES) * 100)}%`,
+                        width: `${(Math.min(runMinutes, DAY_MINUTES - slot.minutes) / DAY_MINUTES) * 100}%`,
                         minWidth: 0,
                         justifyContent: "center",
                         fontSize: 10.5,
                       }}
                     >
-                      {Math.round(runMinutes)}m
+                      <span className="timeline-duration">{slot.time} – {endsAt} · {Math.round(runMinutes)}m at worst</span>
                     </span>
                     <span className="timeline-now" style={{ left: nowOffset }} aria-hidden />
                   </div>
@@ -424,6 +430,8 @@ export function DayTimeline({
                 </span>
               ))}
             </div>
+          </div>
+          </div>
           </div>
         </div>
       </section>

@@ -88,6 +88,12 @@ export function clockLabel(minutes: number) {
   return `${String(Math.floor(whole / 60)).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
 }
 
+export function timelineClockLabel(minutes: number) {
+  const whole = Math.round(minutes);
+  const days = Math.floor(whole / 1440);
+  return `${clockLabel(whole % 1440)}${days > 0 ? ` (+${days} day${days === 1 ? "" : "s"})` : ""}`;
+}
+
 /**
  * Why a declared campaign is not posting, in a few words -- or null when it is.
  * Two switches decide it: the operator's own (in Firestore) and whether a cron
