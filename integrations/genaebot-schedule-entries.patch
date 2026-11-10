@@ -1,0 +1,651 @@
+diff --git a/workspace/lib/console_schedule_entries.py b/workspace/lib/console_schedule_entries.py
+new file mode 100644
+index 0000000..1bce95a
+--- /dev/null
++++ b/workspace/lib/console_schedule_entries.py
+@@ -0,0 +1,261 @@
++import copy
++import datetime as dt
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++from zoneinfo import ZoneInfo
++
++import campaign_deletion
++import console_campaigns as campaigns
++import console_config
++import console_schedule as schedule
++import operator_writer as writer
++import promo_config
++
++IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
++
++
++def entries(doc, declared):
++    return copy.deepcopy(doc.get("scheduleEntries") if "scheduleEntries" in doc else {
++        "primary": {**schedule.definition(doc, declared), "paused": False, "deleted": False, "skipDates": []}})
++
++
++def revision(doc, declared):
++    desired = {key: {field: value for field, value in entry.items() if field != "confirmed"}
++               for key, entry in entries(doc, declared).items()}
++    return hashlib.sha256(json.dumps([desired, doc.get("enabled", True)], sort_keys=True).encode()).hexdigest()
++
++
++def state(entry, day):
++    minute = schedule.occurrence(entry, day)
++    if minute is None:
++        return None
++    return {"minutes": minute, "paused": entry.get("paused", False),
++            "skipped": str(day) in entry.get("skipDates", []), "deleted": entry.get("deleted", False)}
++
++
++def rows(slug, doc, declared, day, include_deleted=False):
++    result = []
++    current_revision = revision(doc, declared)
++    for key, entry in entries(doc, declared).items():
++        current = state(entry, day)
++        if current is None or (current["deleted"] and not include_deleted):
++            continue
++        confirmed_entry = entry.get("confirmed") if "scheduleEntries" in doc else {**entry, **(doc.get("scheduleEdit", {}).get("confirmed") or {})}
++        confirmed = state(confirmed_entry, day) if confirmed_entry else None
++        parts = schedule.parse(entry)
++        weekdays = list(range(7)) if parts[4] == "*" else sorted({(int(value) + 6) % 7 for value in parts[4].split(",")})
++        result.append({"slug": slug, "entryId": key, **current, "time": "%02d:%02d" % divmod(current["minutes"], 60),
++            "campaignEnabled": doc.get("enabled", True), "recurrence": {"timezone": entry["timezone"], "weekdays": weekdays},
++            "confirmed": confirmed, "scheduleEdit": {"revision": current_revision, "editable": True,
++                "status": "ready" if confirmed_entry == {field: value for field, value in entry.items() if field != "confirmed"} else "pending",
++                "confirmedMinutes": confirmed["minutes"] if confirmed else None}})
++    return result
++
++
++def validate(data):
++    schedule.need(isinstance(data, dict) and not set(data) - {"operationId", "date", "timezone", "changes", "actor"}, "Invalid schedule request.")
++    schedule.need(isinstance(data.get("operationId"), str) and IDENTIFIER.fullmatch(data["operationId"]), "Invalid operation ID.")
++    schedule.need(data.get("timezone") == schedule.DISPLAY_ZONE, "Invalid display timezone.")
++    schedule.need(isinstance(data.get("date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["date"]), "Invalid date.")
++    day = dt.date.fromisoformat(data["date"])
++    schedule.need(isinstance(data.get("actor", ""), str) and len(data.get("actor", "")) <= 200, "Invalid actor.")
++    changes = data.get("changes")
++    schedule.need(isinstance(changes, list) and 1 <= len(changes) <= 100, "Choose 1 to 100 changed entries.")
++    seen = set()
++    for change in changes:
++        schedule.need(isinstance(change, dict) and set(change) == {"slug", "entryId", "expectedRevision", "create", "time", "paused", "skipped", "deleted"}, "Invalid entry change.")
++        for field in ("slug", "entryId"):
++            schedule.need(isinstance(change[field], str) and IDENTIFIER.fullmatch(change[field]), "Invalid entry ID.")
++        key = (change["slug"], change["entryId"])
++        schedule.need(key not in seen and change["slug"] != "new", "Duplicate entry change.")
++        seen.add(key)
++        schedule.need(isinstance(change["expectedRevision"], str) and re.fullmatch(r"[a-f0-9]{64}", change["expectedRevision"]), "Invalid revision.")
++        schedule.need(isinstance(change["time"], str) and schedule.TIME.fullmatch(change["time"]), "Invalid start time.")
++        schedule.need(all(type(change[field]) is bool for field in ("create", "paused", "skipped", "deleted")), "Invalid entry state.")
++        schedule.need(not change["create"] or (change["entryId"] != "primary" and not change["deleted"]), "Invalid new entry.")
++    return day
++
++
++def save(data, store, env=None):
++    day = validate(data)
++    schedule.need(promo_config.mode(env)[0] == "firestore", "Schedule entries require live Firestore configuration.")
++    declared = schedule.declarations(env)
++    digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
++    with campaign_deletion.scheduler_lock(env):
++        store.begin()
++        try:
++            receipt = store.get("schedule_operations", data["operationId"])
++            if receipt:
++                schedule.need(receipt["digest"] == digest, "Operation ID was already used for a different request.", 409)
++                return receipt["result"]
++            originals, updated = {}, {}
++            for change in data["changes"]:
++                slug, key = change["slug"], change["entryId"]
++                if slug not in originals:
++                    doc = store.get("campaigns", slug)
++                    schedule.need(doc is not None and not doc.get("deleted"), "Campaign is missing or deleted.", 409)
++                    originals[slug] = doc
++                    updated[slug] = copy.deepcopy(doc)
++                    initial = entries(doc, declared.get(slug))
++                    if "scheduleEntries" not in doc:
++                        for entry in initial.values():
++                            entry["confirmed"] = {**copy.deepcopy(entry), **(doc.get("scheduleEdit", {}).get("confirmed") or {})}
++                    updated[slug]["scheduleEntries"] = initial
++                doc = originals[slug]
++                schedule.need(change["expectedRevision"] == revision(doc, declared.get(slug)), "The schedule changed while you were editing. Reset to load the latest entries.", 409)
++                desired = updated[slug]["scheduleEntries"]
++                if change["create"]:
++                    schedule.need(key not in desired and len(desired) < 100, "Entry already exists or campaign has reached 100 entries.", 409)
++                    entry = {"cron": "0 0 * * *", "timezone": data["timezone"], "paused": False, "deleted": False, "skipDates": [], "confirmed": None}
++                else:
++                    schedule.need(key in desired and not desired[key].get("deleted"), "Scheduled entry is missing or deleted.", 409)
++                    entry = copy.deepcopy(desired[key])
++                hour, minute = map(int, change["time"].split(":"))
++                native = dt.datetime.combine(day, dt.time(hour, minute), ZoneInfo(data["timezone"])).astimezone(ZoneInfo(entry["timezone"]))
++                parts = schedule.parse(entry)
++                parts[:2] = [str(native.minute), str(native.hour)]
++                entry["cron"] = " ".join(parts)
++                schedule.need(schedule.occurrence(entry, day) == hour * 60 + minute, "The selected time is outside this entry's weekdays.")
++                entry.update(paused=change["paused"], deleted=change["deleted"])
++                dates = set(entry.get("skipDates", []))
++                if change["skipped"]:
++                    dates.add(str(day))
++                else:
++                    dates.discard(str(day))
++                entry["skipDates"] = sorted(dates)
++                desired[key] = entry
++                updated[slug]["scheduleEdit"] = {**doc.get("scheduleEdit", {}), "pending": True}
++            result = {"operationId": data["operationId"], "entries": []}
++            writes = []
++            for slug, after in updated.items():
++                by_id = {entry["entryId"]: entry for entry in rows(slug, after, declared.get(slug), day, True)}
++                result["entries"].extend(by_id[change["entryId"]] for change in data["changes"] if change["slug"] == slug)
++                audit_id, audit = writer.audit_document(data.get("actor"), "campaigns", slug, originals[slug], after)
++                writes.extend([("campaigns", slug, after, True), ("audit", audit_id, audit, False)])
++            writes.append(("schedule_operations", data["operationId"], {"digest": digest, "result": result}, False))
++            with console_config.mutation(env):
++                store.commit(writes)
++            return result
++        finally:
++            store.rollback()
++
++
++def command(slug, key):
++    return ["python3", str(Path(__file__).resolve().parents[1] / "bin" / "run-schedule-entry"), slug, key]
++
++
++def job_name(slug, key, doc, declared):
++    if key == "primary":
++        return campaigns.job_name(slug, doc) if doc.get("kind") == "console" else declared["name"]
++    return "console-entry-%s-%s" % (slug, key)
++
++
++def apply_jobs(slug, doc, declared, call):
++    for key, entry in entries(doc, declared).items():
++        name = job_name(slug, key, doc, declared)
++        found = [job for job in call(["list", "--all", "--json"]).get("jobs", []) if job.get("name") == name]
++        schedule.need(len(found) <= 1, "Duplicate entry jobs require operator review.", 409)
++        argv = command(slug, key)
++        allowed_commands = [argv]
++        if key == "primary":
++            allowed_commands.append(["python3", str(Path(__file__).resolve().parents[1] / "bin" / "run-console-campaign"), slug] if doc.get("kind") == "console" else ["python3", declared["script"]])
++        if found:
++            schedule.need(found[0].get("payload", {}).get("argv") in allowed_commands, "Entry job command does not match its owner.", 409)
++        if entry.get("deleted"):
++            if found:
++                call(["rm", found[0]["id"]])
++            schedule.need(not any(job.get("name") == name for job in call(["list", "--all", "--json"]).get("jobs", [])), "Deleted job is still registered.", 503)
++            continue
++        enabled = doc.get("enabled", True) and not entry.get("paused", False)
++        timeout = doc.get("timeoutSeconds", (declared or {}).get("timeoutSeconds", 7200))
++        alert = doc.get("failureAlertTo", (declared or {}).get("failureAlertTo", ""))
++        flags = ["--name", name, "--cron", entry["cron"], "--tz", entry["timezone"], "--exact",
++                 "--session", "isolated", "--command-argv", json.dumps(argv), "--command-cwd", str(Path(argv[1]).parents[1]),
++                 "--timeout-seconds", str(timeout), "--no-deliver"]
++        if alert:
++            flags += ["--failure-alert", "--failure-alert-after", "1", "--failure-alert-channel", "whatsapp", "--failure-alert-to", alert, "--failure-alert-cooldown", "1h"]
++        if found:
++            call(["edit", found[0]["id"]] + flags + (["--enable"] if enabled else ["--disable"]))
++        else:
++            call(["add"] + flags + ["--disabled", "--json"])
++            found = [job for job in call(["list", "--all", "--json"]).get("jobs", []) if job.get("name") == name]
++            schedule.need(len(found) == 1, "New entry job was not found uniquely.", 503)
++            if enabled:
++                call(["edit", found[0]["id"], "--enable"])
++        verified = [job for job in call(["list", "--all", "--json"]).get("jobs", []) if job.get("name") == name]
++        schedule.need(len(verified) == 1, "Entry job verification failed.", 503)
++        job = verified[0]
++        schedule.need(job.get("enabled") == enabled and job.get("schedule", {}).get("expr") == entry["cron"] and job.get("schedule", {}).get("tz") == entry["timezone"]
++                      and job.get("payload", {}).get("argv") == argv and job.get("payload", {}).get("timeoutSeconds") == timeout
++                      and job.get("payload", {}).get("cwd") == str(Path(argv[1]).parents[1])
++                      and (not alert or job.get("failureAlert", {}).get("to") == alert), "Entry job verification is pending.", 503)
++
++
++def reconcile(slug, store, env=None, call=None):
++    call = call or campaigns.gateway
++    doc = store.get("campaigns", slug)
++    if not doc or doc.get("deleted") or "scheduleEntries" not in doc:
++        return
++    declared = schedule.declarations(env).get(slug)
++    apply_jobs(slug, doc, declared, call)
++    store.begin()
++    try:
++        current = store.get("campaigns", slug)
++        if not current or current.get("deleted") or revision(current, declared) != revision(doc, declared):
++            return
++        changed = copy.deepcopy(current)
++        for entry in changed["scheduleEntries"].values():
++            entry["confirmed"] = {field: value for field, value in entry.items() if field != "confirmed"}
++        changed["scheduleEdit"] = {**changed.get("scheduleEdit", {}), "pending": False}
++        if changed.get("kind") == "console":
++            changed["scheduleStatus"] = "ready"
++        if changed != current:
++            with console_config.mutation(env):
++                store.commit([("campaigns", slug, changed, True)])
++    finally:
++        store.rollback()
++
++
++def allowed(doc, key, day):
++    if doc.get("deleted") or doc.get("enabled") is False:
++        return False
++    if "scheduleEntries" not in doc:
++        return key == "primary"
++    entry = doc["scheduleEntries"].get(key)
++    if not entry:
++        return False
++    current = state(entry, day)
++    return current is not None and not any(current[field] for field in ("paused", "skipped", "deleted"))
++
++
++def run(slug, key, argv=None, now=None, read=None, execute=None):
++    import fcntl
++    import subprocess
++    schedule.need(isinstance(slug, str) and IDENTIFIER.fullmatch(slug) and isinstance(key, str) and IDENTIFIER.fullmatch(key), "Invalid scheduled entry.")
++    now = now or dt.datetime.now(dt.timezone.utc)
++    local = now.astimezone(ZoneInfo(schedule.DISPLAY_ZONE))
++    day = local.date()
++    doc = (read or campaign_deletion.live_campaign)(slug)
++    if not allowed(doc, key, day):
++        return 0
++    entry = doc.get("scheduleEntries", {}).get(key)
++    if entry and schedule.occurrence(entry, day) > local.hour * 60 + local.minute:
++        return 0
++    declared = schedule.declarations().get(slug)
++    if doc.get("kind") == "console":
++        args = ["python3", str(Path(__file__).resolve().parents[1] / "bin" / "run-console-campaign"), slug]
++    else:
++        schedule.need(declared is not None, "Campaign declaration is missing.", 409)
++        args = ["python3", declared["script"]]
++    directory = Path(campaign_deletion.config.state_dir()) / "runtime" / "schedule-entries"
++    directory.mkdir(parents=True, exist_ok=True)
++    with (directory / (slug + "-" + key + ".lock")).open("a") as lock:
++        try:
++            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        except BlockingIOError:
++            return 0
++        environment = {**os.environ, "GENAIE_SCHEDULE_ENTRY": key, "GENAIE_SCHEDULE_DAY": str(day)}
++        return (execute or subprocess.call)(args + (argv or []), env=environment)
+diff --git a/workspace/bin/run-schedule-entry b/workspace/bin/run-schedule-entry
+new file mode 100644
+index 0000000..917dca8
+--- /dev/null
++++ b/workspace/bin/run-schedule-entry
+@@ -0,0 +1,8 @@
++#!/usr/bin/env python3
++from pathlib import Path
++import sys
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
++import console_schedule_entries
++
++if __name__ == "__main__":
++    sys.exit(console_schedule_entries.run(sys.argv[1], sys.argv[2], sys.argv[3:]))
+diff --git a/workspace/lib/console_schedule.py b/workspace/lib/console_schedule.py
+index f9b5d26..b8419dc 100644
+--- a/workspace/lib/console_schedule.py
++++ b/workspace/lib/console_schedule.py
+@@ -84,7 +84,11 @@ def read_fields(doc, declared, day):
+     if not edit["editable"]:
+         return {"scheduleEdit": edit}
+     parts = parse(value)
+-    return {"cron": value["cron"], "timezone": value["timezone"],
++    import console_schedule_entries
++    entry_rows = console_schedule_entries.rows((declared or {}).get("slug", ""), doc, declared, day)
++    if "scheduleEntries" in doc:
++        edit = {**edit, "editable": False, "reason": "Use the independent schedule entry controls."}
++    return {"scheduleEntries": entry_rows, "cron": value["cron"], "timezone": value["timezone"],
+             "hour": int(parts[1]), "minute": int(parts[0]), "scheduleMinutes": occurrence(value, day), "scheduleEdit": edit}
+ 
+ 
+@@ -110,6 +114,9 @@ def declarations(env=None):
+ 
+ 
+ def validate(data):
++    if isinstance(data, dict) and "operationId" in data:
++        import console_schedule_entries
++        return console_schedule_entries.validate(data)
+     need(isinstance(data, dict) and not set(data) - {"date", "timezone", "changes", "actor"}, "Invalid schedule request.")
+     need(data.get("timezone") == DISPLAY_ZONE, "Invalid display timezone.")
+     need(isinstance(data.get("date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["date"]), "Invalid schedule day.")
+@@ -132,6 +139,9 @@ def validate(data):
+ 
+ 
+ def save(data, store, env=None):
++    if isinstance(data, dict) and "operationId" in data:
++        import console_schedule_entries
++        return console_schedule_entries.save(data, store, env)
+     need(promo_config.mode(env)[0] == "firestore", "Schedule editing requires live Firestore configuration.")
+     day = validate(data)
+     declared = declarations(env)
+@@ -145,6 +155,7 @@ def save(data, store, env=None):
+                 slug = row["slug"]
+                 existing = store.get("campaigns", slug)
+                 need(existing is not None and not existing.get("deleted"), "Campaign is missing or deleted: %s" % slug, 409)
++                need("scheduleEntries" not in existing, "This campaign uses independent schedule entries. Reload with the updated console.", 409)
+                 current = definition(existing, declared.get(slug))
+                 desired = move(current, row["time"], day)
+                 # An identical desired time is a safe retry after a lost reply.
+@@ -185,6 +196,9 @@ def summary(slug, store, declared, day):
+ 
+ 
+ def apply_builtin(doc, declared, call):
++    if "scheduleEntries" in doc:
++        import console_schedule_entries
++        return console_schedule_entries.apply_jobs(declared["slug"], doc, declared, call)
+     # Change only the existing owned job's schedule, preserving active runs,
+     # enabled state, argv, timeout and alerts. Never call cron run.
+     need(declared is not None, "Campaign declaration is missing.", 409)
+@@ -208,6 +222,9 @@ def reconcile_one(slug, store, env=None, call=None):
+         doc = store.get("campaigns", slug)
+         if not doc or doc.get("deleted") or not (doc.get("scheduleEdit") or {}).get("pending"):
+             return
++        if "scheduleEntries" in doc:
++            import console_schedule_entries
++            return console_schedule_entries.reconcile(slug, store, env, call)
+         declared = declarations(env).get(slug)
+         desired = definition(doc, declared)
+         if doc.get("kind") == "console":
+diff --git a/workspace/lib/console_campaigns.py b/workspace/lib/console_campaigns.py
+index 87096ad..30a12f4 100644
+--- a/workspace/lib/console_campaigns.py
++++ b/workspace/lib/console_campaigns.py
+@@ -386,6 +386,9 @@ def _reconcile_one(slug, store, call):
+     campaign = store.get("campaigns", slug)
+     if not campaign or campaign.get("kind") != "console":
+         return
++    if "scheduleEntries" in campaign:
++        import console_schedule_entries
++        return console_schedule_entries.reconcile(slug, store, call=call)
+     name = job_name(slug, campaign)
+     expression = cron_expression(campaign["schedule"])
+     jobs = call(["list", "--all", "--json"]).get("jobs", [])
+@@ -545,8 +548,10 @@ def run_campaign(slug, argv=None, now=None, resolve=None, broadcast=None, ensure
+     if not dry and (source.get("enabled") is not True or campaign.get("scheduleStatus") != "ready"):
+         return 0
+     now = now or dt.datetime.now(dt.timezone.utc)
+-    day = now.astimezone(ZoneInfo(campaign["schedule"]["timezone"])).date()
+-    if not dry and day.weekday() not in campaign["schedule"]["weekdays"]:
++    entry_id = os.environ.get("GENAIE_SCHEDULE_ENTRY", "primary")
++    entry = campaign.get("scheduleEntries", {}).get(entry_id)
++    day = now.astimezone(ZoneInfo(entry["timezone"] if entry else campaign["schedule"]["timezone"])).date()
++    if not dry and entry is None and day.weekday() not in campaign["schedule"]["weekdays"]:
+         return 0
+     # Keep strict all-picture validation for data-only campaigns: there are no
+     # baked files to fall back to, and a missing asset must never change rotation.
+diff --git a/workspace/lib/promo_broadcast.py b/workspace/lib/promo_broadcast.py
+index a121e9f..a312c3f 100644
+--- a/workspace/lib/promo_broadcast.py
++++ b/workspace/lib/promo_broadcast.py
+@@ -1188,6 +1188,21 @@ def broadcast(*, text, image, targets_file, state_file, send_delay=None, argv=No
+             "regenerate targets.json with make-promo-targets when the source is "
+             "the file" % source["source"])
+ 
++    entry_id = os.environ.get("GENAIE_SCHEDULE_ENTRY", "primary")
++    campaign_doc = (source.get("membership", {}).get("promos") or {}).get(promo_config.promo_key(promo_name), {})
++    if "scheduleEntries" in campaign_doc or entry_id != "primary":
++        import console_schedule_entries
++        import campaign_deletion
++        import datetime as scheduled_datetime
++        from zoneinfo import ZoneInfo
++        occurrence_day = scheduled_datetime.date.fromisoformat(os.environ["GENAIE_SCHEDULE_DAY"]) if os.environ.get("GENAIE_SCHEDULE_DAY") else scheduled_datetime.datetime.now(ZoneInfo("Africa/Harare")).date()
++        if not dry and not console_schedule_entries.allowed(campaign_deletion.live_campaign(promo_config.promo_key(promo_name)), entry_id, occurrence_day):
++            return 0
++        if entry_id != "primary":
++            if not console_schedule_entries.IDENTIFIER.fullmatch(entry_id):
++                raise ValueError("Invalid schedule entry ID")
++            state_file = state_file + ".entry-" + entry_id
++        today = occurrence_day.isoformat()
+     st = load_state(state_file)
+     jids = resolve_targets(all_entries, st, dry=dry)
+     if not jids:
+diff --git a/workspace/lib/promo_config.py b/workspace/lib/promo_config.py
+index 48ba80e..33650b4 100644
+--- a/workspace/lib/promo_config.py
++++ b/workspace/lib/promo_config.py
+@@ -200,7 +200,11 @@ def resolve(promo, targets_file=None, membership_path=None, env=None, err=None,
+         # Data-defined campaigns have no baked manifest entry. A pending job
+         # cannot consume cap turns until reconciliation verifies its schedule.
+         for key, meta in (membership.get("promos") or {}).items():
+-            if meta.get("kind") == "console":
++            if "scheduleEntries" in meta:
++                import console_schedule_entries
++                campaign_day = datetime.datetime.fromtimestamp(inject.get("now", time.time)(), ZoneInfo("Africa/Harare")).date()
++                switches[key] = switches.get(key, False) and any(console_schedule_entries.allowed(meta, entry_id, campaign_day) for entry_id in meta["scheduleEntries"])
++            elif meta.get("kind") == "console":
+                 import console_campaigns
+                 campaign_day = datetime.datetime.fromtimestamp(inject.get("now", time.time)(), ZoneInfo("Africa/Harare")).date()
+                 switches[key] = (switches.get(key, False) and meta.get("scheduleStatus") == "ready"
+diff --git a/workspace/lib/console_live_api.py b/workspace/lib/console_live_api.py
+index 438e3c7..a6c43fa 100644
+--- a/workspace/lib/console_live_api.py
++++ b/workspace/lib/console_live_api.py
+@@ -191,6 +191,14 @@ class LiveViews:
+                          for row in model["campaigns"] if row["enabled"] and row["hour"] is not None and row.get("scheduleMinutes", 0) is not None]
+                 for slot in slots:
+                     slot["time"] = "%02d:%02d" % divmod(slot["minutes"], 60)
++                independent = []
++                for row in model["campaigns"]:
++                    if "scheduleEntries" in row:
++                        for entry in row["scheduleEntries"]:
++                            independent.append({**entry, "slug": row["slug"], "name": row["name"], "targetCount": row["targetCount"], "accounts": row["accounts"]})
++                    else:
++                        independent.extend(slot for slot in slots if slot["slug"] == row["slug"])
++                slots = independent
+                 payload = {"date": model["date"], "timezone": "Africa/Harare", "slots": slots,
+                            "writes": model["context"]["writes"]}
+                 revision = digest(payload)
+diff --git a/workspace/lib/campaign_deletion.py b/workspace/lib/campaign_deletion.py
+index e2420fd..d25078e 100644
+--- a/workspace/lib/campaign_deletion.py
++++ b/workspace/lib/campaign_deletion.py
+@@ -205,6 +205,11 @@ def delete(slug, actor, store, env=None):
+                 runner = ["python3", str(Path(__file__).resolve().parents[1] / "bin" / "run-console-campaign"), slug]
+                 if not any(command["argv"] == runner for command in operation["commands"]):
+                     operation["commands"].append({"argv": runner})
++            if campaign and "scheduleEntries" in campaign:
++                import console_schedule_entries
++                for entry_id in campaign["scheduleEntries"]:
++                    operation["jobNames"].append(console_schedule_entries.job_name(slug, entry_id, campaign, declared))
++                    operation["commands"].append({"argv": console_schedule_entries.command(slug, entry_id)})
+             marker = {"deleted": True, "enabled": False, "deletedAt": audit["at"], "deletion": slug}
+             with __import__("console_config").mutation(env):
+                 store.commit([("campaigns", slug, marker, campaign is not None),
+diff --git a/workspace/bin/console-read b/workspace/bin/console-read
+index 85fb019..883d98b 100755
+--- a/workspace/bin/console-read
++++ b/workspace/bin/console-read
+@@ -654,7 +654,8 @@ def write_capabilities():
+                        for collection, names in operator_writer.EDITABLE.items()),
+         "delete": list(operator_writer.DELETABLE),
+         "campaignDeletion": __import__("campaign_deletion").capability(),
+-        "scheduleEditing": {"edit": current == promo_config.FIRESTORE and os.path.isfile(str(Path(__file__).with_name("console-schedule")))},
++        "scheduleEditing": {"edit": current == promo_config.FIRESTORE and os.path.isfile(str(Path(__file__).with_name("console-schedule"))),
++                            "entries": current == promo_config.FIRESTORE and os.path.isfile(str(Path(__file__).with_name("run-schedule-entry")))},
+         "campaignCreation": {"create": current == promo_config.FIRESTORE,
+                              "images": ad_assets.mode()[0] == "r2" and bool(ad_assets.base_url()),
+                              "scheduling": True},
+diff --git a/workspace/bin/console-schedule b/workspace/bin/console-schedule
+index 73f33b6..423a9ef 100755
+--- a/workspace/bin/console-schedule
++++ b/workspace/bin/console-schedule
+@@ -33,9 +33,10 @@ def main():
+                     schedule.reconcile_one(row["slug"], store)
+                 except Exception:
+                     pass
+-            declared = schedule.declarations()
+-            day = schedule.validate(data)
+-            result = {"campaigns": [schedule.summary(row["slug"], store, declared, day) for row in data["changes"]]}
++            if "operationId" not in data:
++                declared = schedule.declarations()
++                day = schedule.validate(data)
++                result = {"campaigns": [schedule.summary(row["slug"], store, declared, day) for row in data["changes"]]}
+         print(json.dumps({"ok": True, "status": 200, **result}))
+         return 0
+     except (operator_writer.WriteRefused, operator_config.ConfigUnavailable, ValueError) as ex:
+diff --git a/workspace/bin/console-campaign-check b/workspace/bin/console-campaign-check
+index d32ecf7..01b73da 100755
+--- a/workspace/bin/console-campaign-check
++++ b/workspace/bin/console-campaign-check
+@@ -29,7 +29,7 @@ if __name__ == "__main__":
+                 key = deletion.valid_slug(sys.argv[2])
+                 with deletion.scheduler_lock():
+                     doc = deletion.live_campaign(key)
+-                    if doc.get("kind") == "console":
++                    if doc.get("kind") == "console" or "scheduleEntries" in doc:
+                         sys.stderr.write("This campaign is data-defined; its reconciler owns the job. Do not run the script installer.\n")
+                         sys.exit(4)
+                     override = doc.get("scheduleOverride") if not doc.get("deleted") else None
+@@ -48,8 +48,12 @@ if __name__ == "__main__":
+             else:
+                 print("[]")
+             sys.exit(0)
+-        if deletion.enabled() and deletion.live_campaign(slug).get("deleted") is True:
+-            sys.exit(3)
++        if deletion.enabled():
++            doc = deletion.live_campaign(slug)
++            if doc.get("deleted") is True:
++                sys.exit(3)
++            if "scheduleEntries" in doc:
++                sys.exit(4)
+     except Exception as ex:
+         sys.stderr.write("Cannot verify campaign retirement (%s); refusing cron installation.\n" % type(ex).__name__)
+         sys.exit(1)
+diff --git a/deploy/railway/console-api.py b/deploy/railway/console-api.py
+index 269ed6f..4964794 100755
+--- a/deploy/railway/console-api.py
++++ b/deploy/railway/console-api.py
+@@ -551,7 +551,7 @@ class Handler(BaseHTTPRequestHandler):
+             if len(raw) != size:
+                 raise ValueError()
+             request = json.loads(raw)
+-            if not isinstance(request, dict) or set(request) - {"changes", "date", "timezone", "actor"}:
++            if not isinstance(request, dict) or set(request) - {"changes", "date", "timezone", "actor", "operationId"}:
+                 raise ValueError()
+         except (ValueError, TypeError):
+             self.send_any(400, b'{"error":"Invalid schedule change."}', True)
+diff --git a/workspace/lib/test_console_schedule_entries.py b/workspace/lib/test_console_schedule_entries.py
+new file mode 100644
+index 0000000..7241c77
+--- /dev/null
++++ b/workspace/lib/test_console_schedule_entries.py
+@@ -0,0 +1,121 @@
++import copy
++import datetime as dt
++import json
++import os
++from pathlib import Path
++import unittest
++from unittest.mock import patch
++
++import console_schedule_entries as entries
++import console_schedule as schedule
++import operator_config as config
++import operator_writer as writer
++import promo_broadcast
++from test_console_schedule import Schedule, DAY
++from test_console_campaigns import FakeGateway
++
++
++class EntryGateway(FakeGateway):
++    def __call__(self, args):
++        if args[0] == "rm":
++            self.calls.append(args)
++            self.jobs = [job for job in self.jobs if job["id"] != args[1]]
++            return {}
++        before = len(self.jobs)
++        result = super().__call__(args)
++        if args[0] == "add":
++            self.jobs[-1]["id"] = "entry-%d" % before
++        return result
++
++
++class Entries(unittest.TestCase):
++    def setUp(self):
++        Schedule.setUp(self)
++        self.gateway = EntryGateway()
++        self.slug = "borehole-drilling"
++
++    def body(self, entry_id="repeat-1", operation="request-1", **overrides):
++        doc = self.store.get("campaigns", self.slug)
++        change = {"slug": self.slug, "entryId": entry_id, "expectedRevision": entries.revision(doc, self.declared),
++                  "create": entry_id not in entries.entries(doc, self.declared), "time": "12:15", "paused": False, "skipped": False, "deleted": False}
++        change.update(overrides)
++        return {"operationId": operation, "date": str(DAY), "timezone": "Africa/Harare", "actor": "Operator", "changes": [change]}
++
++    def test_daily_repeat_receipt_is_atomic_and_replay_does_not_duplicate(self):
++        body = self.body()
++        result = entries.save(body, self.store, self.env)
++        self.assertEqual(result, entries.save(body, self.store, self.env))
++        self.assertEqual(len(self.store.commits), 1)
++        self.assertEqual(len(self.store.get("campaigns", self.slug)["scheduleEntries"]), 2)
++        self.assertEqual(result["entries"][0]["recurrence"]["weekdays"], list(range(7)))
++        with self.assertRaises(writer.WriteRefused):
++            entries.save({**body, "changes": [{**body["changes"][0], "time": "13:00"}]}, self.store, self.env)
++        self.assertEqual(len(self.store.docs["audit"]), 1)
++
++    def test_conflicts_and_failed_commit_leave_all_entries_unchanged(self):
++        body = self.body()
++        body["changes"].append({**body["changes"][0], "entryId": "repeat-2", "expectedRevision": "b" * 64})
++        with self.assertRaises(writer.WriteRefused):
++            entries.save(body, self.store, self.env)
++        self.assertNotIn("scheduleEntries", self.store.get("campaigns", self.slug))
++        self.store.fail_commit = True
++        with self.assertRaises(config.ConfigUnavailable):
++            entries.save(self.body(), self.store, self.env)
++        self.assertNotIn("scheduleEntries", self.store.get("campaigns", self.slug))
++
++    def test_pause_skip_delete_are_independent_and_reconcile_never_runs_now(self):
++        entries.save(self.body(), self.store, self.env)
++        schedule.reconcile_one(self.slug, self.store, self.env, self.gateway)
++        self.assertEqual(len(self.gateway.jobs), 2)
++        entries.save(self.body(operation="pause", paused=True), self.store, self.env)
++        schedule.reconcile_one(self.slug, self.store, self.env, self.gateway)
++        self.assertTrue(next(job for job in self.gateway.jobs if job["name"] == self.declared["name"])["enabled"])
++        self.assertFalse(next(job for job in self.gateway.jobs if job["name"].startswith("console-entry"))["enabled"])
++        entries.save(self.body(operation="skip", skipped=True), self.store, self.env)
++        doc = self.store.get("campaigns", self.slug)
++        self.assertFalse(entries.allowed(doc, "repeat-1", DAY))
++        self.assertTrue(entries.allowed(doc, "primary", DAY))
++        self.assertTrue(entries.allowed(doc, "repeat-1", DAY + dt.timedelta(days=1)))
++        entries.save(self.body(operation="delete", deleted=True), self.store, self.env)
++        schedule.reconcile_one(self.slug, self.store, self.env, self.gateway)
++        schedule.apply_builtin(self.store.get("campaigns", self.slug), self.declared, self.gateway)
++        self.assertEqual(len(self.gateway.jobs), 1)
++        self.assertTrue(self.store.get("campaigns", self.slug)["scheduleEntries"]["repeat-1"]["deleted"])
++        self.assertFalse(any(call[0] == "run" for call in self.gateway.calls))
++
++    def test_runner_checks_current_state_and_occurrence_day(self):
++        entries.save(self.body(), self.store, self.env)
++        execute = unittest.mock.Mock(return_value=0)
++        read = lambda slug: self.store.get("campaigns", slug)
++        now = dt.datetime(2026, 11, 10, 11, tzinfo=dt.timezone.utc)
++        entries.run(self.slug, "repeat-1", now=now, read=read, execute=execute)
++        self.assertEqual(execute.call_args.kwargs["env"]["GENAIE_SCHEDULE_ENTRY"], "repeat-1")
++        self.assertEqual(execute.call_args.kwargs["env"]["GENAIE_SCHEDULE_DAY"], str(DAY))
++        entries.save(self.body(operation="skip", skipped=True), self.store, self.env)
++        entries.run(self.slug, "repeat-1", now=now, read=read, execute=execute)
++        self.assertEqual(execute.call_count, 1)
++
++    def test_real_broadcast_deduplicates_each_entry_separately(self):
++        entries.save(self.body(), self.store, self.env)
++        image = Path(self.temp.name) / "image.png"
++        image.write_bytes(b"picture")
++        target = "12000000000@g.us"
++        doc = self.store.get("campaigns", self.slug)
++        source = {"mode": "firestore", "enabled": True, "source": "firestore", "membership": {"promos": {self.slug: doc}, "groups": {}},
++                  "switches": {self.slug: True}, "doc": {"groups": [target]}, "storeSwitches": {self.slug: True}, "note": None}
++        def send(entry_id):
++            with patch.dict(os.environ, {"GENAIE_SCHEDULE_ENTRY": entry_id, "GENAIE_SCHEDULE_DAY": str(DAY)}):
++                return promo_broadcast.broadcast(text="hello", image=str(image), targets_file=str(Path(self.temp.name) / "targets.json"),
++                    state_file=str(Path(self.temp.name) / "state.json"), promo_name=self.slug + "-promo", argv=[], run_day=DAY,
++                    resolve_config=lambda *args, **kwargs: source, caps=None, start_jitter=0, send_delay=0,
++                    account_status=lambda accounts: {account: True for account in accounts})
++        with patch("campaign_deletion.live_campaign", return_value=doc), patch("promo_broadcast.send_ad", return_value=(True, "sent")) as send_ad, patch("ad_assets.resolve", side_effect=lambda name, images: images):
++            send("primary")
++            send("primary")
++            send("repeat-1")
++            send("repeat-1")
++        self.assertEqual(send_ad.call_count, 2)
++
++
++if __name__ == "__main__":
++    unittest.main()
