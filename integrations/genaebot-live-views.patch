@@ -314,10 +314,10 @@ index 6660eb8..b5dc668 100644
                  return hit
 diff --git a/workspace/lib/console_live_api.py b/workspace/lib/console_live_api.py
 new file mode 100644
-index 0000000..f853c42
+index 0000000..438e3c7
 --- /dev/null
 +++ b/workspace/lib/console_live_api.py
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,308 @@
 +"""Small authenticated display endpoints over the shared local index."""
 +import base64
 +import datetime
@@ -400,7 +400,7 @@ index 0000000..f853c42
 +            raise console_live_index.NotReady("Waiting for the active write.")
 +        config, revision = self.index.snapshot()
 +        if self.write_fence:
-+            if not self.index.await_boundary(self.write_fence):
++            if datetime.datetime.fromisoformat(config["fetchedAt"].replace("Z", "+00:00")) < datetime.datetime.fromisoformat(self.write_fence.replace("Z", "+00:00")):
 +                raise console_live_index.NotReady("Waiting for the committed changes to reach the display index.")
 +            self.write_fence = None
 +            config, revision = self.index.snapshot()
@@ -456,6 +456,13 @@ index 0000000..f853c42
 +            with self.index.condition:
 +                self.index.lease_until = self.index.clock() + console_live_index.LEASE_SECONDS
 +        self.index.counters["indexedRequests"] += 1
++        # Never hold the projection lock while waiting on the network. Local
++        # telemetry and other requests must remain usable during an outage.
++        if route not in ("metrics", "discoveries", "status"):
++            with self.lock:
++                boundary = self.write_fence if not self.writes_active else None
++            if boundary:
++                self.index.await_boundary(boundary)
 +        with self.lock:
 +            if route == "metrics":
 +                return self.metrics(params)
@@ -1090,10 +1097,10 @@ index 7cc719f..1873b31 100644
          requests = len(self.firestore.requests)
 diff --git a/workspace/lib/test_console_live.py b/workspace/lib/test_console_live.py
 new file mode 100644
-index 0000000..286e9fc
+index 0000000..a1da94c
 --- /dev/null
 +++ b/workspace/lib/test_console_live.py
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,294 @@
 +"""Live display budgets and durable synchronization behavior, without network."""
 +import datetime
 +import importlib.machinery
@@ -1274,6 +1281,35 @@ index 0000000..286e9fc
 +            self.assertEqual(self.index.counters["syncDocuments"], before["syncDocuments"])
 +        finally:
 +            worker.join()
++
++    def test_telemetry_is_not_locked_behind_a_slow_commit_confirmation(self):
++        view = self.service()
++        view.write_fence = "2099-01-01T00:00:00Z"
++        waiting, release, measured = threading.Event(), threading.Event(), threading.Event()
++        def slow_boundary(*args):
++            waiting.set()
++            release.wait(3)
++            return False
++        def read_groups():
++            view.handle("groups", "since=previous")
++        def read_metrics():
++            try:
++                view.handle("metrics", "ids=" + JID_A)
++                measured.set()
++            except Exception:
++                pass
++        with patch.object(self.index, "await_boundary", side_effect=slow_boundary):
++            reader = threading.Thread(target=read_groups)
++            reader.start()
++            self.assertTrue(waiting.wait(1))
++            metric_reader = threading.Thread(target=read_metrics)
++            metric_reader.start()
++            try:
++                self.assertTrue(measured.wait(1), "telemetry waited for Firestore confirmation")
++            finally:
++                release.set()
++                reader.join()
++                metric_reader.join()
 +
 +    def test_request_validation_and_telemetry_are_bounded(self):
 +        view = self.service()
