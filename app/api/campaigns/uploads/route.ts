@@ -23,8 +23,12 @@ export async function POST(request: Request) {
     if (typeof slug !== "string" || !CAMPAIGN_SLUG.test(slug)) return refuse("Enter a valid campaign name first.");
     const error = uploadError(image, slug);
     if (error) return refuse(error);
-    const gate = canCreateCampaign(WRITES_ENABLED, (await getOverview()).writes);
+    const overview = await getOverview(undefined, { fresh: true });
+    const gate = canCreateCampaign(WRITES_ENABLED, overview.writes);
     if (!gate.allowed) return refuse(gate.reason, 403);
+    if (overview.deletedCampaigns?.includes(slug) || overview.campaigns?.some((campaign) => campaign.slug === slug)) {
+      return refuse("This campaign ID is already in use or has been deleted. Choose a different name.", 409);
+    }
     return NextResponse.json(await signCampaignUpload(image), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof TypeError) return refuse("Upload metadata could not be read.");

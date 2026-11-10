@@ -249,3 +249,106 @@ The route contract and read/write budgets are covered by the bot's
 existing regression suites. Console tests cover the narrow API routes, old-bot
 fallback, lazy group choices, saved draft lookups, atomic batch application, and
 protection against reusing a pre-save read after a mutation.
+
+## Campaign deletion
+
+`genaebot-campaign-deletion.patch` is based on **genaebot `ffee01e`**. That
+revision already includes campaign creation and caption overrides. Apply this
+patch to that base or check it against a newer checkout; do not reapply the older
+creation/caption patches on top.
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-campaign-deletion.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-campaign-deletion.patch
+python3 workspace/lib/test_campaign_deletion.py
+python3 workspace/lib/test_operator_config.py
+python3 workspace/lib/test_operator_writer.py
+python3 workspace/lib/test_console_campaigns.py
+python3 workspace/lib/test_console_config.py
+python3 workspace/lib/test_scoped_reads.py
+python3 deploy/test_scoped_console_api.py
+python3 deploy/test_console_read.py
+python3 deploy/test_console_campaign_api.py
+python3 deploy/test_console_write_api.py
+python3 deploy/test_promo_cron_reinstall.py
+python3 deploy/test_ad_assets_deploy.py
+python3 deploy/test_r2_sigv4.py
+PROMO_START_JITTER_SECONDS=0 python3 -m pytest -q workspace/lib/test_promo_broadcast.py workspace/lib/test_promo_config.py workspace/lib/test_ad_assets.py deploy/test_upload_ad_image.py deploy/test_operator_config_parity.py
+```
+
+Deploy the **bot first**, then the console. In addition to the existing console
+API bearer token and Firestore write key, configure these on the bot service:
+
+- `GENAIE_CAMPAIGN_DELETION=1` and `GENAIE_CONFIG_SOURCE=firestore`.
+- `GENAIE_AD_ASSETS_SOURCE=r2` and the existing `GENAIE_AD_ASSETS_BASE_URL`.
+- `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, using
+  object-deletion permission scoped to the same bucket the live asset index uses.
+
+The entrypoint passes the R2 credentials only to the console API process, then
+removes them before starting the gateway. Broadcast runners retain only their
+read-only Firestore key and public picture access. The Docker image bakes the
+existing SigV4 helper beside the manifest; the workspace staging rules already
+carry the new retirement module and installer check. `CONSOLE_WRITES=1` remains
+required on the console. An older bot, file/shadow mode, missing R2 configuration
+or a disabled retirement flag leaves the trash action unavailable.
+
+The authenticated route is:
+
+```
+POST /internal/console/campaigns/<slug>/delete
+{"actor":"operator name"}
+```
+
+Local development sends `{"delete":"<slug>","actor":"operator name"}` to
+`workspace/bin/console-campaign-create` on stdin. Acceptance returns
+`{"ok":true,"slug":"<slug>","name":"Campaign","cleanup":"pending"}`;
+repeated requests return the current status, including `complete`. Picture keys,
+file paths, commands and cleanup options cannot be supplied by the browser.
+Overview adds `deletedCampaigns: string[]` so fresh upload signing refuses retired
+IDs. The campaigns read payload adds `deletions: [{slug,name,cleanup,detail?}]` and
+write capabilities add `campaignDeletion: {delete,reason?}`.
+
+Acceptance transactionally replaces the active campaign with a minimal
+`deleted:true, enabled:false` marker and writes both an audit snapshot and a
+`campaign_deletions/<slug>` cleanup receipt. Built-in declarations remain in the
+repository, but their deletion markers take precedence. The ID cannot be reused.
+Deletion and cleanup fence the shared config cache and navigation summaries;
+strict quota error metadata and scoped/batch read and write behavior are retained.
+Readers remove retired definitions and assignment references **before** validation
+and cap calculation, so incomplete cleanup does not quarantine otherwise healthy
+groups. Live group/campaign edits use transactions that conflict with retirement.
+
+The startup worker wakes immediately after a deletion and retries pending cleanup
+every minute (retaining the existing idle schedule and failure backoff). It verifies and removes owned gateway jobs (including
+known legacy names), cleans each affected group with an audited transaction,
+removes asset documents, deletes exclusive exact R2 keys, and removes that
+campaign's cache directory. Shared objects stay. Failures leave the receipt
+pending, with a sanitized reason, and retry on later runs. Already-complete
+receipts continue to suppress jobs accidentally reintroduced by old installers.
+
+A shared per-campaign lock orders message submissions and cache fills against
+deletion. Each submission checks the live campaign document with the runner's
+read key. Once deletion commits, no remaining group may begin a send. A message
+already being submitted can finish before the marker commits; a timeout waiting
+for that boundary is an unknown outcome and can be retried safely.
+
+Cron installers and the drift checker consult live retirement state and refuse
+installation if it cannot be verified. Asset tools skip retired campaigns,
+preserve their committed mirror entries, and reserve upload keys in durable
+`campaign_asset_uploads` receipts before PUTs. Cleanup waits for an upload to
+finish or its bounded lease to expire, recovering even an uploader that died
+before indexing. Picture cleanup also waits ten minutes after acceptance for
+previously signed five-minute browser PUT URLs to expire; schedules and group
+assignments are cleaned immediately. Config reseeding refuses to overwrite a store with retirement
+markers. Source picture files, Git history and existing images are unchanged.
+
+**Compatibility:** keep retirement protection enabled after the first deletion.
+While enabled, config reads and sends fail closed when live Firestore cannot be
+checked; the old targeting snapshot is no longer an acceptable fallback because
+it may predate a deletion. Reverting to an older bot or file configuration is not
+a supported rollback after retirement. Roll back console code independently,
+while retaining the bot's deletion-aware readers, runners and maintenance tools.
+Do not remove retirement markers or cleanup receipts as part of routine pruning.
+
+Validate using isolated fixtures and fake gateway/R2 services. Deployment does
+not delete any campaign, send test adverts, or change repository assets.

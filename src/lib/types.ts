@@ -174,6 +174,14 @@ export type WriteCapabilities = {
   fields: Record<string, string[]>;
   delete: string[];
   campaignCreation?: { create: boolean; images: boolean; scheduling: boolean };
+  campaignDeletion?: { delete: boolean; reason?: string };
+};
+
+export type CampaignDeletion = {
+  slug: string;
+  name: string;
+  cleanup: "pending" | "complete";
+  detail?: string;
 };
 
 /** The settings every group's daily allowance derives from, in the shape a
@@ -201,6 +209,7 @@ export type Overview = {
   actions?: ActionCapabilities;
   capSettings?: CapSettings;
   campaigns: Campaign[];
+  deletedCampaigns?: string[];
 };
 
 export type PreviewRow = {

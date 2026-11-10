@@ -15,6 +15,7 @@ import {
 import type {
   AdAssets,
   Campaign,
+  CampaignDeletion,
   CampaignPreview,
   GroupsPayload,
   Overview,
@@ -185,9 +186,12 @@ async function runBridge<T>(bridge: string, args: string[], input?: unknown): Pr
     }
     ({ stdout } = await child);
   } catch (error) {
-    const err = error as Error & { stderr?: string; stdout?: string; code?: string };
+    const err = error as Error & { stderr?: string; stdout?: string; code?: string; killed?: boolean };
     if (err.code === "ENOENT") {
       throw new BotUnavailableError("python3 is not on PATH");
+    }
+    if (input !== undefined && err.killed) {
+      throw new BotUnavailableError("The write bridge did not answer within 120s — the change may still have been made. Refresh before retrying.");
     }
     throw refusalFrom(err.stdout) ?? reportedUnavailable(err.stdout) ?? new BotUnavailableError(
       reportedError(err.stdout) || err.stderr?.trim() || err.message,
@@ -410,7 +414,7 @@ export async function getCampaignState(slug: string, { fresh = false }: ReadOpti
  *  and whether the bot could read its index, which is one fact about the bot
  *  rather than one per campaign -- so it rides here and not on each record. */
 export async function getCampaignsPayload(date?: string, { fresh = false }: ReadOptions = {}) {
-  return read<{ date: string; adAssets?: AdAssets; campaigns: Campaign[] }>("campaigns", date, undefined, fresh);
+  return read<{ date: string; adAssets?: AdAssets; campaigns: Campaign[]; deletions?: CampaignDeletion[] }>("campaigns", date, undefined, fresh);
 }
 
 export async function getCampaigns(date?: string, options: ReadOptions = {}) {
@@ -441,6 +445,23 @@ export async function getCampaignPreview(slug: string, date?: string, { fresh = 
  */
 
 const WRITE_TIMEOUT_MS = 30_000;
+
+export async function deleteCampaign(slug: string, { by }: { by: string }): Promise<{ slug: string; cleanup: "pending" | "complete" }> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  let result: { slug: string; cleanup: "pending" | "complete" };
+  try {
+    result = WRITE_SOURCE === "remote"
+      ? await writeRemote<{ slug: string; cleanup: "pending" | "complete" }>(`campaigns/${encodeURIComponent(slug)}/delete`, { actor: by })
+      : await runBridge<{ slug: string; cleanup: "pending" | "complete" }>(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-campaign-create"), [], { delete: slug, actor: by });
+  } catch (error) {
+    if (!(error instanceof SyntaxError) && !(error instanceof BotUnavailableError && error.detail.startsWith("bridge returned non-JSON"))) throw error;
+    throw new BotUnavailableError("The bot returned an unreadable deletion result; the campaign may have been deleted. Refresh before retrying.");
+  }
+  if (!result || result.slug !== slug || !["pending", "complete"].includes(result.cleanup)) {
+    throw new BotUnavailableError("The bot returned an unreadable deletion result; the campaign may have been deleted. Refresh before retrying.");
+  }
+  return result;
+}
 
 export class WritesDisabledError extends Error {
   readonly detail = "writes are switched off; set CONSOLE_WRITES=1 and a write target";
