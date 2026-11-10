@@ -78,7 +78,7 @@ function refreshCampaign(slug: string) {
   revalidatePath("/");
 }
 
-export type SaveCaptionsOutcome = { ok: true } | { ok: false; detail: string };
+export type SaveCaptionsOutcome = { ok: true } | { ok: false; detail: string; latestCaptions?: string[] };
 
 export async function saveCaptionsAction(
   slug: string,
@@ -93,6 +93,9 @@ export async function saveCaptionsAction(
       captions.some((caption) => typeof caption !== "string" || !caption.trim())) {
     return { ok: false, detail: "Keep at least one variant and enter text for every caption." };
   }
+  if (!Array.isArray(expectedCaptions) || expectedCaptions.some((caption) => typeof caption !== "string")) {
+    return { ok: false, detail: "The original captions could not be read. Reload the editor before saving." };
+  }
   // The bot's write bridge accepts at most 64 KiB, including request metadata.
   if (Buffer.byteLength(JSON.stringify(captions), "utf8") > 60 * 1024) {
     return { ok: false, detail: "The captions are too large to save. Shorten them and try again." };
@@ -101,7 +104,7 @@ export async function saveCaptionsAction(
   try {
     const current = await getCampaignPreview(slug, undefined, { fresh: true, captionsOnly: true });
     if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
-      return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving." };
+      return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving.", latestCaptions: current.captions };
     }
     await updateCampaignCaptions(slug, captions, { by: OPERATOR_NAME });
   } catch (error) {
