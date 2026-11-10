@@ -1,3 +1,28 @@
+diff --git a/README.md b/README.md
+index f27625f..dde1180 100644
+--- a/README.md
++++ b/README.md
+@@ -1926,3 +1926,20 @@ drift, which is expected until the manifest is retired.
+ After conversion a run attaches the `images` on the campaign document.
+ `deploy/upload-ad-image.py --write` therefore refreshes that list whenever it
+ changes a converted campaign's index entries, and prints the update in its dry run.
++
++## Campaign retirement from the console
++
++The authenticated console API accepts `POST /internal/console/campaigns/<slug>/delete`
++only when `GENAIE_CAMPAIGN_DELETION=1`, live Firestore configuration, the console
++write key, and the existing R2 cleanup credentials are available. Acceptance
++atomically commits a disabled retirement marker, audit snapshot and cleanup
++receipt. The background worker retries owned cron removal, group assignment
++cleanup, indexed/exclusive picture removal and cache cleanup after restart.
++Readers and broadcast submissions respect retirement immediately; an already
++submitted message can finish. Picture cleanup waits for bounded upload leases.
++
++Converted campaigns retain their existing job name, and cleanup recognizes their
++shared runner command. Conversion and reseeding refuse to restore retired state.
++Installers check retirement before and after registration. Deploy this support
++before enabling the console delete control. Deployment alone deletes nothing;
++retain retirement-aware readers and receipts during rollback.
 diff --git a/deploy/install-promo.sh b/deploy/install-promo.sh
 index 2d1f107..7ab106a 100755
 --- a/deploy/install-promo.sh
@@ -152,6 +177,32 @@ index d19f382..9207d26 100644
  RUN python3 -c 'from zoneinfo import ZoneInfo; ZoneInfo("Africa/Algiers")'
  COPY deploy/railway/wait-gateway-lease.py /usr/local/bin/wait-gateway-lease.py
  COPY deploy/railway/whatsapp-lid-loader.mjs deploy/railway/whatsapp-lid-recovery.mjs deploy/railway/whatsapp-cache-cleanup.mjs deploy/railway/whatsapp-health-audit.mjs /usr/local/lib/genaie/
+diff --git a/deploy/railway/README.md b/deploy/railway/README.md
+index e17ae80..0d0f854 100644
+--- a/deploy/railway/README.md
++++ b/deploy/railway/README.md
+@@ -1280,3 +1280,21 @@ Run `python3 workspace/lib/test_console_campaigns.py` and
+ writer, broadcast, read bridge and console API test suites before deploying.
+ Deploy bot support before enabling the console creation controls. Keep
+ `GCP_SERVICE_ACCOUNT_WRITE_B64` isolated to the console API as before.
++
++## Console campaign retirement
++
++Campaign deletion is opt-in: set `GENAIE_CAMPAIGN_DELETION=1` alongside
++`GENAIE_CONFIG_SOURCE=firestore`, the existing console write key, and scoped R2
++cleanup credentials (`R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
++`R2_SECRET_ACCESS_KEY`). The entrypoint supplies R2 write credentials only to the
++console API process and removes them before starting the gateway. The image also
++bakes the SigV4 cleanup helper beside the manifest.
++
++`POST /internal/console/campaigns/<slug>/delete` uses the existing bearer token.
++Acceptance is a transaction containing the retirement marker, audit snapshot and
++cleanup receipt. The startup worker retries cleanup, waking immediately after
++acceptance and checking pending work every minute. Converted jobs retain their
++existing job name and shared-runner ownership. Uploads, installers and reseeding
++cannot restore retired campaigns. Roll back console code independently while
++retaining retirement-aware bot readers, runners and cleanup receipts. Deploying
++this support does not itself retire any campaign.
 diff --git a/deploy/railway/console-api.py b/deploy/railway/console-api.py
 index 42b5fb7..0118962 100755
 --- a/deploy/railway/console-api.py
