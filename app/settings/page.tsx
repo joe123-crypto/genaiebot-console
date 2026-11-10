@@ -1,20 +1,22 @@
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { CapSettingsForm } from "@/app/settings/_components/cap-settings-form";
-import { getConfiguration, BotUnavailableError } from "@/src/lib/bot-client";
+import { getLiveView } from "@/src/lib/live-client";
+import type { ConfigurationPayload } from "@/src/lib/bot-client";
+import { BotUnavailableError } from "@/src/lib/bot-client";
 import { WRITES_ENABLED } from "@/src/config";
 import { canWrite } from "@/src/lib/write-capabilities";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const loaded = await getConfiguration().then((overview) => ({ ok: true as const, overview }), (error: unknown) => {
+  const loaded = await getLiveView<ConfigurationPayload>("settings").then((overview) => ({ ok: true as const, overview }), (error: unknown) => {
     if (!(error instanceof BotUnavailableError)) throw error;
     return { ok: false as const, detail: error.detail };
   });
   if (!loaded.ok) {
     return (
-      <Shell>
+      <Shell live>
         <PageHead title="Settings" />
         <BotError detail={loaded.detail} />
       </Shell>
@@ -23,7 +25,7 @@ export default async function SettingsPage() {
   const { capSettings, writes } = loaded.overview;
 
   return (
-    <Shell>
+    <Shell live>
       <PageHead title="Settings" subtitle="How many adverts each group gets a day." />
       {capSettings ? (
         <CapSettingsForm

@@ -220,7 +220,7 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
   const [choicesLoading, setChoicesLoading] = useState(false);
   const [lookup, setLookup] = useState<{ source: KnownCampaignGroup[]; key: string; groups: KnownCampaignGroup[] } | null>(null);
   const additionsKey = draft?.added.join(",") ?? "";
-  const missingAdditions = (draft?.added ?? []).filter((jid) => !initialKnownGroups.some((group) => group.jid === jid));
+  const missingAdditions = (draft?.added ?? []).filter((jid) => !initialKnownGroups.some((group) => group.jid === jid) && !choices.some((group) => group.jid === jid));
   const additionsChecked = !loadChoices || missingAdditions.length === 0 ||
     (lookup?.source === initialKnownGroups && lookup.key === additionsKey);
   const knownGroups = useMemo(() => {
@@ -237,14 +237,14 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
 
   useEffect(() => {
     if (!loadChoices || !additionsKey) return;
-    const ids = additionsKey.split(",").filter((jid) => !initialKnownGroups.some((group) => group.jid === jid));
+    const ids = additionsKey.split(",").filter((jid) => !initialKnownGroups.some((group) => group.jid === jid) && !choices.some((group) => group.jid === jid));
     if (ids.length === 0) return;
     let stopped = false;
     loadChoices(ids).then((groups) => {
       if (!stopped) setLookup({ source: initialKnownGroups, key: additionsKey, groups });
     }, () => { if (!stopped) setNotice("Could not check saved draft additions. Your draft is kept; reopen this page to retry."); });
     return () => { stopped = true; };
-  }, [additionsKey, initialKnownGroups, loadChoices]);
+  }, [additionsKey, initialKnownGroups, loadChoices, choices]);
 
   async function openChoices() {
     if (pagedChoices) { setOpen(true); return; }

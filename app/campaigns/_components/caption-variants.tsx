@@ -75,7 +75,7 @@ export function CaptionVariants({
           <div className="caption-actions">
             {navigationBlocked ? <button type="button" className="btn caption-add" disabled
               title="Save or reset pending deletions before adding a variant."><Plus size={16} aria-hidden /> Add variant</button>
-              : <Link className="btn caption-add" href={captionEditorHref(slug, "new")}><Plus size={16} aria-hidden /> Add variant</Link>}
+              : <Link prefetch={false} className="btn caption-add" href={captionEditorHref(slug, "new")}><Plus size={16} aria-hidden /> Add variant</Link>}
             {draft ? <button type="button" className="btn" disabled={pending} onClick={reset}>Reset</button> : null}
             <button type="button" className="btn btn-primary" onClick={save}
               title={saveUnavailableReason}
@@ -109,7 +109,7 @@ export function CaptionVariants({
                   {navigationBlocked ? <button type="button" className="row-action" disabled
                     aria-label={`Edit variant ${index + 1}`} title="Save or reset pending deletions before editing a variant.">
                     <Pencil size={16} aria-hidden />
-                  </button> : <Link className="row-action" aria-label={`Edit variant ${index + 1}`}
+                  </button> : <Link prefetch={false} className="row-action" aria-label={`Edit variant ${index + 1}`}
                     title={`Edit variant ${index + 1}`} href={captionEditorHref(slug, index + 1)}><Pencil size={16} aria-hidden /></Link>}
                   <button type="button" className="row-action row-action-danger" aria-label={`Delete variant ${index + 1}`}
                     title={items.length === 1 ? "Keep at least one caption variant" : `Delete variant ${index + 1}`}
