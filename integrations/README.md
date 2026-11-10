@@ -478,3 +478,44 @@ errors. Fake-stream protocol tests cover consistent bootstrap, persisted resume,
 matching existence filters, incremental delete/update, atomic reset, retirement,
 lease expiry and multiple consumers. Telemetry tests preserve rolling-window
 coverage and member observation timestamps.
+
+
+## Campaign table picture previews
+
+The live-view patch now includes asset metadata in the shared Listen index
+(schema 3). Deploy the updated companion bot **before** this console update.
+Existing schema-2 indexes rebuild once; regular list searches, pagination and
+polls read the local index without per-campaign detail or asset catalogue queries.
+The existing Firestore read identity must be able to read the `assets` collection.
+No R2 credentials or image bytes are added to the display index.
+
+Campaign summaries gain `imageCount: number` and `thumbnailUrl: string | null`.
+The count comes from declared pictures; the URL comes from matching the first
+declared filename to an enabled, validated asset using the existing public URL
+builder and `GENAIE_AD_ASSETS_BASE_URL`. Missing or invalid origins and missing
+assets retain the count and show the fallback icon. Asset changes participate in
+campaign revisions, while schedule responses retain their existing compact shape.
+Full captions and asset lists remain behind the explicit detail request.
+
+The console preserves the compact thumbnail, additional-picture badge and lazy
+loading. An older bot without preview fields displays “Images unavailable” rather
+than an incorrect zero. Deploying console code alone cannot restore previews from
+an older bot that omits their metadata.
+
+For an existing bot with the previous live-view patch already applied, apply
+only `genaebot-campaign-previews.patch`:
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-campaign-previews.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-campaign-previews.patch
+```
+
+For a clean installation, use the revised `genaebot-live-views.patch` in the
+existing live-view sequence instead; it already includes this fix. Do not apply
+both patches.
+Verify with `python3 workspace/lib/test_console_live.py`,
+`python3 workspace/lib/test_console_campaigns.py`, and
+`python3 deploy/test_console_read.py`, with the pinned console stream dependencies
+installed. Confirm `/internal/console/live/campaigns` returns preview summaries,
+check the table after loading another page, and check that unchanged polls retain
+pictures. Deployment does not send any adverts.

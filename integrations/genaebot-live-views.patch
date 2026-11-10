@@ -16,7 +16,7 @@ diff --git a/README.md b/README.md
 index d79814d..70e514d 100644
 --- a/README.md
 +++ b/README.md
-@@ -1964,3 +1964,39 @@ Local callers send the same request to `workspace/bin/console-schedule --apply`
+@@ -1964,3 +1964,44 @@ Local callers send the same request to `workspace/bin/console-schedule --apply`
  on stdin; that mode attempts gateway reconciliation immediately. The console API
  worker provides automatic retry for any pending updates. Repeating a request for
  an already-saved time is safe; stale revisions reject changes as a whole.
@@ -26,7 +26,8 @@ index d79814d..70e514d 100644
 +The console's Schedule home page, paginated Groups/Campaigns views, and assignment
 +pickers use `/internal/console/live/*`. A single demand-driven Firestore Listen
 +stream maintains `console-live.sqlite` in the private Firestore state directory.
-+The stream covers settings, lines, campaigns, groups and campaign-deletion receipts;
++The stream covers settings, lines, campaigns, groups, campaign-deletion receipts
++and asset metadata;
 +it never watches audit entries or asset bytes. No display query downloads config
 +collections. The initial sync, a credential/schema change, or an existence mismatch
 +can require a complete bootstrap. Restart and idle reconnects resume from durable
@@ -47,7 +48,11 @@ index d79814d..70e514d 100644
 +an anchor-based current window; unchanged polls return only freshness metadata.
 +`metrics` accepts up to 100 validated group IDs. `schedule` contains only timeline
 +slots and editing capabilities. Campaign metadata, captions/pictures and previews
-+have separate requests. `/live/status` exposes sync lag and counters for indexed
++have separate requests. Campaign summaries include `imageCount` and `thumbnailUrl`
++from the first declared filename matched to enabled, validated indexed assets.
++Only the public URL and count reach list rows; galleries remain explicit.
++Schema 3 rebuilds existing display indexes once to add asset metadata.
++`/live/status` exposes sync lag and counters for indexed
 +requests, returned rows, streamed documents, rebuilds and active streams.
 +
 +The runtime image and portable CI install `deploy/railway/requirements-console.txt`.
@@ -77,7 +82,7 @@ diff --git a/deploy/railway/README.md b/deploy/railway/README.md
 index 28bbe10..238d7a8 100644
 --- a/deploy/railway/README.md
 +++ b/deploy/railway/README.md
-@@ -1318,3 +1318,37 @@ Deploy the bot before the console update. Old bots keep Save disabled with a
+@@ -1318,3 +1318,38 @@ Deploy the bot before the console update. Old bots keep Save disabled with a
  companion-update explanation. Local `console-schedule --apply` attempts immediate
  application; run the console API worker for automatic pending retries. Neither
  deployment nor changing a start time triggers `cron run` or a catch-up broadcast.
@@ -92,7 +97,8 @@ index 28bbe10..238d7a8 100644
 +
 +Authenticated `/internal/console/live/*` routes share one display index on the
 +volume at the private Firestore state directory's `console-live.sqlite`. The
-+index watches settings, lines, campaigns, groups and campaign-deletion receipts.
++index watches settings, lines, campaigns, groups, campaign-deletion receipts
++and asset metadata (never image bytes).
 +It publishes only complete, consistent generations and persists resume positions
 +with document changes. Existing legacy routes remain available during rollout.
 +
@@ -182,7 +188,7 @@ new file mode 100644
 index 0000000..bd26e59
 --- /dev/null
 +++ b/deploy/railway/requirements-console.txt
-@@ -0,0 +1 @@
+@@ -0,0 +1,1 @@
 +google-cloud-firestore==2.21.0
 diff --git a/deploy/test_console_api.py b/deploy/test_console_api.py
 index d26ce0c..666f990 100644
@@ -241,10 +247,18 @@ index 5fc900a..f44f06a 100644
          self.assertTrue(payload["groups"])
          for row in payload["groups"]:
 diff --git a/workspace/bin/console-read b/workspace/bin/console-read
-index 935918f..85fb019 100755
 --- a/workspace/bin/console-read
 +++ b/workspace/bin/console-read
-@@ -857,6 +857,21 @@ def main(argv):
+@@ -457,7 +457,7 @@
+                 "error": error,
+             }
+         )
+-    records.extend(console_campaigns.records(m, day, resolved().get("storeSwitches"), only_slug=only_slug))
++    records.extend(console_campaigns.records(m, day, resolved().get("storeSwitches"), only_slug=only_slug, include_assets=include_assets))
+     declared_by_slug = {row["slug"]: row for row in declared.get("promos", [])}
+     for row in records:
+         doc = (m.get("promos") or {}).get(row["slug"], {})
+@@ -857,6 +857,21 @@
              if command == "group":
                  payload["discoveredGroups"] = [row for row in payload.get("discoveredGroups", []) if row["jid"] == slug]
              group_metrics.attach(payload, membership())
@@ -314,10 +328,10 @@ index 6660eb8..b5dc668 100644
                  return hit
 diff --git a/workspace/lib/console_live_api.py b/workspace/lib/console_live_api.py
 new file mode 100644
-index 0000000..438e3c7
+index 0000000..11861c8
 --- /dev/null
 +++ b/workspace/lib/console_live_api.py
-@@ -0,0 +1,308 @@
+@@ -0,0 +1,318 @@
 +"""Small authenticated display endpoints over the shared local index."""
 +import base64
 +import datetime
@@ -335,6 +349,7 @@ index 0000000..438e3c7
 +from urllib.parse import parse_qs
 +from zoneinfo import ZoneInfo
 +
++import ad_assets
 +import console_live_index
 +import group_discovery
 +import group_metrics
@@ -417,9 +432,18 @@ index 0000000..438e3c7
 +            config_loader=lambda *args, **kwargs: config, err=io.StringIO())
 +        groups = bridge.group_rows(day)
 +        campaigns = bridge.campaign_records(day, include_assets=False)
-+        # No image catalogue reads. List copy is a count, not downloaded captions.
++        # Summaries use only streamed asset metadata, never a catalogue query.
 +        for row in campaigns:
 +            row["captionCount"] = len(row.get("captions", []))
++            images = row.get("images", [])
++            row["imageCount"] = len(images)
++            first = next((asset for asset in config["assets"].get(row["slug"], [])
++                          if images and asset["filename"] == images[0]), None)
++            try:
++                row["thumbnailUrl"] = ad_assets.public_url(first, self.env) if first else None
++            except ad_assets.AssetsUnavailable:
++                # A bad/missing origin costs the thumbnail, never the table.
++                row["thumbnailUrl"] = None
 +            row.pop("captions", None)
 +            row.pop("images", None)
 +            row.pop("assets", None)
@@ -628,10 +652,10 @@ index 0000000..438e3c7
 +    return (not params.get("line") or params["line"] in row["accounts"]) and (not params.get("cadence") or (row["weeklyCount"] > 0) == (params["cadence"] == "weekly")) and (not params.get("slot") or params["slot"] == slot)
 diff --git a/workspace/lib/console_live_index.py b/workspace/lib/console_live_index.py
 new file mode 100644
-index 0000000..6a97642
+index 0000000..73de10d
 --- /dev/null
 +++ b/workspace/lib/console_live_index.py
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,358 @@
 +"""Durable, display-only Firestore index. Never imported by writers or sends.
 +
 +The single API process owns the leased stream. Readers open independent SQLite
@@ -646,10 +670,11 @@ index 0000000..6a97642
 +import threading
 +import time
 +
++import ad_assets
 +import operator_config as config
 +
-+SCHEMA = 2
-+COLLECTIONS = ("settings", "lines", "campaigns", "groups", "campaign_deletions")
++SCHEMA = 3
++COLLECTIONS = ("settings", "lines", "campaigns", "groups", "campaign_deletions", "assets")
 +LEASE_SECONDS = 90
 +
 +
@@ -802,7 +827,8 @@ index 0000000..6a97642
 +        membership, report = config.quarantine(membership, undecodable)
 +        enabled, report["campaigns"] = config.campaign_switches(enabled)
 +        return {"source": "snapshot", "membership": membership, "enabled": enabled,
-+                "report": report, "fetchedAt": stamp, "degraded": None, "deleted": deleted}, str(revision)
++                "report": report, "fetchedAt": stamp, "degraded": None, "deleted": deleted,
++                "assets": ad_assets._enabled_only(ad_assets._assemble(raw["assets"])[0])}, str(revision)
 +
 +    def publish(self, changes, read_time, tokens, *, reset=False):
 +        """Called only at a global consistent stream boundary."""
@@ -1097,10 +1123,10 @@ index 7cc719f..1873b31 100644
          requests = len(self.firestore.requests)
 diff --git a/workspace/lib/test_console_live.py b/workspace/lib/test_console_live.py
 new file mode 100644
-index 0000000..a1da94c
+index 0000000..603ee8c
 --- /dev/null
 +++ b/workspace/lib/test_console_live.py
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,376 @@
 +"""Live display budgets and durable synchronization behavior, without network."""
 +import datetime
 +import importlib.machinery
@@ -1228,6 +1254,88 @@ index 0000000..a1da94c
 +            self.assertIn("captions", captions)
 +            self.assertNotIn("groups", captions)
 +            self.assertNotIn("adAssets", captions)
++
++    def picture(self, filename="cv-ad.png", body=b"first", **overrides):
++        from test_ad_assets import entry
++        return config.encode_fields(entry("cv", filename, body, **overrides))
++
++    def test_campaign_previews_use_streamed_assets_and_track_updates_without_remote_reads(self):
++        self.env["GENAIE_AD_ASSETS_BASE_URL"] = "https://ads.example.test"
++        # Asset rank does not override the campaign's declared first filename.
++        first = self.picture(rank=99)
++        self.firestore.store["assets"] = {
++            "other-first": self.picture("cv-ad-2.png", b"second", rank=1),
++            "first": first,
++            "disabled": self.picture(enabled=False, rank=0),
++            "invalid": config.encode_fields({"campaign": "cv", "filename": "cv-ad.png"}),
++        }
++        view = self.service()
++        with patch.object(config, "fetch", side_effect=AssertionError("Firestore fetch")), \
++             patch.object(config, "get_document", side_effect=AssertionError("Firestore point read")), \
++             patch.object(config, "list_documents", side_effect=AssertionError("Firestore scan")), \
++             patch.object(view.bridge, "asset_catalogue", side_effect=AssertionError("asset catalogue read")):
++            initial = view.handle("campaigns", "q=cv")
++            row = initial["rows"][0]
++            self.assertEqual(row["slug"], "cv")
++            self.assertEqual(row["imageCount"], 3)
++            self.assertEqual(row["thumbnailUrl"], "https://ads.example.test/" + config.decode_fields(first)["key"])
++            for field in ("images", "assets", "captions", "script"):
++                self.assertNotIn(field, row)
++            self.assertTrue(view.handle("campaigns", "q=cv&since=" + initial["revision"])["unchanged"])
++            schedule = view.handle("schedule", "")
++            for slot in schedule["slots"]:
++                for field in ("imageCount", "thumbnailUrl", "images", "assets"):
++                    self.assertNotIn(field, slot)
++            replacement = self.picture(body=b"replacement", rank=99)
++            self.index.publish([("assets", "first", replacement)], "2026-11-10T10:01:00Z", {})
++            changed = view.handle("campaigns", "q=cv&since=" + initial["revision"])
++            self.assertNotEqual(changed["revision"], initial["revision"])
++            self.assertNotEqual(changed["rows"][0]["thumbnailUrl"], row["thumbnailUrl"])
++            self.assertEqual(view.handle("schedule", "")["revision"], schedule["revision"])
++            self.index.publish([("assets", "first", None)], "2026-11-10T10:02:00Z", {})
++            missing = view.handle("campaigns", "q=cv")
++            self.assertIsNone(missing["rows"][0]["thumbnailUrl"])
++            self.assertEqual(missing["rows"][0]["imageCount"], 3)
++            self.assertNotEqual(missing["revision"], changed["revision"])
++
++    def test_preview_missing_or_invalid_origin_keeps_picture_count_and_table(self):
++        self.firestore.store["assets"] = {"first": self.picture()}
++        view = self.service()
++        for origin in ("", "http://invalid.test"):
++            view.env["GENAIE_AD_ASSETS_BASE_URL"] = origin
++            view.cache = None
++            row = view.handle("campaigns", "q=cv")["rows"][0]
++            self.assertEqual(row["imageCount"], 3)
++            self.assertIsNone(row["thumbnailUrl"])
++
++    def test_summary_without_pictures_reports_zero_and_no_url(self):
++        view = self.service()
++        # A broken/missing declaration can legitimately return an empty image list.
++        original = view.bridge.campaign_records
++        def records(*args, **kwargs):
++            rows = original(*args, **kwargs)
++            for row in rows:
++                row["images"] = []
++            return rows
++        with patch.object(view.bridge, "campaign_records", side_effect=records):
++            row = view.handle("campaigns", "q=cv")["rows"][0]
++        self.assertEqual(row["imageCount"], 0)
++        self.assertIsNone(row["thumbnailUrl"])
++
++    def test_console_campaign_summaries_skip_gallery_url_generation(self):
++        import console_campaigns
++        from test_console_campaigns import payload, MemoryStore
++        store = MemoryStore()
++        console_campaigns.create(payload(), store,
++            env={**self.env, "GENAIE_AD_ASSETS_SOURCE": "r2", "GENAIE_AD_ASSETS_BASE_URL": "https://ads.example.test"},
++            verify=lambda *args: None, reconcile=lambda *args: None)
++        self.firestore.store = store.docs
++        view = self.service()
++        # No global image origin is needed to construct the compact row.
++        with patch.object(console_campaigns, "image_url", side_effect=AssertionError("gallery URLs")):
++            row = view.handle("campaigns", "q=demo")["rows"][0]
++        self.assertEqual(row["imageCount"], 1)
++        self.assertIsNone(row["thumbnailUrl"])
 +
 +    def test_observation_endpoints_do_not_load_full_indexed_config(self):
 +        view = self.service()
@@ -1395,3 +1503,24 @@ index 0000000..a1da94c
 +
 +if __name__ == "__main__":
 +    unittest.main()
+diff --git a/workspace/lib/console_campaigns.py b/workspace/lib/console_campaigns.py
+--- a/workspace/lib/console_campaigns.py
++++ b/workspace/lib/console_campaigns.py
+@@ -503,7 +503,7 @@
+     return {slug: data for slug, data in (membership.get("promos") or {}).items() if data.get("kind") == "console"}
+ 
+ 
+-def records(membership, day, switches=None, only_slug=None):
++def records(membership, day, switches=None, only_slug=None, include_assets=True):
+     result = []
+     for slug, campaign in definitions(membership).items():
+         if only_slug is not None and slug != only_slug:
+@@ -524,7 +524,7 @@
+                        "assets": [{"filename": image["filename"], "url": image_url(image),
+                                    "sha256": image["sha256"], "bytes": image["bytes"],
+                                    "contentType": image["contentType"], "rank": (index + 1) * 10}
+-                                  for index, image in enumerate(campaign["images"])],
++                                  for index, image in enumerate(campaign["images"])] if include_assets else [],
+                        "targetCount": len(daily) + len(weekly), "weeklyCount": len(weekly), "accounts": accounts,
+                        "source": "console", "jobName": job_name(slug, campaign),
+                        "scheduleStatus": campaign.get("scheduleStatus", "pending"), "error": None})

@@ -15,22 +15,30 @@ const NO_ASSETS: CampaignAsset[] = [];
  * suppress, so the element is dropped on error and the muted square with its
  * icon is what remains.
  */
-export function CampaignThumb({ images, assets = NO_ASSETS }: {
-  images: string[];
+export function CampaignThumb({ images, assets = NO_ASSETS, imageCount, thumbnailUrl }: {
+  images?: string[];
   assets?: CampaignAsset[];
+  imageCount?: number;
+  thumbnailUrl?: string | null;
 }) {
-  const [broken, setBroken] = useState(false);
-  const src = images[0] ? campaignImageSrc(assets, images[0]) : undefined;
+  const src = thumbnailUrl !== undefined
+    ? thumbnailUrl || undefined
+    : images?.[0] ? campaignImageSrc(assets, images[0]) : undefined;
+  const count = imageCount ?? images?.length ?? 0;
   return (
     <span className="campaign-thumb" aria-hidden>
       <ImageIcon size={14} aria-hidden />
-      {src && !broken ? (
-        <img src={src} alt="" loading="lazy" decoding="async"
-          onError={() => setBroken(true)} />
-      ) : null}
-      {images.length > 1 ? <span className="campaign-thumb-more">+{images.length - 1}</span> : null}
+      {src ? <ThumbnailImage key={src} src={src} /> : null}
+      {count > 1 ? <span className="campaign-thumb-more">+{count - 1}</span> : null}
     </span>
   );
+}
+
+/** A new URL remounts the image so a failed old URL cannot hide its replacement. */
+function ThumbnailImage({ src }: { src: string }) {
+  const [broken, setBroken] = useState(false);
+  return broken ? null : <img src={src} alt="" loading="lazy" decoding="async"
+    onError={() => setBroken(true)} />;
 }
 
 /**

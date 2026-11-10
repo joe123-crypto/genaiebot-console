@@ -184,6 +184,16 @@ describe("the campaigns list thumbnail", () => {
     fireEvent.error(view.container.querySelector("img")!);
     expect(view.container.querySelectorAll("img")).toHaveLength(0);
   });
+
+  it("retries when a failed URL changes, including returning to a previous URL", () => {
+    const view = render(createElement(CampaignThumb, { imageCount: 2, thumbnailUrl: "https://ads.test/a.jpg" }));
+    fireEvent.error(view.container.querySelector("img")!);
+    expect(sources(view)).toEqual([]);
+    view.rerender(createElement(CampaignThumb, { imageCount: 2, thumbnailUrl: "https://ads.test/b.jpg" }));
+    expect(sources(view)).toEqual(["https://ads.test/b.jpg"]);
+    view.rerender(createElement(CampaignThumb, { imageCount: 2, thumbnailUrl: "https://ads.test/a.jpg" }));
+    expect(sources(view)).toEqual(["https://ads.test/a.jpg"]);
+  });
 });
 
 describe("picture helpers", () => {
