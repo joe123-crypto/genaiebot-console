@@ -3,7 +3,12 @@ import type { DaySlot } from "@/src/domains/schedule";
 
 export type SyncStatus = { revision: string; syncedAt: string | null; stale: boolean; state: "live" | "syncing" | "stale" | "awaiting-commit" };
 export type LiveContext = Omit<GroupContext, "campaigns">;
-export type CampaignRow = Omit<Campaign, "captions" | "images" | "assets" | "script"> & { captionCount: number };
+export type CampaignRow = Omit<Campaign, "captions" | "images" | "assets" | "script"> & {
+  captionCount: number;
+  /** Absent on companion bots predating list previews; zero means no pictures. */
+  imageCount?: number;
+  thumbnailUrl?: string | null;
+};
 export type LiveFacets = { lines: string[]; campaigns: { slug: string; name: string; enabled: boolean }[]; tiers: string[] };
 export type LivePage<T> = { rows?: T[]; nextCursor?: string | null; total?: number; revision: string; sync: SyncStatus;
   unchanged?: boolean; reset?: boolean; context?: LiveContext; facets?: LiveFacets; disabledPromos?: string[]; discovery?: GroupDiscovery; deletions?: import("./types").CampaignDeletion[] };

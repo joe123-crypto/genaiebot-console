@@ -23,12 +23,15 @@ import {
 } from "@/src/domains/campaign-filter";
 import { campaignLabel, campaignOffLabel, plural, slotLabel } from "@/src/lib/format";
 import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
+import type { CampaignRow } from "@/src/lib/live-types";
 import type { Campaign } from "@/src/lib/types";
 
+type TableCampaign = Omit<CampaignRow, "captionCount"> &
+  Partial<Pick<Campaign, "captions" | "images" | "assets" | "script">> & { captionCount?: number };
 type Props = {
   /** Every campaign, in the order the bridge sends them — which is the order
    *  they run through the day. Nothing here reorders them. */
-  campaigns: (Campaign & { captionCount?: number })[];
+  campaigns: TableCampaign[];
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: CampaignFilter;
   remote?: { onFilter: (filter: CampaignFilter) => void; total: number; lines: string[] };
@@ -60,7 +63,7 @@ export function CampaignsTable({
 
   const changed = remote?.onFilter;
   useEffect(() => { changed?.(filter); }, [filter, changed]);
-  const visible = remote ? campaigns : filterCampaigns(campaigns, filter) as (Campaign & { captionCount?: number })[];
+  const visible = remote ? campaigns : filterCampaigns(campaigns, filter);
   const unfiltered = isDefaultCampaignFilter(filter);
   const columns = writesEnabled ? 7 : 6;
 
@@ -224,14 +227,17 @@ export function CampaignsTable({
                   <div className="campaign-copy-cell">
                     {/* Decorative: the counts beside it say the same thing
                         as text, for anything that cannot see the picture. */}
-                    <CampaignThumb images={campaign.images} assets={campaign.assets} />
+                    <CampaignThumb images={campaign.images} assets={campaign.assets}
+                      imageCount={campaign.imageCount} thumbnailUrl={campaign.thumbnailUrl} />
                     <span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                         <Repeat2 size={14} aria-hidden />
-                        {plural((campaign.captionCount ?? campaign.captions.length), "variant")}
+                        {plural((campaign.captionCount ?? campaign.captions?.length ?? 0), "variant")}
                       </span>
                       <br />
-                      {plural(campaign.images.length, "image")}
+                      {campaign.imageCount !== undefined || campaign.images !== undefined
+                        ? plural(campaign.imageCount ?? campaign.images?.length ?? 0, "image")
+                        : "Images unavailable"}
                     </span>
                   </div>
                 </td>

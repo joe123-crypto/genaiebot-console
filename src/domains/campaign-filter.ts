@@ -20,6 +20,8 @@ import {
 import { campaignTitle } from "@/src/lib/format";
 import type { Campaign } from "@/src/lib/types";
 
+type CampaignFilterRow = Pick<Campaign, "slug" | "name" | "tracking" | "enabled" | "error" | "targetCount" | "accounts" | "weeklyCount" | "hour">;
+
 /** Views, not statuses: a campaign has no single status field, and what an
  *  operator wants to see is a combination — off, broken, or running but
  *  pointed at nothing. */
@@ -141,20 +143,20 @@ export function isDefaultCampaignFilter(filter: CampaignFilter) {
 
 /** The three things on a row that name it: the title in the link, the id
  *  underneath, and the ref badge an operator reads off a tracked link. */
-export function campaignHaystack(campaign: Campaign) {
+export function campaignHaystack(campaign: CampaignFilterRow) {
   return [campaignTitle(campaign.slug), campaign.slug, campaign.name, campaign.tracking.prefix ?? ""]
     .join(" ")
     .toLowerCase();
 }
 
 /** Substring, never a regular expression. */
-export function matchesCampaignQuery(campaign: Campaign, query: string) {
+export function matchesCampaignQuery(campaign: CampaignFilterRow, query: string) {
   const wanted = query.trim().toLowerCase();
   if (!wanted) return true;
   return campaignHaystack(campaign).includes(wanted);
 }
 
-function matchesStatus(campaign: Campaign, status: CampaignStatusChoice) {
+function matchesStatus(campaign: CampaignFilterRow, status: CampaignStatusChoice) {
   switch (status) {
     case "all":
       return true;
@@ -177,7 +179,7 @@ function matchesStatus(campaign: Campaign, status: CampaignStatusChoice) {
  * because it drops exactly the switched-off and unscheduled rows this table
  * exists to surface.
  */
-export function filterCampaigns(campaigns: Campaign[], filter: CampaignFilter) {
+export function filterCampaigns<T extends CampaignFilterRow>(campaigns: T[], filter: CampaignFilter) {
   return campaigns.filter(
     (campaign) =>
       matchesStatus(campaign, filter.status) &&
@@ -188,7 +190,7 @@ export function filterCampaigns(campaigns: Campaign[], filter: CampaignFilter) {
   );
 }
 
-export function campaignLineOptions(campaigns: Campaign[], selected: string): FacetOption[] {
+export function campaignLineOptions(campaigns: CampaignFilterRow[], selected: string): FacetOption[] {
   const lines = facetValues(campaigns.flatMap((campaign) => Object.keys(campaign.accounts)));
   return withSelection(
     lines.map((line) => ({ value: line, label: line })),
@@ -197,7 +199,7 @@ export function campaignLineOptions(campaigns: Campaign[], selected: string): Fa
   );
 }
 
-export function campaignSlotOptions(campaigns: Campaign[], selected: string): FacetOption[] {
+export function campaignSlotOptions(campaigns: CampaignFilterRow[], selected: string): FacetOption[] {
   const present = new Set(campaigns.map(campaignSlotBucket));
   // Fixed order, because a time of day has one: not alphabetical.
   const order: Exclude<CampaignSlotChoice, "">[] = [
