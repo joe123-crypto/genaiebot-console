@@ -1,7 +1,7 @@
 import type { Group, GroupContext, Campaign, GroupDiscovery, GroupMetrics, WriteCapabilities } from "./types";
 import type { DaySlot } from "@/src/domains/schedule";
 
-export type SyncStatus = { revision: string; syncedAt: string | null; stale: boolean; state: "live" | "syncing" | "stale" };
+export type SyncStatus = { revision: string; syncedAt: string | null; stale: boolean; state: "live" | "syncing" | "stale" | "awaiting-commit" };
 export type LiveContext = Omit<GroupContext, "campaigns">;
 export type CampaignRow = Omit<Campaign, "captions" | "images" | "assets" | "script"> & { captionCount: number };
 export type LiveFacets = { lines: string[]; campaigns: { slug: string; name: string; enabled: boolean }[]; tiers: string[] };

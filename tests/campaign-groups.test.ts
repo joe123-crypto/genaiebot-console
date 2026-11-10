@@ -84,6 +84,17 @@ describe("campaign group drafts", () => {
     expect(loadChoices).toHaveBeenCalledTimes(1);
   });
 
+  it("retains saved additions and shows a notice when their read is unavailable", async () => {
+    const saved = { version: 1, added: ["3@g.us"], removed: [], paused: [] };
+    localStorage.setItem(groupDraftKey(props.slug), JSON.stringify(saved));
+    const loadChoices = vi.fn().mockRejectedValue(new Error("Synchronizing"));
+    render(createElement(CampaignGroups, { ...props, knownGroups: known.slice(0, 2), loadChoices, partialMembership: true }));
+    await screen.findByText(/Could not check saved draft additions/);
+    expect(stored()).toEqual(saved);
+    expect(loadChoices).toHaveBeenCalledTimes(1);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it.each([null, { version: 1, added: [], removed: [], paused: ["1@g.us"] }])(
     "does not overwrite another tab’s newer draft before its storage event arrives (initial: %j)", (initial) => {
       if (initial) localStorage.setItem(groupDraftKey(props.slug), JSON.stringify(initial));
