@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Send, Sparkles } from "lucide-react";
-import { demoCaptionReply } from "@/src/lib/caption-ai-demo";
+import { suggestCaptionAction } from "@/app/campaigns/caption-ai-actions";
+import type { CaptionChatTurn } from "@/src/lib/caption-ai-types";
 
 type Message = {
   id: number;
@@ -12,13 +13,15 @@ type Message = {
   suggestion?: string;
   revision?: number;
   state?: "applied" | "dismissed";
+  error?: boolean;
 };
 const STARTERS = ["Make it shorter", "Use a professional tone", "Improve the call to action"];
 
-export function CaptionAssistant({ text, revision, disabled, onApply }: {
+export function CaptionAssistant({ text, revision, disabled, unavailableReason, onApply }: {
   text: string;
   revision: number;
   disabled: boolean;
+  unavailableReason?: string;
   onApply: (suggestion: string, sourceRevision: number) => void;
 }) {
   const [prompt, setPrompt] = useState("");
@@ -37,7 +40,7 @@ export function CaptionAssistant({ text, revision, disabled, onApply }: {
 
   async function send(value: string) {
     const question = value.trim();
-    if (!question || disabled || inFlight.current) return;
+    if (!question || disabled || unavailableReason || inFlight.current) return;
     inFlight.current = true;
     const id = ++request.current;
     const sourceRevision = revision;
@@ -46,14 +49,26 @@ export function CaptionAssistant({ text, revision, disabled, onApply }: {
     setPending(true);
     composer.current?.focus();
     try {
-      const reply = await demoCaptionReply(question, text);
+      // Keep recent conversation bounded; the current draft is sent separately
+      // so a previous suggestion is never mistaken for an applied edit.
+      const history: CaptionChatTurn[] = [];
+      for (const message of messages.slice(-10).reverse()) {
+        const content = message.role === "assistant"
+          ? JSON.stringify({ message: message.text, suggestion: message.suggestion ?? null, state: message.error ? "rejected" : message.state ?? "proposed" }) : message.text;
+        const next = [{ role: message.role, content }, ...history];
+        if (new TextEncoder().encode(JSON.stringify(next)).byteLength > 24 * 1024) break;
+        history.unshift({ role: message.role, content });
+      }
+      const outcome = await suggestCaptionAction({ caption: text, prompt: question, history });
       if (request.current !== id) return;
+      if (!outcome.ok) throw new Error(outcome.detail);
+      const reply = outcome.reply;
       setMessages((previous) => [...previous, { id: id * 2 + 1, role: "assistant", text: reply.message,
         prompt: question, suggestion: reply.suggestion, revision: sourceRevision }]);
-    } catch {
+    } catch (error) {
       if (request.current !== id) return;
-      setMessages((previous) => [...previous, { id: id * 2 + 1, role: "assistant",
-        text: "The demo could not prepare a suggestion. Try sending your request again." }]);
+      setMessages((previous) => [...previous, { id: id * 2 + 1, role: "assistant", prompt: question, error: true,
+        text: error instanceof Error ? error.message : "AI could not prepare a suggestion. Your caption is unchanged; try again." }]);
     } finally {
       if (request.current === id) {
         inFlight.current = false;
@@ -73,17 +88,19 @@ export function CaptionAssistant({ text, revision, disabled, onApply }: {
         <div><h2 className="card-title" id="caption-assistant-title">Your caption assistant</h2>
           <p className="card-note caption-help">Describe what you’d like to change. Review a suggestion before applying it.</p></div>
       </div>
-      <span className="pill pill-info">AI demo</span>
+      <span className="pill pill-info">DeepSeek V4.1 Flash</span>
     </div>
-    <p className="caption-demo-note">Simulated suggestions · No AI service is connected. Applying a suggestion updates your draft; Save caption publishes it.</p>
+    <p className="caption-demo-note">Powered by OpenRouter · Applying a suggestion updates your draft. Save caption saves it to the campaign.</p>
+    {unavailableReason ? <p className="caption-ai-unavailable" role="status">{unavailableReason}</p> : null}
     <div ref={history} className="caption-chat-history" role="log" aria-label="Caption assistant conversation" aria-live="polite" aria-relevant="additions text">
       {messages.length === 0 ? <div className="caption-chat-empty"><Sparkles size={24} aria-hidden />
         <h3>A fresh perspective on your caption</h3>
         <p>Make it more concise, adjust the tone, or give readers a clear next step.</p>
       </div> : null}
       {messages.map((message) => <article className={`caption-message caption-message-${message.role}`} key={message.id}>
-        <span className="caption-message-author">{message.role === "user" ? "You" : "Caption assistant · Demo"}</span>
-        <p className="caption-message-text">{message.text}</p>
+        <span className="caption-message-author">{message.role === "user" ? "You" : "Caption assistant"}</span>
+        <p className="caption-message-text" role={message.error ? "alert" : undefined}>{message.text}</p>
+        {message.error ? <button type="button" className="btn caption-ai-retry" disabled={disabled || pending || Boolean(unavailableReason)} onClick={() => void send(message.prompt!)}>Retry request</button> : null}
         {message.suggestion !== undefined && message.state !== "dismissed" ? <div className="caption-suggestion">
           <span className="caption-preview-eyebrow">Suggested caption</span>
           <pre className="caption-box">{message.suggestion}</pre>
@@ -91,23 +108,23 @@ export function CaptionAssistant({ text, revision, disabled, onApply }: {
             {message.state === "applied" ? <span className="caption-applied"><Check size={15} aria-hidden /> Applied to draft</span>
               : message.revision !== revision ? <>
                 <span className="card-note">Caption changed. Regenerate to use your latest draft.</span>
-                <button type="button" className="btn" disabled={disabled || pending} onClick={() => void send(message.prompt!)}>Regenerate</button>
-              </> : <button type="button" className="btn btn-primary" disabled={disabled}
+                <button type="button" className="btn" disabled={disabled || pending || Boolean(unavailableReason)} onClick={() => void send(message.prompt!)}>Regenerate</button>
+              </> : <button type="button" className="btn btn-primary" disabled={disabled || Boolean(unavailableReason)}
                 onClick={() => { onApply(message.suggestion!, message.revision!); mark(message.id, "applied"); }}>Apply suggestion</button>}
-            {!message.state ? <button type="button" className="btn" disabled={disabled} onClick={() => mark(message.id, "dismissed")}>Dismiss</button> : null}
+            {!message.state ? <button type="button" className="btn" disabled={disabled || Boolean(unavailableReason)} onClick={() => mark(message.id, "dismissed")}>Dismiss</button> : null}
           </div>
         </div> : null}
         {message.state === "dismissed" ? <span className="card-note">Suggestion dismissed.</span> : null}
       </article>)}
-      {pending ? <p className="caption-chat-pending" role="status"><Sparkles size={15} aria-hidden /> Preparing a demo suggestion…</p> : null}
+      {pending ? <p className="caption-chat-pending" role="status"><Sparkles size={15} aria-hidden /> Thinking about your caption…</p> : null}
     </div>
     <div className="caption-chat-bottom">
       <div className="caption-starter-prompts" aria-label="Suggested requests">{STARTERS.map((starter) =>
-        <button type="button" className="caption-starter" key={starter} disabled={disabled || pending}
+        <button type="button" className="caption-starter" key={starter} disabled={disabled || pending || Boolean(unavailableReason)}
           onClick={() => void send(starter)}>{starter}</button>)}</div>
       <form className="caption-composer" onSubmit={(event) => { event.preventDefault(); void send(prompt); }} aria-label="Ask the caption assistant">
         <label className="sr-only" htmlFor="caption-ai-prompt">Message the caption assistant</label>
-        <textarea id="caption-ai-prompt" ref={composer} rows={2} value={prompt} disabled={disabled}
+        <textarea id="caption-ai-prompt" ref={composer} rows={2} maxLength={4000} value={prompt} disabled={disabled || Boolean(unavailableReason)}
           placeholder="Ask AI to refine your caption…" onChange={(event) => setPrompt(event.target.value)}
           aria-describedby="caption-chat-keyboard"
           onKeyDown={(event) => {
@@ -115,7 +132,7 @@ export function CaptionAssistant({ text, revision, disabled, onApply }: {
               event.preventDefault(); void send(prompt);
             }
           }} />
-        <button type="submit" className="btn btn-primary caption-send" aria-label="Send message" disabled={disabled || pending || !prompt.trim()}>
+        <button type="submit" className="btn btn-primary caption-send" aria-label="Send message" disabled={disabled || pending || Boolean(unavailableReason) || !prompt.trim() || prompt.length > 4000}>
           <Send size={17} aria-hidden /><span>Send</span>
         </button>
       </form>

@@ -689,6 +689,8 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .caption-starter:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .caption-send { display: inline-flex; align-items: center; gap: 7px; }
 .caption-chat-bottom > .card-note { margin: 8px 0 0; font-size: 11px; }
+.caption-ai-unavailable { margin: 0; padding: 12px 20px; background: var(--warning-soft); color: var(--text-muted); font-size: 13px; }
+.caption-ai-retry { margin-top: 12px; }
 @media (max-width: 1000px) {
   .caption-editor-workspace { grid-template-columns: minmax(0, 1fr); }
   .caption-editor-input { min-height: 280px; }
