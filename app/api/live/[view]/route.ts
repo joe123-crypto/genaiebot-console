@@ -1,7 +1,7 @@
 import { getLiveView } from "@/src/lib/live-client";
 import { BotUnavailableError } from "@/src/lib/bot-client";
 export const dynamic = "force-dynamic";
-const views = new Set(["groups", "campaigns", "discoveries", "metrics", "schedule", "navigation", "campaign", "detail", "preview", "group"]);
+const views = new Set(["groups", "campaigns", "discoveries", "metrics", "schedule", "settings", "lines", "navigation", "campaign", "captions", "detail", "preview", "group"]);
 export async function GET(request: Request, { params }: { params: Promise<{ view: string }> }) {
   const { view } = await params;
   const headers = { "Cache-Control": "no-store" };

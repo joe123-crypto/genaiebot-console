@@ -42,7 +42,7 @@ function Page({ query = "" }: { query?: string }) {
 }
 describe("indexed page requests", () => {
   it("uses the cursor for more rows and does not refetch the initial page", async () => {
-    const fetch = vi.fn(async () => Response.json({ rows: [{ jid: "2@g.us", name: "Next" }], revision: "1", sync, nextCursor: null })); vi.stubGlobal("fetch", fetch);
+    const fetch = vi.fn(async (_url: string) => Response.json({ rows: [{ jid: "2@g.us", name: "Next" }], revision: "1", sync, nextCursor: null })); vi.stubGlobal("fetch", fetch);
     render(<Page />); expect(fetch).not.toHaveBeenCalled();
     await act(async () => fireEvent.click(screen.getByText("More")));
     expect(fetch).toHaveBeenCalledTimes(1); expect(fetch.mock.calls[0][0]).toContain("cursor=next");

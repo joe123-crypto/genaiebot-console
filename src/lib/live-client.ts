@@ -2,7 +2,7 @@ import { BOT_API_BASE_URL, BOT_API_TOKEN } from "@/src/config";
 import { BotUnavailableError } from "./bot-client";
 import { deduplicateRead, withReadSlot } from "./remote-read";
 
-const VIEWS = new Set(["groups", "campaigns", "discoveries", "metrics", "schedule", "navigation", "campaign", "detail", "preview", "group", "status"]);
+const VIEWS = new Set(["groups", "campaigns", "discoveries", "metrics", "schedule", "settings", "lines", "navigation", "campaign", "captions", "detail", "preview", "group", "status"]);
 /** No legacy fallback: a missing live endpoint must never download a directory. */
 export function getLiveView<T>(view: string, params = new URLSearchParams()): Promise<T> {
   if (!VIEWS.has(view)) throw new Error("Unknown live view");

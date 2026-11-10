@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ load: vi.fn(), notFound: vi.fn() }));
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound }));
-vi.mock("@/src/domains/campaign-detail", () => ({ loadCampaignDetail: mocks.load }));
+vi.mock("@/src/domains/campaign-detail", () => ({ loadCaptionEditorDetail: mocks.load }));
 vi.mock("@/app/_components/shell-wrapper", () => ({ Shell: () => null }));
 vi.mock("@/app/campaigns/_components/caption-editor", () => ({ CaptionEditorScreen: () => null }));
 vi.mock("@/src/lib/bot-client", () => ({ captionSaveUnavailableReason: () => "No save connection" }));

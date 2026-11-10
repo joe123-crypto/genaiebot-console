@@ -6,16 +6,17 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { ArrowLeft, Eye, Pencil, RotateCcw, Save } from "lucide-react";
 import { PageHead } from "@/app/_components/ui";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { SyncNotice } from "@/app/_components/live-page";
 import { CaptionAssistant } from "@/app/campaigns/_components/caption-assistant";
 import { saveCaptionsAction } from "@/app/campaigns/actions";
 import { captionDraftKey, editedCaptions, parseCaptionDraft, type CaptionDraft } from "@/src/lib/caption-editor";
 import { campaignTitle } from "@/src/lib/format";
-import type { CampaignDetail } from "@/src/domains/campaign-detail";
+import type { CaptionEditorDetail } from "@/src/domains/campaign-detail";
 
 const UNAVAILABLE = "Saving is unavailable until the required campaign data refreshes successfully. Your draft is kept here.";
 
 export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnavailableReason, aiUnavailableReason }: {
-  slug: string; variant: string; detail: CampaignDetail; writable: boolean; saveUnavailableReason?: string; aiUnavailableReason?: string;
+  slug: string; variant: string; detail: CaptionEditorDetail; writable: boolean; saveUnavailableReason?: string; aiUnavailableReason?: string;
 }) {
   // Retain successful reads across polling failures without leaving saves armed.
   const [lastPreview, setLastPreview] = useState(detail.preview.ok ? detail.preview : null);
@@ -29,7 +30,7 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
     : !fresh ? UNAVAILABLE : saveUnavailableReason;
   const router = useRouter();
 
-  return <>
+  return <><SyncNotice sync={detail.sync} />
     {!detail.preview.ok || !detail.campaign.ok || !detail.writes.ok ? <div className="campaign-read-notice" role="status">
       <div><strong>Could not refresh caption editor.</strong> {preview && campaign ? "Showing the last loaded data. " : "Required campaign data is unavailable. "}
         {!detail.campaign.ok ? detail.campaign.error.detail : !detail.preview.ok ? detail.preview.error.detail : !detail.writes.ok ? detail.writes.error.detail : ""}</div>
@@ -40,7 +41,7 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
       writable={writable} saveUnavailableReason={reason} aiUnavailableReason={aiUnavailableReason} />
       : <><PageHead title="Caption editor" subtitle="Load the campaign to edit its caption." />
         <section className="card card-pad"><p>Caption data is unavailable. Retry to load the editor.</p>
-          <Link className="link" href={`/campaigns/${encodeURIComponent(slug)}`}>Back to campaign</Link></section></>}
+          <Link prefetch={false} className="link" href={`/campaigns/${encodeURIComponent(slug)}`}>Back to campaign</Link></section></>}
   </>;
 }
 
@@ -139,10 +140,10 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
   if (!ready) return <section className="card card-pad" role="status">Loading caption draft…</section>;
   if (!validVariant) return <section className="card card-pad"><h1 className="card-title">Caption variant unavailable</h1>
     <p>This variant does not exist in the loaded campaign. Return to the campaign to choose another.</p>
-    <Link className="link" href={back}>Back to campaign</Link></section>;
+    <Link prefetch={false} className="link" href={back}>Back to campaign</Link></section>;
 
   return <div className="caption-editor-page" aria-busy={pending}>
-    <Link className="caption-back link" href={back}><ArrowLeft size={16} aria-hidden /> Back to campaign</Link>
+    <Link prefetch={false} className="caption-back link" href={back}><ArrowLeft size={16} aria-hidden /> Back to campaign</Link>
     <PageHead title={variant === "new" ? "Create a caption" : `Edit caption · Variant ${variant}`} subtitle={name}
       actions={<div className="caption-actions">
         <button type="button" className="btn" disabled={pending} onClick={() => dirty ? setCancelOpen(true) : clearAndLeave()}>Cancel</button>
