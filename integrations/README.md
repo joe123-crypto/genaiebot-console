@@ -454,7 +454,13 @@ members query local telemetry only for visible IDs. Discoveries query local
 inventory against indexed membership. The schedule endpoint omits group payloads,
 caption text and assets. Unchanged polls return only freshness metadata. After
 writes, the API fences indexed config until a consistent stream boundary is newer
-than the write; uncertain writes are never replayed.
+than the write. The API resumes the shared stream from its saved tokens after
+a write to obtain that boundary promptly, rather than waiting for an idle
+heartbeat. The bounded confirmation wait does not hold the projection lock,
+so local telemetry remains available. If confirmation is delayed, existing
+revision-aware views receive stale/unchanged metadata and retain their data.
+Draft-addition lookups use the live GET proxy and retain drafts on read failure;
+uncertain writes are never replayed.
 
 A visible view renews a 90-second sync lease; browser resources poll every 30
 seconds and pause when hidden/offline. One stream is shared across tabs. The
