@@ -109,12 +109,29 @@ the bot reports `affectsProduction: false` (its campaigns still read
 membership.json), saving is allowed but every screen warns that it will not change
 what is sent.
 
-On a campaign page, **+ Add variant** creates a blank caption, the trash button
-removes a variant, and **Save changes** commits the whole set. At least one
-nonblank caption must remain. **Reset** discards the draft. Template placeholders
-such as `{bot_number}`, `{ref}` and `{ref_link}` remain editable; group-specific
-substitutions appear in the saved preview. Automatic refresh preserves drafts,
-and a save refuses captions that changed since editing began.
+Campaign caption cards are read-only. The pencil beside each trash button opens
+`/campaigns/[slug]/captions/[variant]/edit`; **+ Add variant** opens the same editor
+with a blank caption. Edit the template manually with a live preview, then use
+**Save caption** to save and return to the campaign. Template placeholders such
+as `{bot_number}`, `{ref}` and `{ref_link}` remain editable; group-specific
+substitutions appear in the campaign's saved previews.
+
+The editor's bottom chat panel is an **AI demo**, with simulated suggestions for
+shortening, professional tone, and calls to action. Suggestions preserve factual
+details and placeholders, require **Apply suggestion**, and can be undone before
+further manual edits. Changing the caption makes previous suggestions stale.
+There is no AI backend, API key, or automatic save from chat.
+
+Editor drafts survive navigation and reloads in the same tab using session
+storage, separately for each campaign and variant. **Back to campaign** keeps the
+draft; **Cancel** explicitly discards it. Automatic refresh preserves edits, and
+saving refuses captions changed since the draft began. **Reset to latest** loads
+current captions when a conflict occurs. If browser storage is unavailable,
+drafting continues in memory with a notice.
+
+The campaign's trash buttons still stage deletions: **Save changes** commits them
+and **Reset** discards them. Save or reset these deletions before opening an
+editor or adding a variant. At least one nonblank caption must remain.
 
 Caption persistence also requires the companion bot update in
 [`integrations/genaebot-caption-variants.patch`](integrations/genaebot-caption-variants.patch).

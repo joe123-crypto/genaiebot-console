@@ -15,8 +15,8 @@ const props = { slug, writable: true, imageUnavailableReason: "Picture editing u
 function page(detail: CampaignDetail = healthy, selectedSlug = slug) {
   return createElement(CampaignDetailView, { ...props, slug: selectedSlug, detail });
 }
-function edit() {
-  fireEvent.change(screen.getByRole("textbox", { name: "Variant 1" }), { target: { value: "Unsaved water caption" } });
+function assertReadOnly() {
+  expect(screen.queryByRole("textbox", { name: "Variant 1" })).toBeNull();
 }
 function addGroup() {
   fireEvent.click(screen.getByRole("button", { name: "Add groups" }));
@@ -39,23 +39,23 @@ describe("campaign read resilience", () => {
     for (const title of ["Pictures", "Caption variants", "Where it goes"]) {
       expect(screen.getByRole("heading", { name: title })).toBeTruthy();
     }
-    if (key !== "preview") expect(screen.getByRole("textbox", { name: "Variant 1" })).toBeTruthy();
+    if (key !== "preview") expect(screen.getByLabelText("Variant 1")).toBeTruthy();
     if (key !== "campaign") expect(screen.getByText("borehole.jpg")).toBeTruthy();
     if (key !== "preview") expect(screen.getByText("Market One")).toBeTruthy();
     view.rerender(page());
-    expect(screen.getByRole("textbox", { name: "Variant 1" })).toBeTruthy();
+    expect(screen.getByLabelText("Variant 1")).toBeTruthy();
     expect(screen.getByText("Market One")).toBeTruthy();
     expect(screen.getByText("borehole.jpg")).toBeTruthy();
     expect(screen.queryByText(/Service is busy/)).toBeNull();
   });
 
   it.each(["campaign", "preview", "membership", "writes"] as const)("preserves content and drafts through a failed %s refresh", (key) => {
-    const view = render(page()); edit(); addGroup();
+    const view = render(page()); assertReadOnly(); addGroup();
     const before = stored();
-    const caption = screen.getByRole("textbox", { name: "Variant 1" });
+    const caption = screen.getByLabelText("Variant 1");
     view.rerender(page({ ...healthy, [key]: failure }));
-    expect(screen.getByRole("textbox", { name: "Variant 1" })).toBe(caption);
-    expect((caption as HTMLTextAreaElement).value).toBe("Unsaved water caption");
+    expect(screen.getByLabelText("Variant 1")).toBe(caption);
+    expect(caption.textContent).toContain("Water for {ref}");
     expect(screen.getByText("New Market")).toBeTruthy();
     expect(screen.getByText("Market One")).toBeTruthy();
     expect(screen.getByText("borehole.jpg")).toBeTruthy();
@@ -63,12 +63,12 @@ describe("campaign read resilience", () => {
     if (key !== "writes") expect(screen.getByText(/Showing out-of-date data/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Apply 1 change" }) as HTMLButtonElement).disabled).toBe(true);
     const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
-    expect(save.disabled).toBe(key !== "membership");
+    expect(save.disabled).toBe(true);
     view.rerender(page());
     expect((screen.getByRole("button", { name: "Apply 1 change" }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
     expect(stored()).toEqual(before);
-    expect((caption as HTMLTextAreaElement).value).toBe("Unsaved water caption");
+    expect(caption.textContent).toContain("Water for {ref}");
   });
 
   it("does not prune stored additions when membership has never loaded", () => {
@@ -110,20 +110,20 @@ describe("campaign read resilience", () => {
     const view = render(page(down));
     expect(screen.getByRole("heading", { name: "Borehole Drilling" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Where it goes" })).toBeTruthy();
-    view.rerender(page()); edit(); addGroup();
+    view.rerender(page()); assertReadOnly(); addGroup();
     view.rerender(page(down));
     expect(screen.getByText("New Market")).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Variant 1" }) as HTMLTextAreaElement).value).toBe("Unsaved water caption");
+    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for {ref}");
     view.rerender(page());
-    expect((screen.getByRole("textbox", { name: "Variant 1" }) as HTMLTextAreaElement).value).toBe("Unsaved water caption");
+    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for {ref}");
   });
 
   it("manual retry refreshes the page without clearing drafts", async () => {
-    const view = render(page()); edit(); addGroup();
+    const view = render(page()); assertReadOnly(); addGroup();
     view.rerender(page({ ...healthy, preview: failure }));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry campaign preview" })); });
     expect(mocks.refresh).toHaveBeenCalledOnce();
-    expect((screen.getByRole("textbox", { name: "Variant 1" }) as HTMLTextAreaElement).value).toBe("Unsaved water caption");
+    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for {ref}");
     expect(stored().added).toEqual(["2@g.us"]);
   });
 
@@ -143,7 +143,7 @@ describe("campaign read resilience", () => {
   });
 
   it("resets retained data when navigating to another campaign", () => {
-    const view = render(page()); edit();
+    const view = render(page()); assertReadOnly();
     view.rerender(page({ campaign: failure, adAssets: null, preview: failure,
       membership: failure, writes: failure }, "cv"));
     expect(screen.queryByRole("textbox")).toBeNull();
