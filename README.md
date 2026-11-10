@@ -434,9 +434,13 @@ Browser requests go through same-origin Next.js routes; tokens remain server-sid
 Account mutations also respect `CONSOLE_WRITES=1`; live status remains available
 when writes are disabled. Permanent removal and console sign-in are deferred.
 
-- **Link** adds a new account or pairs an existing unlinked one by QR. New
-  accounts have replies disabled and no group assignments. To replace an
-  existing saved login, Unlink first, then Link.
+- **Link** adds a new account or pairs an existing unlinked one by QR. For a
+  disconnected line with a saved or unknown login, confirm **Replace login and
+  show QR** to clear that login and open pairing automatically. Configuration,
+  assignments, contact references and reply policies stay in place. The console
+  checks status again before replacing a login and retains it if the line has
+  reconnected. Active pairing sessions resume without clearing the login. New
+  accounts have replies disabled and no group assignments.
 - **Unlink** stops sends/replies and clears the saved WhatsApp login after
   confirmation. Configuration, assignments, contact references and history stay.
 - **Pause** stops sends/replies and retains login. It survives gateway restart.
