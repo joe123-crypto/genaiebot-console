@@ -5,9 +5,14 @@ import type { KeyboardEvent, PointerEvent } from "react";
 import { activeSlot, clashes, nextUp, runEndsAt, runningNow, slotKey } from "@/src/domains/schedule";
 import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, timelineClockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { CalendarCheck, CalendarOff, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
 import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleEntriesAction } from "@/app/schedule/actions";
 import type { ScheduleEntriesRequest, ScheduleEntryChange } from "@/src/lib/types";
+
+const POP_WIDTH = 300;
+/** Rough popover height, only used to decide whether it opens below or above its bar. */
+const POP_ESTIMATE = 200;
 
 type Draft = { base: string; slots: DaySlot[] };
 const ordered = (slots: DaySlot[]) => [...slots].sort((first, second) => slotKey(first).localeCompare(slotKey(second)));
@@ -24,6 +29,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
   const [accepted, setAccepted] = useState<{ base: string; slots: DaySlot[] } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [pasteTime, setPasteTime] = useState("12:00");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -55,6 +61,22 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const nowOffset = `${nowMinutes / 1440 * 100}%`;
 
   useEffect(() => { if (selected) panel.current?.focus(); }, [selected]);
+
+  /** Fixed, not absolute: .timeline-scroll clips on both axes, so an in-flow popover is cut off. */
+  useEffect(() => {
+    if (!selected) { setAnchor(null); return; }
+    const place = () => {
+      const rect = barRefs.current.get(selected)?.getBoundingClientRect();
+      if (!rect) return;
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - POP_WIDTH - 12));
+      const below = rect.bottom + 8;
+      setAnchor({ left, top: below + POP_ESTIMATE > window.innerHeight ? Math.max(12, rect.top - POP_ESTIMATE - 8) : below });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [selected]);
 
   function edit(slot: DaySlot, values: Partial<DaySlot>) {
     if (saving.current || locked || slot.scheduleEdit?.editable === false) return;
@@ -240,23 +262,33 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
             </div>
           </div>)}
         </div></div>
-        {selectedSlot && <div className="timeline-options" id="timeline-options" role="dialog" aria-modal="false" aria-labelledby="timeline-options-title" tabIndex={-1} ref={panel}
+        {selectedSlot && <div className="timeline-pop" id="timeline-options" role="dialog" aria-modal="false" aria-labelledby="timeline-options-title" tabIndex={-1} ref={panel}
+          style={{ top: anchor?.top ?? 0, left: anchor?.left ?? 0, width: POP_WIDTH }}
           onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); closeOptions(); } }}>
-          <div className="timeline-options-head"><h3 id="timeline-options-title">{label(selectedSlot)} · {selectedSlot.time}</h3><button type="button" className="btn" onClick={closeOptions}>Close options</button></div>
-          <p>{selectedSlot.time} – {timelineClockLabel(runEndsAt(selectedSlot))} · {Math.round(worstCaseRunSeconds(selectedSlot.targetCount) / 60)} minutes at worst · {timezone}</p>
-          {selectedSlot.recurrence && <p className="card-note">{selectedSlot.recurrence.weekdays.length === 7 ? "Every day" : selectedSlot.recurrence.weekdays.map((day) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).join(", ")} · {selectedSlot.recurrence.timezone}</p>}
-          <label className="timeline-time-input">Start time <input aria-label="Start time" type="time" value={selectedSlot.time} disabled={locked || selectedSlot.deleted || selectedSlot.scheduleEdit?.editable === false}
+          <div className="timeline-pop-head"><h3 id="timeline-options-title">{label(selectedSlot)}</h3>
+            <button type="button" className="icon-btn" aria-label="Close options" title="Close options" onClick={closeOptions}><X size={15} aria-hidden /></button></div>
+          <p className="timeline-pop-meta">{selectedSlot.time} – {timelineClockLabel(runEndsAt(selectedSlot))} · {Math.round(worstCaseRunSeconds(selectedSlot.targetCount) / 60)}m at worst
+            {selectedSlot.recurrence && <> · {selectedSlot.recurrence.weekdays.length === 7 ? "every day" : selectedSlot.recurrence.weekdays.map((day) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).join(", ")}</>}</p>
+          <label className="timeline-time-input">Start <input aria-label="Start time" type="time" value={selectedSlot.time} disabled={locked || selectedSlot.deleted || selectedSlot.scheduleEdit?.editable === false}
             onChange={(event) => { if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(event.target.value)) { const [hour, minute] = event.target.value.split(":").map(Number); move(selectedSlot, hour * 60 + minute); } }} /></label>
-          <fieldset disabled={locked || stale || selectedSlot.scheduleEdit?.editable === false || selectedSlot.deleted} className="timeline-entry-actions">
-            <button type="button" className="btn" onClick={() => edit(selectedSlot, { paused: !selectedSlot.paused })}>{selectedSlot.paused ? "Resume" : "Pause"}</button>
-            <button type="button" className="btn" onClick={() => edit(selectedSlot, { skipped: !selectedSlot.skipped })}>{selectedSlot.skipped ? "Undo skip" : "Skip this day"}</button>
-            <button type="button" className="btn" onClick={() => setCopied(selectedSlot.slug)}>Copy</button>
-            <label className="timeline-time-input">Paste at <input aria-label="Paste time" type="time" value={pasteTime} onChange={(event) => setPasteTime(event.target.value)} /></label>
-            <button type="button" className="btn" disabled={!copied || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(pasteTime)} onClick={() => { const [hour, minute] = pasteTime.split(":").map(Number); paste(hour * 60 + minute); }}>Paste daily repeat</button>
-            <button type="button" className="btn" onClick={() => setConfirmDelete(true)}>Delete scheduled run</button>
-            {confirmDelete && <div className="timeline-delete-confirm"><p>Delete this recurring run? The campaign and its other runs stay in place. Save changes to apply.</p><button type="button" className="btn btn-danger" onClick={() => remove(selectedSlot)}>Confirm delete run</button><button type="button" className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
+          <fieldset disabled={locked || stale || selectedSlot.scheduleEdit?.editable === false || selectedSlot.deleted} className="timeline-pop-actions">
+            <button type="button" className="icon-btn" aria-label={selectedSlot.paused ? "Resume" : "Pause"} title={selectedSlot.paused ? "Resume" : "Pause"}
+              onClick={() => edit(selectedSlot, { paused: !selectedSlot.paused })}>{selectedSlot.paused ? <Play size={15} aria-hidden /> : <Pause size={15} aria-hidden />}</button>
+            <button type="button" className="icon-btn" aria-label={selectedSlot.skipped ? "Undo skip" : "Skip this day"} title={selectedSlot.skipped ? "Undo skip" : `Skip ${date}`}
+              onClick={() => edit(selectedSlot, { skipped: !selectedSlot.skipped })}>{selectedSlot.skipped ? <CalendarCheck size={15} aria-hidden /> : <CalendarOff size={15} aria-hidden />}</button>
+            <button type="button" className={`icon-btn${copied === selectedSlot.slug ? " is-on" : ""}`} aria-label="Copy" title="Copy this run"
+              onClick={() => setCopied(selectedSlot.slug)}><Copy size={15} aria-hidden /></button>
+            <span className="timeline-pop-paste"><input aria-label="Paste time" type="time" value={pasteTime} onChange={(event) => setPasteTime(event.target.value)} />
+              <button type="button" className="icon-btn" aria-label="Paste daily repeat" title="Paste a daily repeat at this time"
+                disabled={!copied || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(pasteTime)}
+                onClick={() => { const [hour, minute] = pasteTime.split(":").map(Number); paste(hour * 60 + minute); }}><ClipboardPaste size={15} aria-hidden /></button></span>
+            <button type="button" className="icon-btn is-danger" aria-label="Delete scheduled run" title="Delete this recurring run"
+              onClick={() => setConfirmDelete(true)}><Trash2 size={15} aria-hidden /></button>
+            {confirmDelete && <div className="timeline-pop-confirm"><p>Delete this recurring run? Its campaign and other runs stay.</p>
+              <button type="button" className="btn btn-danger" onClick={() => remove(selectedSlot)}>Confirm delete run</button>
+              <button type="button" className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
           </fieldset>
-          {selectedSlot.deleted && <p className="card-note">This run will be removed when you save. Reset to undo.</p>}
+          {selectedSlot.deleted && <p className="timeline-pop-meta">Removed when you save. Reset to undo.</p>}
         </div>}
       </div>
     </section>
