@@ -5,8 +5,11 @@ import {
   NOT_LIVE_WARNING,
   READ_ONLY_REASON,
   canDelete,
+  canEditSchedule,
+  canEditScheduleEntries,
   canWrite,
 } from "@/src/lib/write-capabilities";
+import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { WriteCapabilities } from "@/src/lib/types";
 
 /**
@@ -129,5 +132,56 @@ describe("canAct", () => {
     expect(canDelete(true, writes, "groups").allowed).toBe(false);
     expect(canAct(true, { leaveGroup: true, clearRecords: true }, "leaveGroup").allowed)
       .toBe(true);
+  });
+});
+
+/**
+ * The two schedule gates are nested: entries is a strict superset of edit. One timeline now
+ * renders for both bot generations, so the gap between them is what decides whether the entry
+ * actions appear — and a bot that can move times but not act on entries must keep its save.
+ */
+describe("the schedule gates", () => {
+  const live = (scheduleEditing: WriteCapabilities["scheduleEditing"]): WriteCapabilities => ({ ...LIVE, scheduleEditing });
+  const why = (gate: WriteGate) => (gate.allowed ? undefined : gate.reason);
+
+  it("refuses both when the console is read-only", () => {
+    expect(canEditSchedule(false, live({ edit: true, entries: true }))).toEqual({ allowed: false, reason: READ_ONLY_REASON });
+    expect(canEditScheduleEntries(false, live({ edit: true, entries: true }))).toEqual({ allowed: false, reason: READ_ONLY_REASON });
+  });
+
+  it("refuses both when the bot predates console writes", () => {
+    expect(canEditSchedule(true, undefined)).toEqual({ allowed: false, reason: BOT_TOO_OLD_REASON });
+    expect(canEditScheduleEntries(true, undefined)).toEqual({ allowed: false, reason: BOT_TOO_OLD_REASON });
+  });
+
+  it("refuses both without a write key", () => {
+    const writes: WriteCapabilities = { ...LIVE, enabled: false, scheduleEditing: { edit: true, entries: true } };
+    expect(canEditSchedule(true, writes)).toEqual({ allowed: false, reason: NO_WRITE_KEY_REASON });
+    expect(canEditScheduleEntries(true, writes)).toEqual({ allowed: false, reason: NO_WRITE_KEY_REASON });
+  });
+
+  it("requires live configuration, not a file-backed checkout", () => {
+    const writes: WriteCapabilities = { ...LIVE, affectsProduction: false, scheduleEditing: { edit: true, entries: true } };
+    expect(why(canEditSchedule(true, writes))).toBe("Schedule editing requires live Firestore configuration.");
+    expect(why(canEditScheduleEntries(true, writes))).toBe("Schedule editing requires live Firestore configuration.");
+  });
+
+  it("prefers the bot's own reason for refusing schedule editing", () => {
+    expect(why(canEditSchedule(true, live({ edit: false, reason: "Cron source is read-only." }))))
+      .toBe("Cron source is read-only.");
+    expect(why(canEditSchedule(true, live({ edit: false }))))
+      .toBe("Deploy the companion bot update for schedule editing to save times here.");
+  });
+
+  /** The case the single timeline exists to serve, and the one production is in today. */
+  it("allows moving times while refusing entry actions when the bot has no entry support", () => {
+    expect(canEditSchedule(true, live({ edit: true })).allowed).toBe(true);
+    expect(canEditScheduleEntries(true, live({ edit: true })))
+      .toEqual({ allowed: false, reason: "Deploy the companion bot update for repeat, pause, skip and delete controls." });
+  });
+
+  it("allows both once the bot advertises entry support", () => {
+    expect(canEditSchedule(true, live({ edit: true, entries: true })).allowed).toBe(true);
+    expect(canEditScheduleEntries(true, live({ edit: true, entries: true })).allowed).toBe(true);
   });
 });

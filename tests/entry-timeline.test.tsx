@@ -5,8 +5,8 @@ import { EntryTimeline } from "@/app/schedule/_components/entry-timeline";
 import type { DaySlot } from "@/src/domains/schedule";
 import type { ScheduleEntriesRequest } from "@/src/lib/types";
 
-const mock = vi.hoisted(() => ({ save: vi.fn(), notify: vi.fn() }));
-vi.mock("@/app/schedule/actions", () => ({ saveScheduleEntriesAction: mock.save }));
+const mock = vi.hoisted(() => ({ save: vi.fn(), saveTimes: vi.fn(), notify: vi.fn() }));
+vi.mock("@/app/schedule/actions", () => ({ saveScheduleEntriesAction: mock.save, saveScheduleAction: mock.saveTimes }));
 vi.mock("@/app/_components/use-live", () => ({ notifyLiveChange: mock.notify }));
 
 function slot(slug: string, entryId: string, minutes: number): DaySlot {
@@ -143,7 +143,7 @@ describe("independent timeline entries", () => {
     await act(async () => finish({ ok: false, detail: "Nothing saved" }));
   });
   it("allows inspecting bars in read-only mode without writes", () => {
-    render(<EntryTimeline {...props} unavailableReason="Read-only" />); fireEvent.click(bar());
+    render(<EntryTimeline {...props} saveUnavailableReason="Read-only" />); fireEvent.click(bar());
     expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
     click("Pause"); fireEvent.keyDown(bar(), { key: "ArrowRight" });
     expect(bar().getAttribute("aria-valuenow")).toBe("540");
