@@ -7,7 +7,7 @@ import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, timelineClockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
 import { CalendarCheck, CalendarOff, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
 import { notifyLiveChange } from "@/app/_components/use-live";
-import { saveScheduleEntriesAction } from "@/app/schedule/actions";
+import { saveScheduleAction, saveScheduleEntriesAction } from "@/app/schedule/actions";
 import type { ScheduleEntriesRequest, ScheduleEntryChange } from "@/src/lib/types";
 
 const POP_WIDTH = 270;
@@ -21,8 +21,22 @@ const revision = (date: string, slots: DaySlot[]) => JSON.stringify([date, order
 const snap = (minutes: number) => Math.min(1435, Math.max(0, Math.round(minutes / 5) * 5));
 const label = (slot: DaySlot) => campaignTitle(slot.slug);
 
-export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, unavailableReason }: {
-  slots: DaySlot[]; nowMinutes: number; timezone: string; date: string; unavailableReason?: string;
+/** Entry bots report the last confirmed run as `confirmed`; older ones only as
+ * scheduleEdit.confirmedMinutes. Reading one and not the other hides a pending run. */
+function confirmedNote(slot: DaySlot) {
+  if (slot.confirmed) return `Last confirmed: ${clockLabel(slot.confirmed.minutes)}${slot.confirmed.paused ? ", paused"
+    : slot.confirmed.skipped ? ", skipped" : slot.confirmed.deleted ? ", deleted" : ""}.`;
+  const minutes = slot.scheduleEdit?.confirmedMinutes;
+  return typeof minutes === "number" ? `Last confirmed: ${clockLabel(minutes)}.` : "No confirmed run on this day.";
+}
+
+/** A slot the bot will not let us move, including one that arrived without an edit contract:
+ * sending an empty expectedRevision only earns a misleading "Invalid schedule change." */
+const editable = (slot: DaySlot) => Boolean(slot.scheduleEdit) && slot.scheduleEdit!.editable !== false;
+
+export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason, entriesUnavailableReason }: {
+  slots: DaySlot[]; nowMinutes: number; timezone: string; date: string;
+  saveUnavailableReason?: string; entriesUnavailableReason?: string;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState(false);
@@ -48,12 +62,18 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const changes = view.filter((slot) => JSON.stringify(desired(slot)) !== JSON.stringify(saved.has(slotKey(slot)) ? desired(saved.get(slotKey(slot))!) : null));
   const dirty = changes.length > 0;
   const stale = draft !== null && draft.base !== currentRevision;
-  const locked = pending || uncertain !== null || Boolean(unavailableReason);
+  const locked = pending || uncertain !== null || Boolean(saveUnavailableReason);
+  /** Bots without entry support still move times, so this gates the entry actions alone. */
+  const entriesEnabled = !entriesUnavailableReason;
   const selectedSlot = view.find((slot) => slotKey(slot) === selected);
   const groups = new Map<string, DaySlot[]>();
   for (const slot of ordered(view)) groups.set(slot.slug, [...(groups.get(slot.slug) ?? []), slot]);
-  const activeView = dirty ? view : view.flatMap((slot) => slot.scheduleEdit?.status !== "pending" ? [slot]
-    : slot.confirmed ? [{ ...slot, ...slot.confirmed, time: clockLabel(slot.confirmed.minutes) }] : []);
+  const activeView = dirty ? view : view.flatMap((slot) => {
+    if (slot.scheduleEdit?.status !== "pending") return [slot];
+    if (slot.confirmed) return [{ ...slot, ...slot.confirmed, time: clockLabel(slot.confirmed.minutes) }];
+    const minutes = slot.scheduleEdit.confirmedMinutes;
+    return typeof minutes === "number" ? [{ ...slot, minutes, time: clockLabel(minutes) }] : [];
+  });
   const running = runningNow(activeView, nowMinutes);
   const runningKeys = new Set(running.map(slotKey));
   const upcoming = nextUp(activeView, nowMinutes);
@@ -79,7 +99,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }, [selected]);
 
   function edit(slot: DaySlot, values: Partial<DaySlot>) {
-    if (saving.current || locked || slot.scheduleEdit?.editable === false) return;
+    if (saving.current || locked || !editable(slot)) return;
     setFeedback(null);
     setDraft((previous) => ({ base: previous?.base ?? currentRevision,
       slots: (previous?.slots ?? slots).map((row) => slotKey(row) === slotKey(slot) ? { ...row, ...values } : row) }));
@@ -107,7 +127,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   function paste(minutes: number) {
     if (!copied || locked || saving.current || stale) return;
     const source = view.find((slot) => slot.slug === copied && !slot.deleted);
-    if (!source || source.scheduleEdit?.editable === false) return;
+    if (!source || !editable(source)) return;
     const entry: DaySlot = { ...source, entryId: crypto.randomUUID(), minutes, time: clockLabel(minutes), paused: false, skipped: false, deleted: false,
       confirmed: null, recurrence: { timezone, weekdays: [0, 1, 2, 3, 4, 5, 6] } };
     setDraft((previous) => ({ base: previous?.base ?? currentRevision, slots: [...(previous?.slots ?? slots), entry] }));
@@ -122,8 +142,33 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     } else edit(slot, { deleted: true });
     setConfirmDelete(false);
   }
+  /** Times-only drafts go to the older per-campaign action, which the bot supports without
+   * entry support and which recovers its own lost replies server-side. */
+  async function saveTimes() {
+    saving.current = true;
+    setPending(true);
+    setFeedback(null);
+    try {
+      const outcome = await saveScheduleAction({ date, timezone,
+        changes: changes.map((slot) => ({ slug: slot.slug, time: slot.time, expectedRevision: slot.scheduleEdit?.revision ?? "" })) });
+      if (!outcome.ok) { setFeedback({ error: true, text: outcome.detail }); return; }
+      const updated = new Map(outcome.campaigns.map((row) => [row.slug, row]));
+      setAccepted({ base: snapshot, slots: view.map((slot) => {
+        const row = updated.get(slot.slug);
+        return row ? { ...slot, minutes: row.minutes, time: clockLabel(row.minutes), scheduleEdit: row.scheduleEdit } : slot;
+      }) });
+      setDraft(null);
+      closeOptions();
+      setFeedback({ error: false, text: outcome.campaigns.some((row) => row.scheduleEdit.status === "pending")
+        ? "Times saved. Scheduler updates are pending; the bot will retry automatically." : "Times saved and confirmed by the scheduler." });
+      notifyLiveChange();
+    } catch {
+      setFeedback({ error: true, text: "Could not confirm the save. Changes may have been saved; retry to check the latest times. Your draft is still here." });
+    } finally { saving.current = false; setPending(false); }
+  }
   async function save() {
-    if (saving.current || (!uncertain && (!dirty || stale)) || unavailableReason || !date) return;
+    if (saving.current || (!uncertain && (!dirty || stale)) || saveUnavailableReason || !date) return;
+    if (!entriesEnabled) return saveTimes();
     const request: ScheduleEntriesRequest = uncertain ?? { operationId: crypto.randomUUID(), date, timezone,
       changes: changes.map((slot): ScheduleEntryChange => ({ slug: slot.slug, entryId: slot.entryId ?? "primary",
         expectedRevision: slot.scheduleEdit?.revision ?? "", create: !saved.has(slotKey(slot)), time: slot.time,
@@ -159,7 +204,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }
   function pointerDown(event: PointerEvent<HTMLSpanElement>, slot: DaySlot) {
     suppressClick.current = false;
-    if (locked || slot.deleted || slot.scheduleEdit?.editable === false || event.button !== 0) return;
+    if (locked || slot.deleted || !editable(slot) || event.button !== 0) return;
     const width = event.currentTarget.closest(".timeline-track")?.getBoundingClientRect().width ?? 0;
     if (!width) return;
     event.preventDefault();
@@ -202,11 +247,12 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
       <div className="card-head"><div><h2 className="card-title" id="day-timeline-title">Day timeline</h2>
         <span className="card-note">Click a bar for options. Drag along its row to change the start time. Length shows the worst-case estimate; purple uses the ads line, blue the default line.</span></div>
         <div className="timeline-actions">{draft && <button type="button" className="btn" onClick={reset} disabled={locked}>Reset</button>}
-          <button type="button" className="btn btn-primary" title={unavailableReason} disabled={pending || Boolean(unavailableReason) || !date || (!uncertain && (!dirty || stale))} onClick={save}>
+          <button type="button" className="btn btn-primary" title={saveUnavailableReason} disabled={pending || Boolean(saveUnavailableReason) || !date || (!uncertain && (!dirty || stale))} onClick={save}>
             {pending ? "Saving…" : uncertain ? "Retry original request" : "Save changes"}</button></div>
       </div>
       <div className="timeline-feedback">
-        {unavailableReason && <p className="card-note">{unavailableReason}</p>}
+        {saveUnavailableReason && <p className="card-note">{saveUnavailableReason}</p>}
+        {!saveUnavailableReason && entriesUnavailableReason && <p className="card-note">{entriesUnavailableReason}</p>}
         {feedback && <p className={feedback.error ? "caption-error" : "card-note"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
         {stale && !uncertain && <p className="caption-error" role="alert">The schedule changed while you were editing. Reset to load the latest times.</p>}
         <p className="card-note" role="status">{dirty ? "Unsaved changes. The bot still runs the saved schedule until you save." : "Saved schedule. Pending updates retain their last-confirmed times."}</p>
@@ -232,7 +278,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
                   {" "}<span className="timeline-range">→ {timelineClockLabel(runEndsAt(slot))} · {Math.round(worstCaseRunSeconds(slot.targetCount) / 60)}m</span>
                   {slot.deleted ? <span className="card-note"> · Removal {dirty ? "drafted" : "pending"}</span> : slot.paused ? <span className="card-note"> · Paused</span> : slot.skipped ? <span className="card-note"> · Skipped {date}</span> : null}
                   {slot.campaignEnabled === false && <span className="card-note"> · Campaign off</span>}
-                  {slot.scheduleEdit?.status === "pending" && <div className="card-note">Scheduler pending. {slot.confirmed ? `Last confirmed: ${clockLabel(slot.confirmed.minutes)}${slot.confirmed.paused ? ", paused" : slot.confirmed.skipped ? ", skipped" : slot.confirmed.deleted ? ", deleted" : ""}.` : "No confirmed run on this day."}</div>}
+                  {slot.scheduleEdit?.status === "pending" && <div className="card-note">Scheduler pending. {confirmedNote(slot)}</div>}
                   {slot.scheduleEdit?.editable === false && <div className="card-note">{slot.scheduleEdit.reason}</div>}
                 </div>;
               })}
@@ -249,7 +295,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
                   {moved && <span className="timeline-ghost" style={{ left: `${base.minutes / 1440 * 100}%` }} title={`saved time ${base.time}`} aria-hidden />}
                   <span ref={(element) => { if (element) barRefs.current.set(key, element); else barRefs.current.delete(key); }}
                     className={`timeline-fill is-draggable${(slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0) ? " is-ads" : ""}${runningKeys.has(key) && activeSlot(slot) ? " is-running" : ""}${runEndsAt(slot) <= nowMinutes ? " is-done" : ""}${!activeSlot(slot) ? " is-inactive" : ""}${moved ? " is-moved" : ""}${dragging === key ? " is-dragging" : ""}${selected === key ? " is-selected" : ""}`}
-                    role="slider" tabIndex={0} aria-disabled={locked || slot.deleted || slot.scheduleEdit?.editable === false}
+                    role="slider" tabIndex={0} aria-disabled={locked || slot.deleted || !editable(slot)}
                     aria-label={`${label(slot)} run ${index + 1} start time`} aria-valuemin={0} aria-valuemax={1439} aria-valuenow={slot.minutes}
                     aria-valuetext={`${slot.time}, to ${endsAt} at worst`} aria-haspopup="dialog" aria-controls={selected === key ? "timeline-options" : undefined}
                     title={`${slot.time} to ${endsAt} at worst — click for options or drag to change`}
@@ -270,9 +316,9 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
             <button type="button" className="icon-btn" aria-label="Close options" title="Close options" onClick={closeOptions}><X size={15} aria-hidden /></button></div>
           <p className="timeline-pop-meta">{selectedSlot.time} – {timelineClockLabel(runEndsAt(selectedSlot))} · {Math.round(worstCaseRunSeconds(selectedSlot.targetCount) / 60)}m at worst
             {selectedSlot.recurrence && <> · {selectedSlot.recurrence.weekdays.length === 7 ? "every day" : selectedSlot.recurrence.weekdays.map((day) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).join(", ")}</>}</p>
-          <label className="timeline-time-input">Start <input aria-label="Start time" type="time" value={selectedSlot.time} disabled={locked || selectedSlot.deleted || selectedSlot.scheduleEdit?.editable === false}
+          <label className="timeline-time-input">Start <input aria-label="Start time" type="time" value={selectedSlot.time} disabled={locked || selectedSlot.deleted || !editable(selectedSlot)}
             onChange={(event) => { if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(event.target.value)) { const [hour, minute] = event.target.value.split(":").map(Number); move(selectedSlot, hour * 60 + minute); } }} /></label>
-          <fieldset disabled={locked || stale || selectedSlot.scheduleEdit?.editable === false || selectedSlot.deleted} className="timeline-pop-actions">
+          {entriesEnabled && <fieldset disabled={locked || stale || !editable(selectedSlot) || selectedSlot.deleted} className="timeline-pop-actions">
             <button type="button" className="icon-btn" aria-label={selectedSlot.paused ? "Resume" : "Pause"} title={selectedSlot.paused ? "Resume" : "Pause"}
               onClick={() => edit(selectedSlot, { paused: !selectedSlot.paused })}>{selectedSlot.paused ? <Play size={15} aria-hidden /> : <Pause size={15} aria-hidden />}</button>
             <button type="button" className="icon-btn" aria-label={selectedSlot.skipped ? "Undo skip" : "Skip this day"} title={selectedSlot.skipped ? "Undo skip" : `Skip ${date}`}
@@ -288,7 +334,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
             {confirmDelete && <div className="timeline-pop-confirm"><p>Delete this recurring run? Its campaign and other runs stay.</p>
               <button type="button" className="btn btn-danger" onClick={() => remove(selectedSlot)}>Confirm delete run</button>
               <button type="button" className="btn" onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
-          </fieldset>
+          </fieldset>}
           {selectedSlot.deleted && <p className="timeline-pop-meta">Removed when you save. Reset to undo.</p>}
         </div>}
       </div>

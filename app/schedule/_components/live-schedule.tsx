@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { DayTimeline } from "./day-timeline";
 import { EntryTimeline } from "./entry-timeline";
 import { canEditSchedule, canEditScheduleEntries } from "@/src/lib/write-capabilities";
 import { minutesOfDay } from "@/src/lib/format";
@@ -27,10 +26,8 @@ export function LiveScheduleView({ initial, initialError, writable }: { initial:
   useLivePoll(read);
   const gate = canEditSchedule(writable, data?.writes);
   const entryGate = canEditScheduleEntries(writable, data?.writes);
-  const entrySupport = data?.writes?.scheduleEditing?.entries || data?.slots?.some((slot) => slot.entryId);
   return <><SyncNotice sync={data?.sync} error={error} />{data?.slots && data.date && data.timezone ?
-    entrySupport ? <EntryTimeline slots={data.slots} nowMinutes={now ?? 0} timezone={data.timezone} date={data.date}
-      unavailableReason={entryGate.allowed ? undefined : entryGate.reason} /> :
-      <DayTimeline slots={data.slots} nowMinutes={now ?? 0} timezone={data.timezone} date={data.date}
-        saveUnavailableReason={gate.allowed ? undefined : gate.reason} /> : <p role="status">Loading the live schedule…</p>}</>;
+    <EntryTimeline slots={data.slots} nowMinutes={now ?? 0} timezone={data.timezone} date={data.date}
+      saveUnavailableReason={gate.allowed ? undefined : gate.reason}
+      entriesUnavailableReason={entryGate.allowed ? undefined : entryGate.reason} /> : <p role="status">Loading the live schedule…</p>}</>;
 }
