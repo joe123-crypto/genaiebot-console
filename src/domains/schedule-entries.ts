@@ -6,13 +6,14 @@ const REVISION = /^[a-f0-9]{64}$/;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 export function validScheduleEntriesRequest(input: ScheduleEntriesRequest): boolean {
-  if (!input || typeof input !== "object" || !IDENTIFIER.test(input.operationId ?? "") ||
+  if (!input || typeof input !== "object" || typeof input.operationId !== "string" || !IDENTIFIER.test(input.operationId) ||
     typeof input.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.date) ||
     !Number.isFinite(Date.parse(`${input.date}T00:00:00Z`)) || new Date(`${input.date}T00:00:00Z`).toISOString().slice(0, 10) !== input.date ||
     typeof input.timezone !== "string" || !Array.isArray(input.changes) || !input.changes.length || input.changes.length > 100) return false;
   return new Set(input.changes.map((change) => change && slotKey(change))).size === input.changes.length && input.changes.every((change) =>
-    change && IDENTIFIER.test(change.slug) && change.slug !== "new" && IDENTIFIER.test(change.entryId) &&
-    REVISION.test(change.expectedRevision) && TIME.test(change.time) &&
+    change && typeof change.slug === "string" && IDENTIFIER.test(change.slug) && change.slug !== "new" &&
+    typeof change.entryId === "string" && IDENTIFIER.test(change.entryId) &&
+    typeof change.expectedRevision === "string" && REVISION.test(change.expectedRevision) && typeof change.time === "string" && TIME.test(change.time) &&
     [change.create, change.paused, change.skipped, change.deleted].every((value) => typeof value === "boolean") &&
     !(change.create && (change.entryId === "primary" || change.deleted)));
 }

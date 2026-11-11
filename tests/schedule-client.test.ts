@@ -1,9 +1,22 @@
 import { afterEach, expect, it, vi } from "vitest";
 vi.mock("@/src/config", () => ({ BOT_SOURCE: "remote", BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read-token", GENAEBOT_CHECKOUT: "/unused", WRITE_SOURCE: "remote", WRITES_ENABLED: true, BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "write-token" }));
-import { saveSchedule, WriteRefusedError } from "@/src/lib/bot-client";
+import { saveSchedule, saveScheduleEntries, WriteRefusedError } from "@/src/lib/bot-client";
 const input = { date: "2026-11-10", timezone: "Africa/Harare", changes: [{ slug: "borehole-drilling", time: "07:10", expectedRevision: "a".repeat(64) }] };
 const saved = { slug: "borehole-drilling", minutes: 430, scheduleEdit: { revision: "b".repeat(64), editable: true, status: "pending", confirmedMinutes: 435 } };
 afterEach(() => vi.unstubAllGlobals());
+it("posts entry operations to the same authenticated bridge and rejects a mismatched receipt", async () => {
+  const request = { operationId: "repeat-request", date: "2026-11-11", timezone: "Africa/Harare", changes: [
+    { slug: "alpha", entryId: "repeat-1", expectedRevision: "a".repeat(64), create: true, time: "12:15", paused: false, skipped: false, deleted: false },
+  ] };
+  const result = { operationId: request.operationId, entries: [{ ...request.changes[0], minutes: 735, campaignEnabled: true,
+    recurrence: { timezone: "Africa/Harare", weekdays: [0, 1, 2, 3, 4, 5, 6] }, confirmed: null,
+    scheduleEdit: { revision: "b".repeat(64), editable: true, status: "pending", confirmedMinutes: null } }] };
+  const fetch = vi.fn(async () => Response.json(result)); vi.stubGlobal("fetch", fetch);
+  expect(await saveScheduleEntries(request, { by: "Operator" })).toEqual(result);
+  expect(fetch).toHaveBeenCalledWith("https://bot.example/internal/console/schedule", expect.objectContaining({ method: "POST", cache: "no-store", body: JSON.stringify({ ...request, actor: "Operator" }) }));
+  fetch.mockResolvedValueOnce(Response.json({ ...result, operationId: "other" }));
+  await expect(saveScheduleEntries(request, { by: "Operator" })).rejects.toMatchObject({ detail: expect.stringContaining("unreadable") });
+});
 it("posts to the authenticated schedule endpoint with no caching", async () => {
   const fetch = vi.fn(async () => Response.json({ campaigns: [saved] })); vi.stubGlobal("fetch", fetch);
   expect(await saveSchedule(input, { by: "Operator" })).toEqual({ campaigns: [saved] });
