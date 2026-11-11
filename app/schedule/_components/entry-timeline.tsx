@@ -75,7 +75,10 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     return typeof minutes === "number" ? [{ ...slot, minutes, time: clockLabel(minutes) }] : [];
   });
   const running = runningNow(activeView, nowMinutes);
-  const runningKeys = new Set(running.map(slotKey));
+  /** Keyed by the minute the run was judged at, not just the slot: a pending move is judged at
+   * its confirmed time while its bar is drawn at the unconfirmed one, and highlighting that bar
+   * would call a run active before it starts. */
+  const runningAt = new Map(running.map((slot) => [slotKey(slot), slot.minutes]));
   const upcoming = nextUp(activeView, nowMinutes);
   const found = clashes(dirty ? view : activeView);
   const nowOffset = `${nowMinutes / 1440 * 100}%`;
@@ -294,7 +297,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
                 return <span key={key}>
                   {moved && <span className="timeline-ghost" style={{ left: `${base.minutes / 1440 * 100}%` }} title={`saved time ${base.time}`} aria-hidden />}
                   <span ref={(element) => { if (element) barRefs.current.set(key, element); else barRefs.current.delete(key); }}
-                    className={`timeline-fill is-draggable${(slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0) ? " is-ads" : ""}${runningKeys.has(key) && activeSlot(slot) ? " is-running" : ""}${runEndsAt(slot) <= nowMinutes ? " is-done" : ""}${!activeSlot(slot) ? " is-inactive" : ""}${moved ? " is-moved" : ""}${dragging === key ? " is-dragging" : ""}${selected === key ? " is-selected" : ""}`}
+                    className={`timeline-fill is-draggable${(slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0) ? " is-ads" : ""}${runningAt.get(key) === slot.minutes && activeSlot(slot) ? " is-running" : ""}${runEndsAt(slot) <= nowMinutes ? " is-done" : ""}${!activeSlot(slot) ? " is-inactive" : ""}${moved ? " is-moved" : ""}${dragging === key ? " is-dragging" : ""}${selected === key ? " is-selected" : ""}`}
                     role="slider" tabIndex={0} aria-disabled={locked || slot.deleted || !editable(slot)}
                     aria-label={`${label(slot)} run ${index + 1} start time`} aria-valuemin={0} aria-valuemax={1439} aria-valuenow={slot.minutes}
                     aria-valuetext={`${slot.time}, to ${endsAt} at worst`} aria-haspopup="dialog" aria-controls={selected === key ? "timeline-options" : undefined}
