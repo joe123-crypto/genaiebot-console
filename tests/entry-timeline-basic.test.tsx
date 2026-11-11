@@ -118,6 +118,20 @@ describe("a bot without entry support", () => {
     expect(screen.getByText(/Alpha could still be sending/)).toBeDefined();
   });
 
+  /** The confirmed time drives the status line, but the bar is still drawn at the unconfirmed
+   * time, so highlighting it would call a run active an hour before it starts. */
+  it("does not mark a bar drawn at an unconfirmed time as running", () => {
+    mount({ slots: [basic("alpha", 600, { scheduleEdit: { revision: "a".repeat(64), editable: true, status: "pending", confirmedMinutes: 540 } })], nowMinutes: 545 });
+    expect(screen.getByText(/Alpha could still be sending/)).toBeDefined();
+    expect(bar().getAttribute("aria-valuenow")).toBe("600");
+    expect(bar().className).not.toContain("is-running");
+  });
+
+  it("still marks a bar running when it is drawn at the time that is running", () => {
+    mount({ slots: [basic("alpha", 540, { targetCount: 51 })], nowMinutes: 545 });
+    expect(bar().className).toContain("is-running");
+  });
+
   it("drops a pending run with no confirmed time from the day's status", () => {
     mount({ slots: [basic("alpha", 600, { scheduleEdit: { revision: "a".repeat(64), editable: true, status: "pending", confirmedMinutes: null } })], nowMinutes: 545 });
     expect(screen.getByText(/No confirmed run on this day/)).toBeDefined();
