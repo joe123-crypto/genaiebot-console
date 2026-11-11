@@ -18,6 +18,15 @@
         "CONSOLE_WRITES=1 npm run dev -- -p 3100"
       ],
       "port": 3100
+    },
+    {
+      "name": "entry-timeline",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /home/joseph/.codex/worktrees/63a2/genaiebot_console && CONSOLE_WRITES=1 npm run dev -- -p 3200"
+      ],
+      "port": 3200
     }
   ]
 }
