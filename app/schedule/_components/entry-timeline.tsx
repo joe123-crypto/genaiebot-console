@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, PointerEvent } from "react";
+import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { activeSlot, clashes, nextUp, runEndsAt, runningNow, slotKey } from "@/src/domains/schedule";
 import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, timelineClockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
-import { CalendarCheck, CalendarOff, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
+import { CalendarCheck, CalendarOff, CheckCircle2, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
 import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleAction, saveScheduleEntriesAction } from "@/app/schedule/actions";
 import type { ScheduleEntriesRequest, ScheduleEntryChange } from "@/src/lib/types";
@@ -34,9 +34,11 @@ function confirmedNote(slot: DaySlot) {
  * sending an empty expectedRevision only earns a misleading "Invalid schedule change." */
 const editable = (slot: DaySlot) => Boolean(slot.scheduleEdit) && slot.scheduleEdit!.editable !== false;
 
-export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason, entriesUnavailableReason }: {
+/** `summary` is passed in rather than read here: the counts beside the overlap
+ * card poll their own sources, and this component stays free of live fetching. */
+export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason, entriesUnavailableReason, summary }: {
   slots: DaySlot[]; nowMinutes: number; timezone: string; date: string;
-  saveUnavailableReason?: string; entriesUnavailableReason?: string;
+  saveUnavailableReason?: string; entriesUnavailableReason?: string; summary?: ReactNode;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState(false);
@@ -242,10 +244,16 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }
 
   return <>
-    {found.length > 0 && <div className="banner" style={{ display: "block" }} role="status"><strong>Two runs on one line could overlap.</strong>
-      {found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
-        On the {clash.account} line, {label(clash.current)} can still be sending at {timelineClockLabel(clash.finishes)}, after {label(clash.next)} starts at {clash.next.time}.
-      </div>)}</div>}
+    <div className="schedule-summary">
+      {found.length > 0
+        ? <div className="banner" style={{ display: "block" }} role="status"><strong>Two runs on one line could overlap.</strong>
+            {found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
+              On the {clash.account} line, {label(clash.current)} can still be sending at {timelineClockLabel(clash.finishes)}, after {label(clash.next)} starts at {clash.next.time}.
+            </div>)}</div>
+        : <div className="banner banner-ok" role="status"><CheckCircle2 size={17} aria-hidden style={{ flex: "0 0 auto", marginTop: 1 }} />
+            <span><strong>No overlaps.</strong> Every run finishes before the next one on its line starts.</span></div>}
+      {summary}
+    </div>
     <section className="card" aria-labelledby="day-timeline-title">
       <div className="card-head"><div><h2 className="card-title" id="day-timeline-title">Day timeline</h2>
         <span className="card-note">Click a bar for options. Drag along its row to change the start time. Length shows the worst-case estimate; purple uses the ads line, blue the default line.</span></div>

@@ -888,6 +888,17 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   margin-bottom: 18px;
 }
 
+/* The overlap card and its three counts share one row: the cards stretch to the
+   card's height rather than adding any of their own. */
+.schedule-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; margin-bottom: 18px; }
+.schedule-summary > .banner { flex: 1 1 380px; margin-bottom: 0; min-width: 0; }
+.banner-ok { border-color: var(--success-border); background: var(--success-soft); color: #12694f; }
+
+.schedule-counts { display: flex; gap: 12px; flex: 1 1 360px; min-width: 0; }
+.schedule-count { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 12px 14px; }
+.schedule-count .stat-value { font-size: 22px; margin-top: 2px; }
+@media (max-width: 760px) { .schedule-counts { flex-wrap: wrap; } }
+
 .banner pre {
   margin: 6px 0 0;
   white-space: pre-wrap;
