@@ -10,9 +10,9 @@ import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleEntriesAction } from "@/app/schedule/actions";
 import type { ScheduleEntriesRequest, ScheduleEntryChange } from "@/src/lib/types";
 
-const POP_WIDTH = 300;
+const POP_WIDTH = 270;
 /** Rough popover height, only used to decide whether it opens below or above its bar. */
-const POP_ESTIMATE = 200;
+const POP_ESTIMATE = 180;
 
 type Draft = { base: string; slots: DaySlot[] };
 const ordered = (slots: DaySlot[]) => [...slots].sort((first, second) => slotKey(first).localeCompare(slotKey(second)));
@@ -222,13 +222,14 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
             {Array.from({ length: 13 }, (_, index) => index * 2).map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}
             <span className="timeline-now-label" style={{ left: nowOffset }}>{clockLabel(nowMinutes)} now</span></div></div>
           {[...groups].map(([slug, campaignSlots]) => <div className="timeline-row" key={slug} data-campaign={slug}>
-            <div><span className="cell-strong">{label(campaignSlots[0])}</span><br /><span className="card-note">{plural(campaignSlots[0].targetCount, "group")}</span>
+            <div className="timeline-entry-cell">
+              <span className="timeline-entry-name" title={`${label(campaignSlots[0])} · ${plural(campaignSlots[0].targetCount, "group")}`}><span className="cell-strong">{label(campaignSlots[0])}</span> <span className="card-note">· {plural(campaignSlots[0].targetCount, "group")}</span></span>
               {campaignSlots.map((slot, index) => {
                 const base = saved.get(slotKey(slot)), moved = base && base.minutes !== slot.minutes;
                 return <div className="timeline-entry-label" key={slotKey(slot)}>
                   <button type="button" className="timeline-label-button" onClick={() => { suppressClick.current = false; openOptions(slot); }} aria-label={`${label(slot)} run ${index + 1} options`}>
                     {campaignSlots.length > 1 && `${index + 1}. `}{moved && <><span className="timeline-was">{base.time}</span> → </>}<strong>{slot.time}</strong></button>
-                  <br /><span className="timeline-range">Ends {timelineClockLabel(runEndsAt(slot))} · {Math.round(worstCaseRunSeconds(slot.targetCount) / 60)}m at worst</span>
+                  {" "}<span className="timeline-range">→ {timelineClockLabel(runEndsAt(slot))} · {Math.round(worstCaseRunSeconds(slot.targetCount) / 60)}m</span>
                   {slot.deleted ? <span className="card-note"> · Removal {dirty ? "drafted" : "pending"}</span> : slot.paused ? <span className="card-note"> · Paused</span> : slot.skipped ? <span className="card-note"> · Skipped {date}</span> : null}
                   {slot.campaignEnabled === false && <span className="card-note"> · Campaign off</span>}
                   {slot.scheduleEdit?.status === "pending" && <div className="card-note">Scheduler pending. {slot.confirmed ? `Last confirmed: ${clockLabel(slot.confirmed.minutes)}${slot.confirmed.paused ? ", paused" : slot.confirmed.skipped ? ", skipped" : slot.confirmed.deleted ? ", deleted" : ""}.` : "No confirmed run on this day."}</div>}
