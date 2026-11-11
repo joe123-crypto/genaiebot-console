@@ -617,15 +617,27 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .timeline-label-button:hover { text-decoration: underline; }
 .timeline-fill.is-inactive { opacity: 0.45; background: repeating-linear-gradient(135deg, var(--text-faint) 0 4px, var(--surface-muted) 4px 8px); }
 .timeline-fill.is-selected { outline: 2px solid var(--primary); outline-offset: 2px; z-index: 4; }
-.timeline-options { border: 1px solid var(--border); background: var(--surface-muted); border-radius: 10px; padding: 16px; margin-top: 12px; }
-.timeline-options:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
-.timeline-options-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-.timeline-options-head h3 { margin: 0; }
-.timeline-entry-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border: 0; margin: 12px 0 0; padding: 0; }
 .timeline-time-input { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .timeline-time-input input { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; background: var(--surface); color: var(--text); }
-.timeline-delete-confirm { flex-basis: 100%; }
-.timeline-delete-confirm .btn { margin-right: 8px; }
+/* Anchored beside its bar in fixed position: .timeline-scroll clips on both axes. */
+.timeline-pop { position: fixed; z-index: 40; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 12px; box-shadow: 0 10px 28px rgb(0 0 0 / 0.18); }
+.timeline-pop:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
+.timeline-pop-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.timeline-pop-head h3 { margin: 0; font-size: 14px; }
+.timeline-pop-meta { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.timeline-pop .timeline-time-input { margin-top: 10px; font-size: 12px; }
+.timeline-pop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border: 0; margin: 10px 0 0; padding: 0; }
+.timeline-pop-paste { display: inline-flex; align-items: center; gap: 4px; }
+.timeline-pop-paste input { padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 12px; background: var(--surface); color: var(--text); }
+.timeline-pop-confirm { flex-basis: 100%; margin-top: 8px; }
+.timeline-pop-confirm p { margin: 0 0 8px; font-size: 12px; }
+.timeline-pop-confirm .btn { margin-right: 8px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); cursor: pointer; }
+.icon-btn:hover:not(:disabled) { background: var(--surface-muted); }
+.icon-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.icon-btn:disabled { opacity: 0.45; cursor: default; }
+.icon-btn.is-on { border-color: var(--primary); color: var(--primary); }
+.icon-btn.is-danger:hover:not(:disabled) { border-color: var(--danger-border); color: var(--danger); }
 .timeline-track .timeline-now { pointer-events: none; }
 .timeline-duration { display: none; }
 .timeline-fill:is(:hover, :focus-visible, .is-dragging) { z-index: 3; }
