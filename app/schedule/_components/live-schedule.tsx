@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { EntryTimeline } from "./entry-timeline";
+import { ScheduleCounts } from "./schedule-counts";
 import { canEditSchedule, canEditScheduleEntries } from "@/src/lib/write-capabilities";
 import { minutesOfDay } from "@/src/lib/format";
 import { SyncNotice } from "@/app/_components/live-page";
@@ -29,5 +30,6 @@ export function LiveScheduleView({ initial, initialError, writable }: { initial:
   return <><SyncNotice sync={data?.sync} error={error} />{data?.slots && data.date && data.timezone ?
     <EntryTimeline slots={data.slots} nowMinutes={now ?? 0} timezone={data.timezone} date={data.date}
       saveUnavailableReason={gate.allowed ? undefined : gate.reason}
-      entriesUnavailableReason={entryGate.allowed ? undefined : entryGate.reason} /> : <p role="status">Loading the live schedule…</p>}</>;
+      entriesUnavailableReason={entryGate.allowed ? undefined : entryGate.reason}
+      summary={<ScheduleCounts campaignsToday={new Set(data.slots.map((slot) => slot.slug)).size} />} /> : <p role="status">Loading the live schedule…</p>}</>;
 }

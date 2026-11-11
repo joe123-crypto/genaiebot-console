@@ -167,6 +167,20 @@ describe("a bot without entry support", () => {
     expect(screen.queryByText("Two runs on one line could overlap.")).toBeNull();
   });
 
+  it("says so in the same place when nothing overlaps", () => {
+    mount({ slots: [basic("alpha", 540, { targetCount: 51 }), basic("beta", 660)] });
+    expect(screen.getByText("No overlaps.")).toBeDefined();
+    fireEvent.keyDown(bar("Beta run 1 start time"), { key: "PageDown" });
+    expect(screen.queryByText("No overlaps.")).toBeNull();
+  });
+
+  it("keeps the counts beside the overlap card in both states", () => {
+    mount({ summary: <p>three counts</p>, slots: [basic("alpha", 540, { targetCount: 51 }), basic("beta", 660)] });
+    expect(screen.getByText("three counts").parentElement?.className).toBe("schedule-summary");
+    fireEvent.keyDown(bar("Beta run 1 start time"), { key: "PageDown" });
+    expect(screen.getByText("three counts").parentElement?.className).toBe("schedule-summary");
+  });
+
   it("offers the save switched off, and says why", () => {
     mount({ saveUnavailableReason: "The console is in read-only mode." });
     fireEvent.keyDown(bar(), { key: "ArrowRight" });
