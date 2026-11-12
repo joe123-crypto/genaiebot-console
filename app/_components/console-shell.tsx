@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { CheckCheck } from "lucide-react";
+import Image from "next/image";
 import { PRODUCT_NAME } from "@/src/config";
 // Type-only, so this drags none of that module's bot adapters in.
 import type { Attention } from "@/src/domains/console";
@@ -29,9 +29,14 @@ export function ConsoleShell({
     <div className="console-app">
       <aside className="console-sidebar">
         <div className="console-brand">
-          <span className="console-brand-mark" aria-hidden>
-            <CheckCheck size={19} strokeWidth={2.4} />
-          </span>
+          <Image
+            className="console-brand-mark"
+            src="/logo.png"
+            alt=""
+            width={95}
+            height={216}
+            priority
+          />
           <span className="console-brand-name">{PRODUCT_NAME}</span>
         </div>
 

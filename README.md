@@ -1,4 +1,4 @@
-# Genaie Console
+# Genaie
 
 An operator UI for the Genaie WhatsApp bot (`../genaebot`). It covers the parts
 OpenClaw does not provide or exposes too technically: which groups the bot is
