@@ -130,3 +130,50 @@ describe("caption AI request validation", () => {
     });
   });
 });
+
+describe("campaign pictures as caption context", () => {
+  const data = `data:image/jpeg;base64,${"A".repeat(80)}`;
+  const remote = "https://pub-abc.r2.dev/ads/sale/deadbeef.jpg";
+  beforeEach(() => { vi.stubEnv("GENAIE_AD_ASSETS_BASE_URL", "https://pub-abc.r2.dev"); });
+
+  it("sends the pictures beside the caption as a multipart user turn", async () => {
+    await generateCaptionReply({ ...input, images: [data, remote] });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const turn = body.messages.at(-1).content;
+    expect(Array.isArray(turn)).toBe(true);
+    expect(turn[0].type).toBe("text");
+    expect(JSON.parse(turn[0].text)).toEqual({ currentCaption: input.caption, request: input.prompt,
+      requiredPlaceholders: ["{bot_number}", "{ref_link}"], campaignPictures: 2 });
+    expect(turn.slice(1)).toEqual([
+      { type: "image_url", image_url: { url: data } },
+      { type: "image_url", image_url: { url: remote } },
+    ]);
+  });
+  it("keeps a plain text turn when no pictures are offered", async () => {
+    await generateCaptionReply(input);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(typeof body.messages.at(-1).content).toBe("string");
+    expect(JSON.parse(body.messages.at(-1).content).campaignPictures).toBeUndefined();
+  });
+  it("accepts the bucket's own pictures and nothing else", () => {
+    expect(parseCaptionAIRequest({ ...input, images: [remote, data] }).images).toEqual([remote, data]);
+    expect(parseCaptionAIRequest({ ...input, images: [] }).images).toBeUndefined();
+    expect(parseCaptionAIRequest({ ...input }).images).toBeUndefined();
+    // More than the cap is trimmed rather than refused.
+    expect(parseCaptionAIRequest({ ...input, images: Array(9).fill(remote) }).images).toHaveLength(4);
+    for (const bad of [["http://pub-abc.r2.dev/a.jpg"], ["https://evil.example/a.jpg"],
+      ["https://pub-abc.r2.dev.evil.example/a.jpg"], ["file:///etc/passwd"], ["data:text/html;base64,AAAA"],
+      ["data:image/jpeg;base64,not base64!"], [`data:image/jpeg;base64,${"A".repeat(950 * 1024)}`], [5]]) {
+      expect(() => parseCaptionAIRequest({ ...input, images: bad })).toThrow(CaptionAIError);
+    }
+  });
+  it("refuses remote pictures when no asset bucket is configured", () => {
+    vi.stubEnv("GENAIE_AD_ASSETS_BASE_URL", "");
+    expect(() => parseCaptionAIRequest({ ...input, images: [remote] })).toThrow(CaptionAIError);
+    expect(parseCaptionAIRequest({ ...input, images: [data] }).images).toEqual([data]);
+  });
+  it("refuses more picture bytes than the action body can carry", () => {
+    const heavy = `data:image/jpeg;base64,${"A".repeat(800 * 1024)}`;
+    expect(() => parseCaptionAIRequest({ ...input, images: [heavy, heavy, heavy] })).toThrow(CaptionAIError);
+  });
+});

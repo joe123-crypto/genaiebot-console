@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { campaignCreateError, campaignSlug, uploadError, type NewCampaign } from "@/src/domains/campaign-create";
+import { campaignCreateError, campaignDraftError, campaignSlug, uploadError, type NewCampaign } from "@/src/domains/campaign-create";
 import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { daySlots, clashes } from "@/src/domains/schedule";
 import { campaign } from "./fixtures/campaign-detail";
@@ -14,6 +14,16 @@ describe("campaign creation", () => {
     ["outside group weekdays", { schedule: { time: "10:10", timezone: "Africa/Harare", weekdays: [0] }, groups: [{ jid: "1@g.us", weekdays: [1] }] }] ])("rejects %s", (_, patch) => {
       expect(campaignCreateError({ ...validCampaign(), ...patch })).toBeTruthy();
     });
+  it("accepts the details on their own, and still demands captions to create", () => {
+    const { captions, ...draft } = validCampaign();
+    expect(captions).toBeTruthy();
+    expect(campaignDraftError(draft)).toBeUndefined();
+    expect(campaignCreateError(draft)).toBe("Enter text for every caption and keep at least one variant.");
+    expect(campaignDraftError({ ...draft, groups: [] })).toBeTruthy();
+    expect(campaignDraftError({ ...draft, name: "" })).toBeTruthy();
+    expect(campaignCreateError({ ...draft, captions: ["Still too long", "x".repeat(61 * 1024)] }))
+      .toBe("The campaign configuration is too large. Shorten the captions or notes.");
+  });
   it("validates image ownership, types, limits and duplicates", () => {
     const input = validCampaign(), image = input.images[0];
     expect(uploadError({ ...image, bytes: 6 * 1024 * 1024 }, "demo")).toBeUndefined();

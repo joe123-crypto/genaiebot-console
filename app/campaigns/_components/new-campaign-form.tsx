@@ -3,10 +3,11 @@ import { PaginatedPicker } from "@/app/_components/paginated-picker";
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { createCampaignAction } from "@/app/campaigns/new/actions";
-import { ALL_WEEKDAYS, WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignSlug, campaignCreateError,
-  type CampaignImageUpload, type NewCampaign } from "@/src/domains/campaign-create";
+import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { ALL_WEEKDAYS, WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignSlug, campaignDraftError,
+  type CampaignDraft, type CampaignImageUpload } from "@/src/domains/campaign-create";
+import { CAMPAIGN_DRAFT_KEY, parseCampaignDraft } from "@/src/lib/campaign-draft";
+import { draftFiles, keepDraftFiles } from "@/src/lib/campaign-files";
 import type { Group, Tracking } from "@/src/lib/types";
 import type { WriteGate } from "@/src/lib/write-capabilities";
 
@@ -27,7 +28,6 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
   const groups = paginated ? pickedGroups : loadError ? lastGroups : incomingGroups;
   const router = useRouter();
   const [name, setName] = useState("");
-  const [captions, setCaptions] = useState([""]);
   const [pictures, setPictures] = useState<Picture[]>([]);
   const [time, setTime] = useState("");
   const [days, setDays] = useState([...ALL_WEEKDAYS]);
@@ -44,12 +44,33 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
-  const [recovery, setRecovery] = useState<NewCampaign | null>(null);
-  const [saved, setSaved] = useState<{ slug: string; warning: string } | null>(null);
   const inFlight = useRef(false);
   const requestId = useRef("");
   const urls = useRef(new Set<string>());
   useEffect(() => () => { for (const url of urls.current) URL.revokeObjectURL(url); }, []);
+  // Coming back from the caption step must find the details as they were left.
+  useEffect(() => {
+    let stashed;
+    try {
+      const raw = sessionStorage.getItem(CAMPAIGN_DRAFT_KEY);
+      if (!raw) return;
+      stashed = parseCampaignDraft(raw);
+    } catch { return; }
+    const { draft, groupNames } = stashed;
+    requestId.current = draft.requestId;
+    setName(draft.name); setEnabled(draft.enabled); setTime(draft.schedule.time); setTimezone(draft.schedule.timezone);
+    setCadence(draft.schedule.weekdays.length === 7 ? "daily" : "weekdays"); setDays([...draft.schedule.weekdays]);
+    setSelected(Object.fromEntries(draft.groups.map(({ jid, ...settings }) => [jid, settings])));
+    setPickedGroups(draft.groups.map(({ jid }) => ({ jid, name: groupNames[jid] ?? null, account: "default", status: "active" })));
+    void draftFiles().then((files) => setPictures(draft.images.flatMap((image) => {
+      const file = files.get(image.key);
+      if (!file) return [];
+      const preview = URL.createObjectURL(file); urls.current.add(preview);
+      return [{ id: crypto.randomUUID(), file, preview, uploaded: image }];
+    })));
+    setTracking(draft.tracking ?? {}); setComment(draft.comment ?? ""); setWeeklyComment(draft.weeklyComment ?? "");
+    setTimeoutValue(draft.timeoutSeconds ? String(draft.timeoutSeconds) : ""); setAlertTo(draft.failureAlertTo ?? "");
+  }, []);
   const slug = campaignSlug(name);
   const campaignDays = cadence === "daily" ? ALL_WEEKDAYS : days;
   const query = search.trim().toLowerCase();
@@ -90,68 +111,38 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (inFlight.current || !gate.allowed || saved) return;
+    if (inFlight.current) return;
     inFlight.current = true; setBusy(true); setError("");
-    let submittedRequest = recovery;
     try {
-      if (!submittedRequest) {
-        requestId.current ||= crypto.randomUUID();
-        const images = await Promise.all(pictures.map(describe));
-        const configuredTracking = Object.fromEntries(Object.entries(tracking).filter(([, value]) => value?.trim()).map(([key, value]) => [key, value!.trim()]));
-        const input: NewCampaign = { requestId: requestId.current, slug, name: name.trim(), enabled, captions, images,
-          schedule: { time, timezone: timezone.trim() || "Africa/Harare", weekdays: [...campaignDays] },
-          groups: Object.entries(selected).map(([jid, settings]) => ({ jid, ...settings })),
-          ...(Object.keys(configuredTracking).length ? { tracking: configuredTracking } : {}),
-          ...(comment.trim() ? { comment: comment.trim() } : {}), ...(weeklyComment.trim() ? { weeklyComment: weeklyComment.trim() } : {}),
-          ...(timeout ? { timeoutSeconds: Number(timeout) } : {}), ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
-        const invalid = campaignCreateError(input);
-        if (invalid) { setError(invalid); return; }
-        for (let index = 0; index < pictures.length; index++) {
-          const picture = pictures[index], image = images[index];
-          if (picture.uploaded?.key === image.key) continue;
-          setProgress(`Uploading picture ${index + 1} of ${pictures.length}…`);
-          const signed = await fetch("/api/campaigns/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, image }) });
-          const upload = await signed.json();
-          if (!signed.ok) throw new Error(upload.error || "The upload could not be prepared.");
-          const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: picture.file });
-          // Immutable keys: a previous identical upload is verified by the bot.
-          if (!response.ok && response.status !== 412) throw new Error(`Picture ${index + 1} could not upload. Your form is kept; try again.`);
-          setPictures((current) => current.map((item) => item.id === picture.id ? { ...item, uploaded: image } : item));
-        }
-        // Keep an independent snapshot of exactly what reaches the create API.
-        submittedRequest = structuredClone(input);
-      }
-      setProgress("Saving campaign and schedule…");
-      const result = await createCampaignAction(submittedRequest);
-      if (!result.ok) {
-        // Once any attempt is uncertain, even a later preflight refusal cannot
-        // prove that the earlier attempt did not land. Keep recovering it.
-        if (recovery || result.outcome !== "not-created") setRecovery(submittedRequest);
-        setError(result.detail);
-        return;
-      }
-      setRecovery(null);
-      if (result.scheduling === "pending") {
-        setSaved({ slug: result.slug, warning: result.warning || "Campaign saved. Scheduling is pending; the bot will retry automatically." });
-      } else {
-        setSaved({ slug: result.slug, warning: "Campaign saved." });
-        router.push(`/campaigns/${result.slug}`); router.refresh();
-      }
+      requestId.current ||= crypto.randomUUID();
+      const images = await Promise.all(pictures.map(describe));
+      const configuredTracking = Object.fromEntries(Object.entries(tracking).filter(([, value]) => value?.trim()).map(([key, value]) => [key, value!.trim()]));
+      const draft: CampaignDraft = { requestId: requestId.current, slug, name: name.trim(), enabled, images,
+        schedule: { time, timezone: timezone.trim() || "Africa/Harare", weekdays: [...campaignDays] },
+        groups: Object.entries(selected).map(([jid, settings]) => ({ jid, ...settings })),
+        ...(Object.keys(configuredTracking).length ? { tracking: configuredTracking } : {}),
+        ...(comment.trim() ? { comment: comment.trim() } : {}), ...(weeklyComment.trim() ? { weeklyComment: weeklyComment.trim() } : {}),
+        ...(timeout ? { timeoutSeconds: Number(timeout) } : {}), ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
+      const invalid = campaignDraftError(draft);
+      if (invalid) { setError(invalid); return; }
+      // Nothing is sent yet: the pictures upload when the campaign is created.
+      const groupNames = Object.fromEntries(draft.groups.flatMap(({ jid }) => {
+        const found = groups.find((group) => group.jid === jid)?.name;
+        return found ? [[jid, found] as [string, string]] : [];
+      }));
+      await keepDraftFiles(new Map(pictures.map((picture, index) => [images[index].key, picture.file])));
+      try { sessionStorage.setItem(CAMPAIGN_DRAFT_KEY, JSON.stringify({ version: 1, draft: structuredClone(draft), groupNames })); }
+      catch { setError("Browser storage is unavailable, so these details cannot be carried to the captions step."); return; }
+      router.push("/campaigns/new/caption");
     } catch (failure) {
-      if (submittedRequest) setRecovery(submittedRequest);
-      setError(failure instanceof Error ? failure.message : "The outcome is unknown. Retry this form to check the same creation request.");
+      setError(failure instanceof Error ? failure.message : "The pictures could not be prepared. Your form is kept; try again.");
     }
     finally { inFlight.current = false; setBusy(false); setProgress(""); }
   }
   return <form className="new-campaign" onSubmit={submit}>
     {loadError ? <div className="banner" role="status">Could not refresh groups or save availability. Your form is kept. {loadError}</div> : null}
     {!gate.allowed ? <div className="banner" role="status">{gate.reason} You can prepare the form here.</div> : null}
-    {saved ? <div className="banner" role="status">{saved.warning} <Link prefetch={false} href={`/campaigns/${saved.slug}`}>Open saved campaign</Link></div> : null}
-    {recovery ? <div className="banner" role="status">
-      Creation may already have been saved. Editing is locked until its outcome is confirmed. Retry the original request to check its result.{" "}
-      <Link prefetch={false} href={`/campaigns/${recovery.slug}`}>Check campaign</Link>
-    </div> : null}
-    <fieldset disabled={busy || Boolean(saved) || Boolean(recovery)} className="campaign-create-fields">
+    <fieldset disabled={busy} className="campaign-create-fields">
       <section className="card card-pad"><h2 className="card-title">Campaign</h2>
         <label className="modal-label" htmlFor="campaign-name">Name</label><input className="modal-input" id="campaign-name" required maxLength={120} value={name} onChange={(event) => setName(event.target.value)} />
         {slug ? <p className="card-note">Campaign ID: {slug}</p> : null}
@@ -170,12 +161,6 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
             <button className="btn" type="button" disabled={index === pictures.length - 1} aria-label={`Move picture ${index + 1} down`} onClick={() => move(index, 1)}><ArrowDown size={14} /></button>
             <button className="btn" type="button" aria-label={`Remove picture ${index + 1}`} onClick={() => remove(picture.id)}><Trash2 size={14} /></button>
           </div></figure>)}</div>
-      </section>
-      <section className="card card-pad"><h2 className="card-title">Captions</h2><p className="card-note">Variants rotate using the existing campaign rules. You can use {"{bot_number}"}, {"{ref}"}, and {"{ref_link}"}.</p>
-        {captions.map((caption, index) => <div key={index} className="campaign-create-caption"><label className="modal-label" htmlFor={`caption-${index}`}>Caption {index + 1}</label>
-          <textarea id={`caption-${index}`} required rows={5} className="modal-input" value={caption} onChange={(event) => setCaptions((current) => current.map((text, at) => at === index ? event.target.value : text))} />
-          <button className="btn" type="button" disabled={captions.length === 1} aria-label={`Remove caption ${index + 1}`} onClick={() => setCaptions((current) => current.filter((_, at) => at !== index))}>Remove variant</button></div>)}
-        <button className="btn" type="button" onClick={() => setCaptions((current) => [...current, ""])}><Plus size={14} />Add variant</button>
       </section>
       <section className="card card-pad"><h2 className="card-title">Schedule</h2><div className="campaign-create-columns">
         <div><label className="modal-label" htmlFor="campaign-time">Posting time</label><input className="modal-input" id="campaign-time" type="time" required value={time} onChange={(event) => setTime(event.target.value)} /><p className="card-note">{timezone || "Africa/Harare"}</p></div>
@@ -219,7 +204,8 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
       </details>
     </fieldset>
     {error ? <div className="modal-error" role="alert">{error}</div> : null}
-    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy || !gate.allowed || Boolean(saved)}>{busy ? "Creating…" : recovery ? "Retry original request" : "Create campaign"}</button></div>
+    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Preparing…" : "Next"}</button></div>
+    <p className="card-note">Captions come next. The campaign is created once at least one caption is written.</p>
     {progress ? <p role="status">{progress}</p> : null}
   </form>;
 }
