@@ -17,6 +17,8 @@ export type NewCampaign = {
   tracking?: Tracking; comment?: string; weeklyComment?: string;
   timeoutSeconds?: number; failureAlertTo?: string;
 };
+/** Everything the create form collects; captions are written in the caption step. */
+export type CampaignDraft = Omit<NewCampaign, "captions">;
 export type CreateCampaignResult = { slug: string; scheduling: "ready" | "pending"; warning?: string };
 export type CreateCampaignOutcome = ({ ok: true } & CreateCampaignResult) | {
   ok: false; detail: string;
@@ -42,15 +44,14 @@ export function uploadError(value: unknown, slug: string): string | undefined {
   const extension = image.contentType === "image/png" ? "png" : "jpg";
   if (image.key !== `ads/${slug}/${image.sha256}.${extension}`) return "The picture does not belong to this campaign.";
 }
-/** The same checks run in the form and on the server; the bot checks again. */
-export function campaignCreateError(value: unknown): string | undefined {
+/** Everything but the captions, which the create form collects on its own. */
+export function campaignDraftError(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return "The campaign could not be read.";
-  const campaign = value as NewCampaign;
+  const campaign = value as CampaignDraft;
   if (typeof campaign.requestId !== "string" || !/^[a-f0-9-]{36}$/.test(campaign.requestId)) return "The creation request ID is invalid.";
   if (typeof campaign.slug !== "string" || (!CAMPAIGN_SLUG.test(campaign.slug) || campaign.slug === "new")) return "Enter a name containing letters or numbers (campaign IDs have at most 64 characters).";
   if (typeof campaign.name !== "string" || !campaign.name.trim() || campaign.name.length > 120) return "Enter a campaign name of at most 120 characters.";
   if (typeof campaign.enabled !== "boolean") return "Enabled must be on or off.";
-  if (!Array.isArray(campaign.captions) || !campaign.captions.length || campaign.captions.some((caption) => typeof caption !== "string" || !caption.trim())) return "Enter text for every caption and keep at least one variant.";
   if (!Array.isArray(campaign.images) || !campaign.images.length || campaign.images.length > 20) return "Choose between 1 and 20 pictures.";
   for (const image of campaign.images) { const error = uploadError(image, campaign.slug); if (error) return error; }
   if (new Set(campaign.images.map((image) => image.filename)).size !== campaign.images.length || new Set(campaign.images.map((image) => image.key)).size !== campaign.images.length) return "Remove duplicate pictures or filenames.";
@@ -70,5 +71,12 @@ export function campaignCreateError(value: unknown): string | undefined {
     if (campaign.tracking.number && !/^\+[1-9][0-9]{6,14}$/.test(campaign.tracking.number)) return "Use an international contact phone number.";
   }
   for (const field of ["comment", "weeklyComment"] as const) if (campaign[field] !== undefined && (typeof campaign[field] !== "string" || campaign[field]!.length > 2000)) return "Notes must be at most 2000 characters.";
+}
+/** The same checks run in the form and on the server; the bot checks again. */
+export function campaignCreateError(value: unknown): string | undefined {
+  const invalid = campaignDraftError(value);
+  if (invalid) return invalid;
+  const campaign = value as NewCampaign;
+  if (!Array.isArray(campaign.captions) || !campaign.captions.length || campaign.captions.some((caption) => typeof caption !== "string" || !caption.trim())) return "Enter text for every caption and keep at least one variant.";
   if (new TextEncoder().encode(JSON.stringify(campaign)).length > 60 * 1024) return "The campaign configuration is too large. Shorten the captions or notes.";
 }

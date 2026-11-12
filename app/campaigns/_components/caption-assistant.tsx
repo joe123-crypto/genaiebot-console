@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Send, Sparkles } from "lucide-react";
+import { Check, Image as ImageIcon, Send, Sparkles } from "lucide-react";
 import { suggestCaptionAction } from "@/app/campaigns/caption-ai-actions";
+import { SHRINK_NOTICE, shrinkPercent } from "@/src/lib/caption-diff";
 import type { CaptionChatTurn } from "@/src/lib/caption-ai-types";
 
 type Message = {
@@ -11,20 +12,27 @@ type Message = {
   text: string;
   prompt?: string;
   suggestion?: string;
+  /** The caption this suggestion was built from, for comparing against it. */
+  basis?: string;
   revision?: number;
   state?: "applied" | "dismissed";
   error?: boolean;
 };
 const STARTERS = ["Make it shorter", "Use a professional tone", "Improve the call to action"];
 
-export function CaptionAssistant({ text, revision, disabled, unavailableReason, onApply }: {
+export function CaptionAssistant({ text, revision, disabled, unavailableReason, images = [], onApply }: {
   text: string;
   revision: number;
   disabled: boolean;
   unavailableReason?: string;
+  /** The campaign's pictures, ready to send: asset URLs or data URLs. */
+  images?: string[];
   onApply: (suggestion: string, sourceRevision: number) => void;
 }) {
   const [prompt, setPrompt] = useState("");
+  // Pictures are the advert, so an operator asking for a caption almost always
+  // means "about these". They can still untick it.
+  const [usePictures, setUsePictures] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState(false);
   const request = useRef(0);
@@ -59,12 +67,13 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
         if (new TextEncoder().encode(JSON.stringify(next)).byteLength > 24 * 1024) break;
         history.unshift({ role: message.role, content });
       }
-      const outcome = await suggestCaptionAction({ caption: text, prompt: question, history });
+      const sent = usePictures ? images : [];
+      const outcome = await suggestCaptionAction({ caption: text, prompt: question, history, ...(sent.length ? { images: sent } : {}) });
       if (request.current !== id) return;
       if (!outcome.ok) throw new Error(outcome.detail);
       const reply = outcome.reply;
       setMessages((previous) => [...previous, { id: id * 2 + 1, role: "assistant", text: reply.message,
-        prompt: question, suggestion: reply.suggestion, revision: sourceRevision }]);
+        prompt: question, suggestion: reply.suggestion, basis: text, revision: sourceRevision }]);
     } catch (error) {
       if (request.current !== id) return;
       setMessages((previous) => [...previous, { id: id * 2 + 1, role: "assistant", prompt: question, error: true,
@@ -90,7 +99,13 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
       </div>
       <span className="pill pill-info">DeepSeek V4.1 Flash</span>
     </div>
-    <p className="caption-demo-note">Powered by OpenRouter · Applying a suggestion updates your draft. Save caption saves it to the campaign.</p>
+    <p className="caption-demo-note">Powered by OpenRouter · Applying a suggestion updates your draft. Nothing changes until you save the caption.</p>
+    {images.length ? <label className="caption-pictures-option">
+      <input type="checkbox" checked={usePictures} disabled={disabled || Boolean(unavailableReason)}
+        onChange={(event) => setUsePictures(event.target.checked)} />
+      <ImageIcon size={15} aria-hidden />
+      <span>Show the assistant {images.length === 1 ? "this campaign’s picture" : `these ${images.length} campaign pictures`}</span>
+    </label> : null}
     {unavailableReason ? <p className="caption-ai-unavailable" role="status">{unavailableReason}</p> : null}
     <div ref={history} className="caption-chat-history" role="log" aria-label="Caption assistant conversation" aria-live="polite" aria-relevant="additions text">
       {messages.length === 0 ? <div className="caption-chat-empty"><Sparkles size={24} aria-hidden />
@@ -104,6 +119,11 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
         {message.suggestion !== undefined && message.state !== "dismissed" ? <div className="caption-suggestion">
           <span className="caption-preview-eyebrow">Suggested caption</span>
           <pre className="caption-box">{message.suggestion}</pre>
+          {shrinkPercent(message.basis ?? "", message.suggestion) >= SHRINK_NOTICE ? <p className="caption-shrink" role="status">
+            {shrinkPercent(message.basis ?? "", message.suggestion)}% shorter than your caption
+            ({Array.from(message.suggestion).length.toLocaleString()} characters instead of {Array.from(message.basis ?? "").length.toLocaleString()}).
+            Check that nothing you need was dropped.
+          </p> : null}
           <div className="caption-suggestion-actions">
             {message.state === "applied" ? <span className="caption-applied"><Check size={15} aria-hidden /> Applied to draft</span>
               : message.revision !== revision ? <>

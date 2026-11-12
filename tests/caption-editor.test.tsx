@@ -310,3 +310,76 @@ describe("editor resource resilience", () => {
     expect(screen.getByRole("alert").textContent).toContain("Captions changed");
   });
 });
+
+describe("campaign pictures in the assistant", () => {
+  const images = ["https://pub-abc.r2.dev/ads/borehole-drilling/a.jpg", "https://pub-abc.r2.dev/ads/borehole-drilling/b.jpg"];
+  function picture() { return screen.getByRole("checkbox", { name: /campaign pictures|campaign’s picture/ }) as HTMLInputElement; }
+
+  it("offers the pictures, ticked, and sends them with the request", async () => {
+    mount({ images });
+    expect(picture().checked).toBe(true);
+    await chat();
+    expect(mocks.reply.mock.calls[0][0].images).toEqual(images);
+  });
+  it("sends nothing once the operator unticks the option", async () => {
+    mount({ images });
+    fireEvent.click(picture());
+    expect(picture().checked).toBe(false);
+    await chat();
+    expect(mocks.reply.mock.calls[0][0].images).toBeUndefined();
+  });
+  it("names a single picture in the singular", () => {
+    mount({ images: [images[0]] });
+    expect(screen.getByText("Show the assistant this campaign’s picture")).toBeTruthy();
+  });
+  it("hides the option for a campaign with no pictures", async () => {
+    mount();
+    expect(screen.queryByRole("checkbox", { name: /picture/ })).toBeNull();
+    await chat();
+    expect(mocks.reply.mock.calls[0][0].images).toBeUndefined();
+  });
+});
+
+describe("an unsaved draft kept from an earlier visit", () => {
+  const stale = "ZEBRA MARKER LINE ONE";
+  function keepDraft(text = stale) {
+    sessionStorage.setItem(captionDraftKey(props.slug, props.variant),
+      JSON.stringify({ version: 1, base: props.captions, text }));
+  }
+
+  it("says the caption on screen is a draft, not what is saved", () => {
+    keepDraft();
+    mount();
+    expect(text().value).toBe(stale);
+    expect(screen.getByText(/unsaved draft kept from an earlier visit/)).toBeTruthy();
+  });
+  it("loads the saved caption in one click and stops saying so", () => {
+    keepDraft();
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Load the saved caption" }));
+    expect(text().value).toBe(props.captions[0]);
+    expect(screen.queryByText(/unsaved draft kept from an earlier visit/)).toBeNull();
+  });
+  it("stays quiet when the editor opens on the saved caption", () => {
+    mount();
+    expect(screen.queryByText(/unsaved draft kept from an earlier visit/)).toBeNull();
+    edit();
+    expect(screen.queryByText(/unsaved draft kept from an earlier visit/)).toBeNull();
+  });
+});
+
+describe("a suggestion that drops part of the caption", () => {
+  it("says how much shorter it is, so a silent truncation is visible", async () => {
+    mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Everything else is unchanged.", suggestion: "Water $25" } });
+    mount();
+    await chat();
+    expect(screen.getByText(/shorter than your caption/)).toBeTruthy();
+    expect(screen.getByText(/Check that nothing you need was dropped/)).toBeTruthy();
+  });
+  it("stays quiet for a suggestion that keeps the caption's substance", async () => {
+    mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Reworded.", suggestion: `${props.captions[0]} now` } });
+    mount();
+    await chat();
+    expect(screen.queryByText(/shorter than your caption/)).toBeNull();
+  });
+});

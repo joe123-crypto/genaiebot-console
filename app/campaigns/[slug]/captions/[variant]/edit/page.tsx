@@ -16,7 +16,7 @@ export default async function CaptionEditorPage({ params }: { params: Promise<{ 
   const detail = await loadCaptionEditorDetail(slug);
   if (detail.campaign.ok && detail.campaign.data === null) notFound();
   return <Shell live><CaptionEditorScreen key={`${slug}:${variant}`} slug={slug} variant={variant} detail={detail}
-    writable={WRITES_ENABLED}
+    writable={WRITES_ENABLED} images={detail.pictures}
     aiUnavailableReason={captionAIUnavailableReason()}
     saveUnavailableReason={captionSaveUnavailableReason(detail.writes.ok ? detail.writes.data ?? undefined : undefined)} />
   </Shell>;
