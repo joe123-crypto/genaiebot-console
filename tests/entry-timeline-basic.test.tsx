@@ -109,6 +109,28 @@ describe("a bot without entry support", () => {
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  /** The bot checks one expectedRevision per change, so a draft that only moves Alpha has no
+   * stake in Beta. Digesting the whole day made an unrelated campaign's revision -- which the
+   * bot rotates on any save of its own -- disable Save and the entry actions for good. */
+  it("ignores a revision bump on a campaign the draft never touched", () => {
+    const view = mount(); fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    view.rerender(<EntryTimeline {...props} slots={props.slots.map((row) => row.slug === "beta"
+      ? { ...row, scheduleEdit: { ...row.scheduleEdit!, revision: "c".repeat(64) } } : row)} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("reports an open draft so the page can hold the poll still", () => {
+    const onEditingChange = vi.fn();
+    mount({ onEditingChange });
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByText("Live updates are paused while you have unsaved changes.")).toBeDefined();
+    click("Reset");
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+
   /** The regression this mode was most likely to hide: entry bots report the last confirmed run
    * as `confirmed`, older ones only as scheduleEdit.confirmedMinutes. Reading one and not the
    * other dropped pending runs out of the status line entirely. */

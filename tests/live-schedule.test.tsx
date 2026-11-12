@@ -22,6 +22,24 @@ it("passes occurrences without time-based row sorting and advances the clock wit
   expect(fetch.mock.calls[0][0]).toContain("/api/live/schedule?since=1");
 });
 
+/** A poll that lands mid-draft swaps the saved times out from under the editor. The timeline
+ * says when it holds a draft, and the page stops asking until the draft is resolved; saving
+ * dispatches genaie:changed, which refetches without waiting for the interval. */
+it("holds the poll still while the timeline has a draft", async () => {
+  vi.useFakeTimers(); const fetch = vi.fn().mockResolvedValue(Response.json({ unchanged: true, revision: "1", sync: { stale: false } })); vi.stubGlobal("fetch", fetch);
+  render(<LiveScheduleView initial={initial} writable={false} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(fetch).toHaveBeenCalledTimes(1);
+
+  await act(async () => { calls.timeline.mock.lastCall?.[0].onEditingChange(true); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+  expect(fetch).toHaveBeenCalledTimes(1);
+
+  await act(async () => { calls.timeline.mock.lastCall?.[0].onEditingChange(false); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
 /** One timeline for both bot generations: the two capabilities arrive as separate reasons so a
  * bot that can move times but not act on entries keeps its drag and save. */
 it("reports the two write capabilities separately", () => {

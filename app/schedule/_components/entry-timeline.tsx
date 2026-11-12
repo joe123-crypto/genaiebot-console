@@ -16,10 +16,14 @@ const POP_WIDTH = 270;
 /** Rough popover height, only used to decide whether it opens below or above its bar. */
 const POP_ESTIMATE = 180;
 
-type Draft = { base: string; slots: DaySlot[] };
+type Draft = { date: string; base: Map<string, string | null>; slots: DaySlot[] };
 const ordered = (slots: DaySlot[]) => [...slots].sort((first, second) => slotKey(first).localeCompare(slotKey(second)));
 const desired = (slot: DaySlot) => [slot.minutes, Boolean(slot.paused), Boolean(slot.skipped), Boolean(slot.deleted)];
-const revision = (date: string, slots: DaySlot[]) => JSON.stringify([date, ordered(slots).map((slot) => [slotKey(slot), desired(slot), slot.scheduleEdit?.revision])]);
+/** What a saved run looked like when the draft first touched it: its desired state and the
+ *  revision its campaign was serving. `null` records a run the draft created, which has to stay
+ *  absent server-side. Kept per run because the bot's precondition is per change, not per day --
+ *  a digest of the whole day would let an unrelated campaign's revision bump kill the draft. */
+const baseline = (slot: DaySlot | undefined) => slot ? JSON.stringify([desired(slot), slot.scheduleEdit?.revision]) : null;
 const snap = (minutes: number) => Math.min(1435, Math.max(0, Math.round(minutes / 5) * 5));
 const label = (slot: DaySlot) => campaignTitle(slot.slug);
 
@@ -38,9 +42,12 @@ const editable = (slot: DaySlot) => Boolean(slot.scheduleEdit) && slot.scheduleE
 
 /** `summary` is passed in rather than read here: the counts beside the overlap
  * card poll their own sources, and this component stays free of live fetching. */
-export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason, entriesUnavailableReason, summary }: {
+export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason, entriesUnavailableReason, summary, onEditingChange }: {
   slots: DaySlot[]; nowMinutes: number; timezone: string; date: string;
   saveUnavailableReason?: string; entriesUnavailableReason?: string; summary?: ReactNode;
+  /** Lets the page hold the live poll still while a draft is open. Must be a stable
+   *  reference -- a `useState` setter is one. */
+  onEditingChange?: (editing: boolean) => void;
 }) {
   /** The campaign day is the bot's, and so is every minute in `slots`, in what
    *  is saved, and in the overlap maths. Only the labels move: `shown` is the
@@ -67,12 +74,12 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const suppressClick = useRef(false);
   const snapshot = JSON.stringify([date, ordered(serverSlots)]);
   const slots = accepted?.base === snapshot ? accepted.slots : serverSlots;
-  const currentRevision = revision(date, slots);
   const saved = new Map(slots.map((slot) => [slotKey(slot), slot]));
   const view = draft?.slots ?? slots;
   const changes = view.filter((slot) => JSON.stringify(desired(slot)) !== JSON.stringify(saved.has(slotKey(slot)) ? desired(saved.get(slotKey(slot))!) : null));
   const dirty = changes.length > 0;
-  const stale = draft !== null && draft.base !== currentRevision;
+  const stale = draft !== null && (draft.date !== date ||
+    [...draft.base].some(([key, base]) => baseline(saved.get(key)) !== base));
   const locked = pending || uncertain !== null || Boolean(saveUnavailableReason);
   /** Bots without entry support still move times, so this gates the entry actions alone. */
   const entriesEnabled = !entriesUnavailableReason;
@@ -94,6 +101,13 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const found = clashes(dirty ? view : activeView);
   const nowOffset = `${nowMinutes / 1440 * 100}%`;
 
+  /** A poll that lands mid-draft replaces `serverSlots`, which is how a draft used to be
+   *  invalidated by a campaign it never touched. Staleness is scoped now, so this is the
+   *  second line of defence rather than the fix -- and it keeps the day's times still while
+   *  the operator is reading them. `save` fires notifyLiveChange, which resumes at once. */
+  useEffect(() => { onEditingChange?.(draft !== null || uncertain !== null); }, [draft, uncertain, onEditingChange]);
+  useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
+
   useEffect(() => { if (selected) panel.current?.focus(); }, [selected]);
 
   /** Fixed, not absolute: .timeline-scroll clips on both axes, so an in-flow popover is cut off. */
@@ -112,10 +126,17 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [selected]);
 
+  /** Records a run's baseline the first time the draft touches it, and never again: re-recording
+   *  would quietly adopt a change that landed underneath the draft instead of flagging it. */
+  function touch(previous: Draft | null, slot: DaySlot) {
+    const base = new Map(previous?.base);
+    if (!base.has(slotKey(slot))) base.set(slotKey(slot), baseline(saved.get(slotKey(slot))));
+    return base;
+  }
   function edit(slot: DaySlot, values: Partial<DaySlot>) {
     if (saving.current || locked || !editable(slot)) return;
     setFeedback(null);
-    setDraft((previous) => ({ base: previous?.base ?? currentRevision,
+    setDraft((previous) => ({ date, base: touch(previous, slot),
       slots: (previous?.slots ?? slots).map((row) => slotKey(row) === slotKey(slot) ? { ...row, ...values } : row) }));
   }
   function move(slot: DaySlot, minutes: number) { edit(slot, { minutes, time: clockLabel(minutes) }); }
@@ -144,7 +165,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     if (!source || !editable(source)) return;
     const entry: DaySlot = { ...source, entryId: crypto.randomUUID(), minutes, time: clockLabel(minutes), paused: false, skipped: false, deleted: false,
       confirmed: null, recurrence: { timezone, weekdays: [0, 1, 2, 3, 4, 5, 6] } };
-    setDraft((previous) => ({ base: previous?.base ?? currentRevision, slots: [...(previous?.slots ?? slots), entry] }));
+    setDraft((previous) => ({ date, base: touch(previous, entry), slots: [...(previous?.slots ?? slots), entry] }));
     setSelected(slotKey(entry));
     setConfirmDelete(false);
     setFeedback(null);
@@ -275,6 +296,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
         {!saveUnavailableReason && entriesUnavailableReason && <p className="card-note">{entriesUnavailableReason}</p>}
         {feedback && <p className={feedback.error ? "caption-error" : "card-note"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
         {stale && !uncertain && <p className="caption-error" role="alert">The schedule changed while you were editing. Reset to load the latest times.</p>}
+        {draft && <p className="card-note" role="status">Live updates are paused while you have unsaved changes.</p>}
         <p className="card-note" role="status">{dirty ? "Unsaved changes. The bot still runs the saved schedule until you save." : "Saved schedule. Pending updates retain their last-confirmed times."}</p>
       </div>
       <div className="card-pad">
