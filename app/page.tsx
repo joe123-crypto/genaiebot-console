@@ -11,6 +11,6 @@ export default async function ScheduleHomePage() {
   let initialError: string | undefined;
   try { initial = await getLiveView("schedule"); }
   catch (error) { if (!(error instanceof BotUnavailableError)) throw error; initialError = error.detail; }
-  return <Shell live><PageHead title="Schedule" subtitle={`The campaign day in ${BOT_TIMEZONE}. Live updates every 30 seconds.`} />
+  return <Shell live><PageHead subtitle={`The campaign day in ${BOT_TIMEZONE}. Live updates every 30 seconds.`} />
     <LiveScheduleView initial={initial} initialError={initialError} writable={WRITES_ENABLED} /></Shell>;
 }

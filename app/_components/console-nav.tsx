@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
-  CalendarClock,
+  House,
   Megaphone,
   MessageCircle,
   ScrollText,
@@ -15,7 +15,7 @@ import type { LucideIcon } from "lucide-react";
 export type NavCounts = { groupsNeedingReview?: number; campaigns?: number };
 
 const items: ReadonlyArray<{ href: string; label: string; icon: LucideIcon }> = [
-  { href: "/", label: "Schedule", icon: CalendarClock },
+  { href: "/", label: "Home", icon: House },
   { href: "/groups", label: "Groups", icon: Users },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/lines", label: "WhatsApp Lines", icon: MessageCircle },

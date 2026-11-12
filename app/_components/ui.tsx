@@ -7,14 +7,14 @@ export function PageHead({
   subtitle,
   actions,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string;
   actions?: ReactNode;
 }) {
   return (
     <header className="page-head">
       <div>
-        <h1 className="page-title">{title}</h1>
+        {title ? <h1 className="page-title">{title}</h1> : null}
         {subtitle ? <p className="page-sub">{subtitle}</p> : null}
       </div>
       {actions}
