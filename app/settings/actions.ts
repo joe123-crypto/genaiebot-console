@@ -1,7 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
+import { cookies } from "next/headers";
+import {
+  OPERATOR_NAME, TIMEZONE_COOKIE_MAX_AGE_SECONDS, TIMEZONE_COOKIE_NAME, WRITES_ENABLED,
+} from "@/src/config";
+import { isDisplayTimezone } from "@/src/lib/timezone";
 import { getConfiguration, updateSettings } from "@/src/lib/bot-client";
 import {
   capChange, capDraftProblems, storedSettings, type CapChange, type CapDraft,
@@ -54,6 +58,26 @@ export async function saveCapSettingsAction(draft: CapDraft, expected: Required<
     return failedWrite(error);
   }
   // Caps decide what every campaign sends today, so every screen re-reads.
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Pick the clock the console is read on.
+ *
+ * Alone among the actions here it does not gate on `WRITES_ENABLED`: nothing
+ * reaches the bot and nothing about a send changes. It sets a cookie on the
+ * browser that asked, so a read-only console can still be read in Algiers time
+ * and two operators can watch the same bot on different clocks.
+ */
+export async function setDisplayTimezoneAction(zone: string): Promise<WriteOutcome> {
+  if (!isDisplayTimezone(zone)) return { ok: false, detail: "That is not one of the zones the console shows." };
+  (await cookies()).set(TIMEZONE_COOKIE_NAME, zone, {
+    maxAge: TIMEZONE_COOKIE_MAX_AGE_SECONDS,
+    sameSite: "lax",
+    path: "/",
+  });
+  // Times are server-rendered on every screen, so every screen re-reads.
   revalidatePath("/", "layout");
   return { ok: true };
 }

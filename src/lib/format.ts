@@ -64,9 +64,10 @@ export function worstCaseRunSeconds(groupCount: number) {
 
 /**
  * Minutes since midnight in the bot's own timezone, which is the scale every
- * slot on the timeline is already drawn on. Harare is UTC+2 all year, but the
- * campaign day belongs to the manifest's timezone rather than to the machine
- * rendering it, so the zone is asked for by name rather than assumed.
+ * slot on the timeline is already drawn on. The campaign day belongs to the
+ * manifest's timezone rather than to the machine rendering it, so the zone is
+ * asked for by name rather than assumed. Which clock those minutes are then
+ * printed on is a separate question, answered in `src/lib/timezone`.
  */
 export function minutesOfDay(now: Date, timeZone = BOT_TIMEZONE) {
   const parts = new Intl.DateTimeFormat("en-GB", {

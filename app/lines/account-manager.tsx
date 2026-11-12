@@ -6,6 +6,8 @@ import { PageHead } from '@/app/_components/ui';
 import { ACCOUNT_ID, type AccountsPayload, type LinkSession, type WhatsAppAccount } from '@/src/lib/account-types';
 import type { LineSummary } from '@/src/domains/console';
 import { campaignTitle } from '@/src/lib/format';
+import { displayStamp } from '@/src/lib/timezone';
+import { useDisplayTimezone } from '@/app/_components/timezone-context';
 import { ConfirmDialog } from '@/app/_components/confirm-dialog';
 import { setContactLineAction, syncLineNumberAction } from '@/app/lines/actions';
 import { linkedNumberChange } from '@/src/domains/line-edit';
@@ -104,6 +106,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
    *  through the bot's config writer, gated separately on what it accepts. */
   configWrites?: boolean;
 }) {
+  const displayZone = useDisplayTimezone();
   const [data, setData] = useState<AccountsPayload | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -275,7 +278,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
         actions={<button className="account-button account-button-primary" disabled={disabled} onClick={() => { setAdding(true); setActionError(null); }}><Plus size={16} /> Add account</button>} />
       <div className="account-toolbar">
         <span role="status">{!available ? 'Updates paused while hidden or offline.' : readError ? 'Live status unavailable.' : data ? 'Live status · checks every 5 seconds' : 'Loading live status…'}
-          {data ? <span className="account-observed">Last observed: <time dateTime={data.observedAt}>{new Date(data.observedAt).toLocaleTimeString()}</time></span> : null}
+          {data ? <span className="account-observed">Last observed: <time dateTime={data.observedAt}>{displayStamp(data.observedAt, displayZone)}</time></span> : null}
         </span>
         <button className="account-button" disabled={!available || Boolean(busy)} onClick={() => { void refresh(); void refreshMembership(); }}><RefreshCw size={15} /> Refresh</button>
       </div>

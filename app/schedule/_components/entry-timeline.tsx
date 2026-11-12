@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { activeSlot, clashes, nextUp, runEndsAt, runningNow, slotKey } from "@/src/domains/schedule";
 import type { DaySlot } from "@/src/domains/schedule";
-import { campaignTitle, clockLabel, timelineClockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { campaignTitle, clockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
+import { botMinutes, displayClock, displayTimelineClock, zoneShiftMinutes } from "@/src/lib/timezone";
+import { useDisplayTimezone } from "@/app/_components/timezone-context";
 import { CalendarCheck, CalendarOff, CheckCircle2, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
 import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleAction, saveScheduleEntriesAction } from "@/app/schedule/actions";
@@ -23,11 +25,11 @@ const label = (slot: DaySlot) => campaignTitle(slot.slug);
 
 /** Entry bots report the last confirmed run as `confirmed`; older ones only as
  * scheduleEdit.confirmedMinutes. Reading one and not the other hides a pending run. */
-function confirmedNote(slot: DaySlot) {
-  if (slot.confirmed) return `Last confirmed: ${clockLabel(slot.confirmed.minutes)}${slot.confirmed.paused ? ", paused"
+function confirmedNote(slot: DaySlot, shift: number) {
+  if (slot.confirmed) return `Last confirmed: ${displayClock(slot.confirmed.minutes, shift)}${slot.confirmed.paused ? ", paused"
     : slot.confirmed.skipped ? ", skipped" : slot.confirmed.deleted ? ", deleted" : ""}.`;
   const minutes = slot.scheduleEdit?.confirmedMinutes;
-  return typeof minutes === "number" ? `Last confirmed: ${clockLabel(minutes)}.` : "No confirmed run on this day.";
+  return typeof minutes === "number" ? `Last confirmed: ${displayClock(minutes, shift)}.` : "No confirmed run on this day.";
 }
 
 /** A slot the bot will not let us move, including one that arrived without an edit contract:
@@ -40,6 +42,13 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   slots: DaySlot[]; nowMinutes: number; timezone: string; date: string;
   saveUnavailableReason?: string; entriesUnavailableReason?: string; summary?: ReactNode;
 }) {
+  /** The campaign day is the bot's, and so is every minute in `slots`, in what
+   *  is saved, and in the overlap maths. Only the labels move: `shown` is the
+   *  one place a bot minute becomes something an operator reads, and
+   *  `botMinutes` is the one place a time they typed comes back. */
+  const displayZone = useDisplayTimezone();
+  const shift = zoneShiftMinutes(timezone, displayZone);
+  const shown = (slot: { minutes: number }) => displayClock(slot.minutes, shift);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
@@ -126,7 +135,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   function openOptions(slot: DaySlot) {
     if (suppressClick.current) { suppressClick.current = false; return; }
     setSelected(slotKey(slot));
-    setPasteTime(clockLabel(Math.min(1439, Math.ceil(runEndsAt(slot) / 5) * 5)));
+    setPasteTime(displayClock(Math.min(1439, Math.ceil(runEndsAt(slot) / 5) * 5), shift));
     setConfirmDelete(false);
   }
   function paste(minutes: number) {
@@ -248,7 +257,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
       {found.length > 0
         ? <div className="banner" style={{ display: "block" }} role="status"><strong>Two runs on one line could overlap.</strong>
             {found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
-              On the {clash.account} line, {label(clash.current)} can still be sending at {timelineClockLabel(clash.finishes)}, after {label(clash.next)} starts at {clash.next.time}.
+              On the {clash.account} line, {label(clash.current)} can still be sending at {displayTimelineClock(clash.finishes, shift)}, after {label(clash.next)} starts at {shown(clash.next)}.
             </div>)}</div>
         : <div className="banner banner-ok" role="status"><CheckCircle2 size={17} aria-hidden style={{ flex: "0 0 auto", marginTop: 1 }} />
             <span><strong>No overlaps.</strong> Every run finishes before the next one on its line starts.</span></div>}
@@ -270,14 +279,15 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
       </div>
       <div className="card-pad">
         <div className="timeline-status" role="status"><span className={`run-dot${running.length && !dirty ? " is-live" : ""}`} aria-hidden />
-          <span className="cell-mono">{clockLabel(nowMinutes)} in {timezone}</span>
+          <span className="cell-mono">{displayClock(nowMinutes, shift)} in {displayZone}</span>
+          {shift !== 0 && <span className="card-note">Campaign day planned in {timezone}.</span>}
           <span>{dirty ? "If saved: " : ""}{running.length ? `${[...new Set(running.map(label))].join(" and ")} could still be sending.`
-            : upcoming ? `Nothing sending. ${label(upcoming)} is next at ${upcoming.time}.` : "Nothing sending. The day's runs are over."}</span></div>
+            : upcoming ? `Nothing sending. ${label(upcoming)} is next at ${shown(upcoming)}.` : "Nothing sending. The day's runs are over."}</span></div>
         {copied && <p className="card-note" role="status">Copied {campaignTitle(copied)}. Click an empty time on its row or use Paste below. Added runs recur every day until deleted.</p>}
         <div className="timeline-scroll"><div className="timeline-canvas">
-          <div className="timeline-row timeline-header"><strong className="cell-mono">Time · {timezone}</strong><div className="timeline-axis timeline-ruler cell-mono">
-            {Array.from({ length: 13 }, (_, index) => index * 2).map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}
-            <span className="timeline-now-label" style={{ left: nowOffset }}>{clockLabel(nowMinutes)} now</span></div></div>
+          <div className="timeline-row timeline-header"><strong className="cell-mono">Time · {displayZone}</strong><div className="timeline-axis timeline-ruler cell-mono">
+            {Array.from({ length: 13 }, (_, index) => index * 2).map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{displayClock(hour * 60, shift)}</span>)}
+            <span className="timeline-now-label" style={{ left: nowOffset }}>{displayClock(nowMinutes, shift)} now</span></div></div>
           {[...groups].map(([slug, campaignSlots]) => <div className="timeline-row" key={slug} data-campaign={slug}>
             <div className="timeline-entry-cell">
               <span className="timeline-entry-name" title={`${label(campaignSlots[0])} · ${plural(campaignSlots[0].targetCount, "group")}`}><span className="cell-strong">{label(campaignSlots[0])}</span> <span className="card-note">· {plural(campaignSlots[0].targetCount, "group")}</span></span>
@@ -285,11 +295,11 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
                 const base = saved.get(slotKey(slot)), moved = base && base.minutes !== slot.minutes;
                 return <div className="timeline-entry-label" key={slotKey(slot)}>
                   <button type="button" className="timeline-label-button" onClick={() => { suppressClick.current = false; openOptions(slot); }} aria-label={`${label(slot)} run ${index + 1} options`}>
-                    {campaignSlots.length > 1 && `${index + 1}. `}{moved && <><span className="timeline-was">{base.time}</span> → </>}<strong>{slot.time}</strong></button>
-                  {" "}<span className="timeline-range">→ {timelineClockLabel(runEndsAt(slot))} · {Math.round(worstCaseRunSeconds(slot.targetCount) / 60)}m</span>
+                    {campaignSlots.length > 1 && `${index + 1}. `}{moved && <><span className="timeline-was">{shown(base)}</span> → </>}<strong>{shown(slot)}</strong></button>
+                  {" "}<span className="timeline-range">→ {displayTimelineClock(runEndsAt(slot), shift)} · {Math.round(worstCaseRunSeconds(slot.targetCount) / 60)}m</span>
                   {slot.deleted ? <span className="card-note"> · Removal {dirty ? "drafted" : "pending"}</span> : slot.paused ? <span className="card-note"> · Paused</span> : slot.skipped ? <span className="card-note"> · Skipped {date}</span> : null}
                   {slot.campaignEnabled === false && <span className="card-note"> · Campaign off</span>}
-                  {slot.scheduleEdit?.status === "pending" && <div className="card-note">Scheduler pending. {confirmedNote(slot)}</div>}
+                  {slot.scheduleEdit?.status === "pending" && <div className="card-note">Scheduler pending. {confirmedNote(slot, shift)}</div>}
                   {slot.scheduleEdit?.editable === false && <div className="card-note">{slot.scheduleEdit.reason}</div>}
                 </div>;
               })}
@@ -301,20 +311,20 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
             }}>
               {campaignSlots.map((slot, index) => {
                 const key = slotKey(slot), base = saved.get(key), moved = base && base.minutes !== slot.minutes;
-                const minutes = worstCaseRunSeconds(slot.targetCount) / 60, endsAt = timelineClockLabel(runEndsAt(slot));
+                const minutes = worstCaseRunSeconds(slot.targetCount) / 60, endsAt = displayTimelineClock(runEndsAt(slot), shift);
                 return <span key={key}>
-                  {moved && <span className="timeline-ghost" style={{ left: `${base.minutes / 1440 * 100}%` }} title={`saved time ${base.time}`} aria-hidden />}
+                  {moved && <span className="timeline-ghost" style={{ left: `${base.minutes / 1440 * 100}%` }} title={`saved time ${shown(base)}`} aria-hidden />}
                   <span ref={(element) => { if (element) barRefs.current.set(key, element); else barRefs.current.delete(key); }}
                     className={`timeline-fill is-draggable${(slot.accounts.ads ?? 0) > (slot.accounts.default ?? 0) ? " is-ads" : ""}${runningAt.get(key) === slot.minutes && activeSlot(slot) ? " is-running" : ""}${runEndsAt(slot) <= nowMinutes ? " is-done" : ""}${!activeSlot(slot) ? " is-inactive" : ""}${moved ? " is-moved" : ""}${dragging === key ? " is-dragging" : ""}${selected === key ? " is-selected" : ""}`}
                     role="slider" tabIndex={0} aria-disabled={locked || slot.deleted || !editable(slot)}
                     aria-label={`${label(slot)} run ${index + 1} start time`} aria-valuemin={0} aria-valuemax={1439} aria-valuenow={slot.minutes}
-                    aria-valuetext={`${slot.time}, to ${endsAt} at worst`} aria-haspopup="dialog" aria-controls={selected === key ? "timeline-options" : undefined}
-                    title={`${slot.time} to ${endsAt} at worst — click for options or drag to change`}
+                    aria-valuetext={`${shown(slot)}, to ${endsAt} at worst`} aria-haspopup="dialog" aria-controls={selected === key ? "timeline-options" : undefined}
+                    title={`${shown(slot)} to ${endsAt} at worst — click for options or drag to change`}
                     onClick={(event) => { event.stopPropagation(); openOptions(slot); }} onPointerDown={(event) => pointerDown(event, slot)}
                     onPointerMove={(event) => pointerMove(event, slot)} onPointerUp={(event) => pointerUp(event)} onPointerCancel={(event) => pointerUp(event, true)}
                     onKeyDown={(event) => keyDown(event, slot)}
                     style={{ left: `${slot.minutes / 1440 * 100}%`, right: "auto", width: `${Math.min(minutes, 1440 - slot.minutes) / 1440 * 100}%`, minWidth: 0 }}>
-                    <span className="timeline-duration">{slot.time} – {endsAt} · {Math.round(minutes)}m at worst</span></span>
+                    <span className="timeline-duration">{shown(slot)} – {endsAt} · {Math.round(minutes)}m at worst</span></span>
                 </span>;
               })}<span className="timeline-now" style={{ left: nowOffset }} aria-hidden />
             </div>
@@ -325,10 +335,10 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
           onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); closeOptions(); } }}>
           <div className="timeline-pop-head"><h3 id="timeline-options-title">{label(selectedSlot)}</h3>
             <button type="button" className="icon-btn" aria-label="Close options" title="Close options" onClick={closeOptions}><X size={15} aria-hidden /></button></div>
-          <p className="timeline-pop-meta">{selectedSlot.time} – {timelineClockLabel(runEndsAt(selectedSlot))} · {Math.round(worstCaseRunSeconds(selectedSlot.targetCount) / 60)}m at worst
+          <p className="timeline-pop-meta">{shown(selectedSlot)} – {displayTimelineClock(runEndsAt(selectedSlot), shift)} · {Math.round(worstCaseRunSeconds(selectedSlot.targetCount) / 60)}m at worst
             {selectedSlot.recurrence && <> · {selectedSlot.recurrence.weekdays.length === 7 ? "every day" : selectedSlot.recurrence.weekdays.map((day) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day]).join(", ")}</>}</p>
-          <label className="timeline-time-input">Start <input aria-label="Start time" type="time" value={selectedSlot.time} disabled={locked || selectedSlot.deleted || !editable(selectedSlot)}
-            onChange={(event) => { if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(event.target.value)) { const [hour, minute] = event.target.value.split(":").map(Number); move(selectedSlot, hour * 60 + minute); } }} /></label>
+          <label className="timeline-time-input">Start <input aria-label="Start time" type="time" value={shown(selectedSlot)} disabled={locked || selectedSlot.deleted || !editable(selectedSlot)}
+            onChange={(event) => { if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(event.target.value)) { const [hour, minute] = event.target.value.split(":").map(Number); move(selectedSlot, botMinutes(hour * 60 + minute, shift)); } }} /></label>
           {entriesEnabled && <fieldset disabled={locked || stale || !editable(selectedSlot) || selectedSlot.deleted} className="timeline-pop-actions">
             <button type="button" className="icon-btn" aria-label={selectedSlot.paused ? "Resume" : "Pause"} title={selectedSlot.paused ? "Resume" : "Pause"}
               onClick={() => edit(selectedSlot, { paused: !selectedSlot.paused })}>{selectedSlot.paused ? <Play size={15} aria-hidden /> : <Pause size={15} aria-hidden />}</button>
@@ -339,7 +349,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
             <span className="timeline-pop-paste"><input aria-label="Paste time" type="time" value={pasteTime} onChange={(event) => setPasteTime(event.target.value)} />
               <button type="button" className="icon-btn" aria-label="Paste daily repeat" title="Paste a daily repeat at this time"
                 disabled={!copied || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(pasteTime)}
-                onClick={() => { const [hour, minute] = pasteTime.split(":").map(Number); paste(hour * 60 + minute); }}><ClipboardPaste size={15} aria-hidden /></button></span>
+                onClick={() => { const [hour, minute] = pasteTime.split(":").map(Number); paste(botMinutes(hour * 60 + minute, shift)); }}><ClipboardPaste size={15} aria-hidden /></button></span>
             <button type="button" className="icon-btn is-danger" aria-label="Delete scheduled run" title="Delete this recurring run"
               onClick={() => setConfirmDelete(true)}><Trash2 size={15} aria-hidden /></button>
             {confirmDelete && <div className="timeline-pop-confirm"><p>Delete this recurring run? Its campaign and other runs stay.</p>

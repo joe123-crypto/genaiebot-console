@@ -2,10 +2,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { liveFetch, useLivePoll } from "./use-live";
 import type { LivePage, SyncStatus } from "@/src/lib/live-types";
+import { displayStamp } from "@/src/lib/timezone";
+import { useDisplayTimezone } from "@/app/_components/timezone-context";
 
 export function SyncNotice({ sync, error }: { sync?: SyncStatus; error?: string | null }) {
+  const zone = useDisplayTimezone();
   return error || sync?.stale ? <p className="banner" role="status">{error ?? (sync?.state === "awaiting-commit" ? "Waiting for saved changes to reach the display." : "Configuration is out of date.")}
-    {sync?.syncedAt ? ` Last confirmed: ${new Date(sync.syncedAt).toLocaleString()}.` : " Synchronizing the display index…"}
+    {sync?.syncedAt ? ` Last confirmed: ${displayStamp(sync.syncedAt, zone)}.` : " Synchronizing the display index…"}
     {" "}Your current data and drafts are kept.</p> : null;
 }
 

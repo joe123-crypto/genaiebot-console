@@ -3,19 +3,17 @@ import { ADD_EXPLAINER, AddDiscoveredGroup } from "@/app/groups/_components/add-
 import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { DiscoveredGroup, GroupDiscovery } from "@/src/lib/types";
 import { DmcHeading, DmcValue, MemberValue } from "@/app/groups/_components/group-metrics";
-
-function observedAt(value: string) {
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC") : "Unknown";
-}
+import { displayStamp } from "@/src/lib/timezone";
+import { BOT_TIMEZONE } from "@/src/config";
 
 /** Server-rendered inventory; these rows are deliberately outside ad settings
  *  until an operator adds one -- which puts it on record in no campaign. The
  *  Add column appears only when the console's writes are switched on. */
-export function DiscoveredGroups({ groups, discovery, addGate }: {
+export function DiscoveredGroups({ groups, discovery, addGate, zone = BOT_TIMEZONE }: {
   groups?: DiscoveredGroup[];
   discovery?: GroupDiscovery;
   addGate?: WriteGate;
+  zone?: string;
 }) {
   if (groups === undefined && discovery === undefined) return null;
   const rows = groups ?? [];
@@ -36,7 +34,7 @@ export function DiscoveredGroups({ groups, discovery, addGate }: {
                   account.status === "error" ? "Discovery unavailable; previous observations are retained." :
                     account.status === "stale" ? "Observations are out of date; the account may be offline or in standby." :
                       "Discovery up to date."}
-              {account.lastSuccessAt ? <> Last successful scan: <time dateTime={account.lastSuccessAt}>{observedAt(account.lastSuccessAt)}</time>.</> : null}
+              {account.lastSuccessAt ? <> Last successful scan: <time dateTime={account.lastSuccessAt}>{displayStamp(account.lastSuccessAt, zone, "Unknown")}</time>.</> : null}
             </p>
           ))}
           <p>Last seen records an observation, not a guarantee that the bot is still a member.</p>
@@ -61,8 +59,8 @@ export function DiscoveredGroups({ groups, discovery, addGate }: {
                   </td>
                   <td className="cell-muted">{group.accounts.map((account) => account.accountId).join(", ")}</td>
                   <td><DmcValue metrics={group.metrics} /></td>
-                  <td><MemberValue metrics={group.metrics} /></td>
-                  <td className="cell-muted"><time dateTime={group.lastSeenAt}>{observedAt(group.lastSeenAt)}</time></td>
+                  <td><MemberValue metrics={group.metrics} zone={zone} /></td>
+                  <td className="cell-muted"><time dateTime={group.lastSeenAt}>{displayStamp(group.lastSeenAt, zone, "Unknown")}</time></td>
                   {addGate ? (
                     <td className="cell-actions">
                       <AddDiscoveredGroup jid={group.jid} label={group.name || group.jid} gate={addGate} />

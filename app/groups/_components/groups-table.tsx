@@ -8,6 +8,7 @@ import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
 import { STATUS_LABEL, StatusPill } from "@/app/_components/ui";
+import { useDisplayTimezone } from "@/app/_components/timezone-context";
 import { DeleteGroup } from "@/app/groups/_components/delete-group";
 import { EditGroup } from "@/app/groups/_components/edit-group";
 import { AddGroupCampaign, type GroupCampaignOption } from "@/app/groups/_components/add-group-campaign";
@@ -83,6 +84,7 @@ export function GroupsTable({
   groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
   campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES, remote,
 }: Props) {
+  const displayZone = useDisplayTimezone();
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
   // while already here is applied, the sixty-second refresh is not.
@@ -274,7 +276,7 @@ export function GroupsTable({
                   <td className="cell-muted">{group.account}</td>
                   <td className="cell-muted">{group.activity}</td>
                   <td><DmcValue metrics={group.metrics} /></td>
-                  <td><MemberValue metrics={group.metrics} /></td>
+                  <td><MemberValue metrics={group.metrics} zone={displayZone} /></td>
                   <td>
                     {group.cap === null ? (
                       <span className="cell-muted">—</span>
@@ -362,7 +364,7 @@ export function GroupsTable({
                   ) : null}
                 </tr>
                 <tr id={`${id}-details-${group.jid}`} hidden={!expanded.has(group.jid)} className="group-details-row">
-                  <td colSpan={columns}><GroupDetails jid={group.jid} note={extraGroups[group.jid]?.note ?? group.note} metrics={group.metrics} /></td>
+                  <td colSpan={columns}><GroupDetails jid={group.jid} note={extraGroups[group.jid]?.note ?? group.note} metrics={group.metrics} zone={displayZone} /></td>
                 </tr>
               </Fragment>
             ))}

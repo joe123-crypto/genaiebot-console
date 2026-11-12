@@ -81,8 +81,14 @@ export const WRITES_ENABLED =
 export const ACCOUNT_WRITES_ENABLED =
   process.env.CONSOLE_WRITES?.trim() === "1" && Boolean(BOT_API_BASE_URL && BOT_API_TOKEN);
 
-/** Campaign sends are planned in Harare time; so is every slot the UI shows. */
+/** The zone campaign sends are planned in, and the clock the console shows
+ *  until an operator picks the other one (see `src/lib/timezone`). Changing
+ *  which clock is on screen never moves a send: that is the bot's own setting. */
 export const BOT_TIMEZONE = "Africa/Harare";
 
 export const SESSION_COOKIE_NAME = "genaie_console_session";
+/** Which clock this browser reads the console on. A preference, not operator
+ *  state: it is held by the browser that chose it and never reaches the bot. */
+export const TIMEZONE_COOKIE_NAME = "genaie_console_timezone";
+export const TIMEZONE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
