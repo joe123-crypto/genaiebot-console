@@ -5,7 +5,7 @@
  * those two and nothing else.
  */
 
-export const PRODUCT_NAME = "Genaie Console";
+export const PRODUCT_NAME = "Genaie";
 
 /**
  * Who the console says is acting. There is no session to read a name from yet,

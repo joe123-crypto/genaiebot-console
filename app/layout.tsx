@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Genaie Console",
+  title: "Genaie",
   description: "Operate the Genaie WhatsApp bot: groups, campaigns, schedule and lines.",
 };
 

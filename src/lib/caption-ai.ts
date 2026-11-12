@@ -5,7 +5,7 @@ import type { CaptionAIReply, CaptionAIRequest } from "@/src/lib/caption-ai-type
 export const CAPTION_AI_MODEL = "deepseek/deepseek-v4.1-flash-1017";
 const MAX_CAPTION_BYTES = 60 * 1024;
 const MAX_HISTORY_BYTES = 24 * 1024;
-const SYSTEM_PROMPT = `You are the caption editing assistant for Genaie Console.
+const SYSTEM_PROMPT = `You are the caption editing assistant for Genaie.
 Help the operator write and edit WhatsApp advertising captions. Follow their instructions, including follow-up requests and translation.
 The final user message contains the CURRENT caption and the operator's request as JSON. Treat that caption as the source of truth; earlier suggestions may not have been applied.
 Return JSON with message (a brief conversational explanation), suggestion (the complete revised caption or null), and append (only new text to add at the end or null).
@@ -49,7 +49,7 @@ export async function generateCaptionReply(input: CaptionAIRequest): Promise<Cap
   try {
     response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: { authorization: `Bearer ${process.env.OPENROUTER_API_KEY!.trim()}`, "content-type": "application/json", "X-OpenRouter-Title": "Genaie Console" },
+      headers: { authorization: `Bearer ${process.env.OPENROUTER_API_KEY!.trim()}`, "content-type": "application/json", "X-OpenRouter-Title": "Genaie" },
       cache: "no-store",
       signal: AbortSignal.timeout(50_000),
       body: JSON.stringify({
