@@ -132,7 +132,7 @@ describe("group observations and More", () => {
     expect(details.textContent).toContain(note);
     expect(within(details).getByText("1@g.us")).toBeTruthy();
     expect(within(details).getByText(/Complete —/)).toBeTruthy();
-    expect(within(details).getByText(/2026-11-08 12:00:00 UTC to 2026-11-09 12:00:00 UTC/)).toBeTruthy();
+    expect(within(details).getByText(/2026-11-08 14:00 Africa\/Harare to 2026-11-09 14:00 Africa\/Harare/)).toBeTruthy();
     expect(details.querySelector("td")?.colSpan).toBe(9);
 
     type("market");

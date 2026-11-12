@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GroupsTable, type GroupEditing } from "./groups-table";
+import { useDisplayTimezone } from "@/app/_components/timezone-context";
 import { DiscoveredGroups } from "./discovered-groups";
 import { DEFAULT_GROUP_FILTER, groupFilterQuery, type GroupFilter } from "@/src/domains/group-filter";
 import { GROUP_EDIT_FIELDS } from "@/src/domains/group-edit";
@@ -13,6 +14,7 @@ import { liveFetch, LoadMore, useDebounced, useLivePoll, useVisibleIds } from "@
 export function LiveGroups({ initial, initialError, filter: initialFilter, writable }: {
   initial: LivePage<Group> | null; initialError?: string; filter: GroupFilter; writable: boolean;
 }) {
+  const displayZone = useDisplayTimezone();
   const root = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState(initialFilter);
   const q = useDebounced(filter.q, 300);
@@ -43,7 +45,7 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
     <SyncNotice sync={groups.page?.sync} error={groups.error} />
     <SyncNotice sync={discovery.page?.sync} error={discovery.error} />
     <DiscoveredGroups groups={discovery.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
-      discovery={discovery.page?.discovery} addGate={writable ? canWrite(writable, context?.writes, "groups", "name", "source", "status", "promos", "daily_cap") : undefined} />
+      zone={displayZone} discovery={discovery.page?.discovery} addGate={writable ? canWrite(writable, context?.writes, "groups", "name", "source", "status", "promos", "daily_cap") : undefined} />
     <LoadMore next={discovery.page?.nextCursor} loading={discovery.loading} load={discovery.loadMore} />
     <GroupsTable groups={groups.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
       disabledPromos={groups.page?.disabledPromos ?? []} writesEnabled={writable} editing={editing}

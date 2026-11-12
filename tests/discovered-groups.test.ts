@@ -34,7 +34,7 @@ describe("automatic group discovery", () => {
     expect(html).toContain(group.jid);
     expect(html).toContain("The Advertisement Hub (Buy &amp; Sell)");
     expect(html).toContain("ads, default");
-    expect(html).toContain("2026-11-08 06:00:00 UTC");
+    expect(html).toContain("2026-11-08 08:00 Africa/Harare");
     expect(html).toContain("No campaigns are assigned automatically");
     expect(html).not.toContain("<button");
     expect(html).not.toContain("Delete");

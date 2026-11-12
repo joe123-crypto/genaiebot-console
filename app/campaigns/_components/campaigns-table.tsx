@@ -21,7 +21,9 @@ import {
   type CampaignFilter,
   type CampaignStatusChoice,
 } from "@/src/domains/campaign-filter";
-import { campaignLabel, campaignOffLabel, plural, slotLabel } from "@/src/lib/format";
+import { campaignLabel, campaignOffLabel, plural } from "@/src/lib/format";
+import { displaySlotLabel } from "@/src/lib/timezone";
+import { useDisplayTimezone } from "@/app/_components/timezone-context";
 import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
 import type { CampaignRow } from "@/src/lib/live-types";
 import type { Campaign } from "@/src/lib/types";
@@ -56,6 +58,7 @@ export function CampaignsTable({
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
   // while already here is applied, the sixty-second refresh is not.
+  const displayZone = useDisplayTimezone();
   const [filter, setFilter] = useUrlFilter(
     initialFilter, campaignFilterQuery, CAMPAIGN_FILTER_KEYS,
   );
@@ -149,7 +152,7 @@ export function CampaignsTable({
         <table className="data">
           <thead>
             <tr>
-              <th scope="col">Slot</th>
+              <th scope="col">Slot · {displayZone}</th>
               <th scope="col">Campaign</th>
               <th scope="col">Reach</th>
               <th scope="col">Line</th>
@@ -169,7 +172,7 @@ export function CampaignsTable({
                   }}
                   title={campaignOffLabel(campaign) ?? undefined}
                 >
-                  {slotLabel(campaign)}
+                  {displaySlotLabel(campaign, displayZone)}
                 </td>
                 <td>
                   <div className="cell-strong">

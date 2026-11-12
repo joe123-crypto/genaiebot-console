@@ -10,7 +10,9 @@ import { CampaignImages } from "@/app/campaigns/_components/campaign-images";
 import { CampaignSwitch } from "@/app/campaigns/_components/campaign-switch";
 import { CaptionVariants } from "@/app/campaigns/_components/caption-variants";
 import { campaignAssetDir } from "@/src/lib/campaign-images";
-import { campaignOffLabel, campaignTitle, groupLabel, slotLabel } from "@/src/lib/format";
+import { campaignOffLabel, campaignTitle, groupLabel } from "@/src/lib/format";
+import { displaySlotLabel, displayStamp } from "@/src/lib/timezone";
+import { useDisplayTimezone } from "@/app/_components/timezone-context";
 import { canWrite, type WriteGate } from "@/src/lib/write-capabilities";
 import type { CampaignDetail } from "@/src/domains/campaign-detail";
 import type { ReadResource } from "@/src/lib/read-resource";
@@ -26,10 +28,11 @@ function useRetainedResource<T>(resource: ReadResource<T>) {
   return resource.ok ? resource : last;
 }
 
-function ReadNotice({ label, resource, lastAt, retry, pending }: {
+function ReadNotice({ label, resource, lastAt, zone, retry, pending }: {
   label: string;
   resource: ReadResource<unknown>;
   lastAt?: string;
+  zone: string;
   retry: () => void;
   pending: boolean;
 }) {
@@ -38,7 +41,7 @@ function ReadNotice({ label, resource, lastAt, retry, pending }: {
     <div className="campaign-read-notice" role="status">
       <div>
         <strong>{label}: {lastAt ? "Could not refresh" : "Unavailable"}.</strong>{" "}
-        {lastAt ? <>Showing out-of-date data, last loaded <time dateTime={lastAt}>{lastAt.replace("T", " ").replace(/\.\d+Z$/, " UTC")}</time>. </> : "This section could not load. "}
+        {lastAt ? <>Showing out-of-date data, last loaded <time dateTime={lastAt}>{displayStamp(lastAt, zone)}</time>. </> : "This section could not load. "}
         <span>{resource.error.detail}</span>
       </div>
       <button className="btn" type="button" disabled={pending} onClick={retry}
@@ -66,6 +69,7 @@ export function CampaignDetailView(props: Props) {
 }
 
 function CampaignDetailContent({ slug, detail, writable, captionUnavailableReason, imageUnavailableReason }: Props) {
+  const displayZone = useDisplayTimezone();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const campaignSnapshot = useRetainedResource(detail.campaign);
@@ -92,13 +96,13 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
   const heldBack = preview ? preview.groups.length - (sendingToday ?? 0) - pausedRows : 0;
   const retry = () => { if (!pending) startTransition(() => router.refresh()); };
   const notice = (label: string, resource: ReadResource<unknown>, lastAt?: string) =>
-    <ReadNotice label={label} resource={resource} lastAt={lastAt} retry={retry} pending={pending} />;
+    <ReadNotice label={label} resource={resource} lastAt={lastAt} zone={displayZone} retry={retry} pending={pending} />;
 
   return <>
     <PageHead title={campaign?.source === "console" ? campaign.name : campaignTitle(slug)} subtitle={campaign
       ? campaign.enabled
-        ? `Runs at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
-        : `Not posting (${campaignOffLabel(campaign)}) — would run at ${slotLabel(campaign)} ${campaign.timezone} · ${campaign.name}`
+        ? `Runs at ${displaySlotLabel(campaign, displayZone)} ${displayZone} · ${campaign.name}`
+        : `Not posting (${campaignOffLabel(campaign)}) — would run at ${displaySlotLabel(campaign, displayZone)} ${displayZone} · ${campaign.name}`
       : "Campaign details are unavailable."}
       actions={<Link prefetch={false} className="link" href="/campaigns">All campaigns</Link>} />
 
