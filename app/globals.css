@@ -788,7 +788,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   .campaign-group-deltas { display: block; margin-left: 0; }
   .campaign-group-dialog { padding: 16px; }
 }
-.row-action:disabled { opacity: 0.4; cursor: not-allowed; }
+.row-action:disabled { color: var(--text-faint); opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
 .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
@@ -941,7 +941,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
-  color: var(--text-faint);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
