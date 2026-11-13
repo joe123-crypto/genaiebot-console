@@ -929,7 +929,10 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   border: 0;
 }
 
-.cell-actions { text-align: right; white-space: nowrap; }
+/* The preview link's ::after is stretched across the whole row at z-index 1, so
+   a control meant to be clicked in its own right has to sit above it. Without
+   this the overlay swallows the click and the row navigates instead. */
+.cell-actions { text-align: right; white-space: nowrap; position: relative; z-index: 2; }
 
 .row-action {
   display: inline-flex;
