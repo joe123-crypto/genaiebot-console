@@ -6,13 +6,12 @@ export function useLivePoll(read: (signal: AbortSignal) => Promise<void>, enable
   const callback = useRef(read);
   callback.current = read;
   useEffect(() => {
-    if (!enabled) return;
     let timer: ReturnType<typeof setTimeout>;
     let active: AbortController | undefined;
     let disposed = false;
     let rerun = false;
     const available = () => document.visibilityState === "visible" && navigator.onLine;
-    function schedule() { clearTimeout(timer); if (!disposed && available()) timer = setTimeout(run, LIVE_INTERVAL); }
+    function schedule() { clearTimeout(timer); if (!disposed && enabled && available()) timer = setTimeout(run, LIVE_INTERVAL); }
     async function run() {
       clearTimeout(timer);
       if (disposed || !available() || active) return;
@@ -22,9 +21,14 @@ export function useLivePoll(read: (signal: AbortSignal) => Promise<void>, enable
     }
     function availability() {
       clearTimeout(timer);
-      if (!available()) active?.abort(); else void run();
+      if (!available()) active?.abort(); else if (enabled) void run();
     }
+    /** Reads even while paused: `enabled` suspends the interval, not an explicit "this just
+     *  changed". A save dispatches this before React re-renders, so the hook is still in its
+     *  paused pass -- dropping the listener there meant the page waited a whole interval for
+     *  state it had just written itself. */
     function changed() { if (active) { rerun = true; active.abort(); } else void run(); }
+
     schedule();
     document.addEventListener("visibilitychange", availability);
     window.addEventListener("online", availability);

@@ -948,9 +948,9 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   cursor: pointer;
 }
 
-.row-action:hover { background: var(--surface-muted); color: var(--text-muted); }
+.row-action:hover:not(:disabled) { background: var(--surface-muted); color: var(--text-muted); }
 
-.row-action-danger:hover {
+.row-action-danger:hover:not(:disabled) {
   background: var(--danger-soft);
   border-color: var(--danger-border);
   color: var(--danger);
