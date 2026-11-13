@@ -76,7 +76,8 @@ export async function saveCaptionsAction(
   if (!Array.isArray(expectedCaptions) || expectedCaptions.some((caption) => typeof caption !== "string")) {
     return { ok: false, detail: "The original captions could not be read. Reload the editor before saving." };
   }
-  // The bot's write bridge accepts at most 64 KiB, including request metadata.
+  // The bot's own validator caps captions at 60 KiB; the gateway envelope
+  // around them is 64 KiB. Check the limit that governs, not the envelope.
   if (Buffer.byteLength(JSON.stringify(captions), "utf8") > 60 * 1024) {
     return { ok: false, detail: "The captions are too large to save. Shorten them and try again." };
   }
