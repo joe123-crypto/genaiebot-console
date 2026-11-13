@@ -40,6 +40,20 @@ it("holds the poll still while the timeline has a draft", async () => {
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
+/** The save's own notifyLiveChange fires before React re-renders, so the hook is still in
+ * its paused pass. Dropping the listener there left the page waiting a whole interval for
+ * state it had just written. */
+it("still refetches on an explicit change while the poll is held", async () => {
+  vi.useFakeTimers(); const fetch = vi.fn().mockResolvedValue(Response.json({ unchanged: true, revision: "1", sync: { stale: false } })); vi.stubGlobal("fetch", fetch);
+  render(<LiveScheduleView initial={initial} writable={false} />);
+  await act(async () => { calls.timeline.mock.lastCall?.[0].onEditingChange(true); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+  expect(fetch).not.toHaveBeenCalled();
+
+  await act(async () => { window.dispatchEvent(new Event("genaie:changed")); });
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
 /** One timeline for both bot generations: the two capabilities arrive as separate reasons so a
  * bot that can move times but not act on entries keeps its drag and save. */
 it("reports the two write capabilities separately", () => {

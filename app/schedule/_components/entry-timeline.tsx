@@ -45,8 +45,8 @@ const editable = (slot: DaySlot) => Boolean(slot.scheduleEdit) && slot.scheduleE
 export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, saveUnavailableReason, entriesUnavailableReason, summary, onEditingChange }: {
   slots: DaySlot[]; nowMinutes: number; timezone: string; date: string;
   saveUnavailableReason?: string; entriesUnavailableReason?: string; summary?: ReactNode;
-  /** Lets the page hold the live poll still while a draft is open. Must be a stable
-   *  reference -- a `useState` setter is one. */
+  /** Lets the page hold the live poll still while there are unsaved changes. Read through
+   *  a ref, so it need not be a stable reference. */
   onEditingChange?: (editing: boolean) => void;
 }) {
   /** The campaign day is the bot's, and so is every minute in `slots`, in what
@@ -78,8 +78,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const view = draft?.slots ?? slots;
   const changes = view.filter((slot) => JSON.stringify(desired(slot)) !== JSON.stringify(saved.has(slotKey(slot)) ? desired(saved.get(slotKey(slot))!) : null));
   const dirty = changes.length > 0;
-  const stale = draft !== null && (draft.date !== date ||
-    [...draft.base].some(([key, base]) => baseline(saved.get(key)) !== base));
+  const stale = draft !== null && (draft.date !== date || movedUnderDraft(draft.base));
   const locked = pending || uncertain !== null || Boolean(saveUnavailableReason);
   /** Bots without entry support still move times, so this gates the entry actions alone. */
   const entriesEnabled = !entriesUnavailableReason;
@@ -101,12 +100,22 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const found = clashes(dirty ? view : activeView);
   const nowOffset = `${nowMinutes / 1440 * 100}%`;
 
-  /** A poll that lands mid-draft replaces `serverSlots`, which is how a draft used to be
-   *  invalidated by a campaign it never touched. Staleness is scoped now, so this is the
-   *  second line of defence rather than the fix -- and it keeps the day's times still while
-   *  the operator is reading them. `save` fires notifyLiveChange, which resumes at once. */
-  useEffect(() => { onEditingChange?.(draft !== null || uncertain !== null); }, [draft, uncertain, onEditingChange]);
-  useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
+  /** A poll that lands mid-draft replaces `serverSlots`, so the page holds it still while
+   *  there are unsaved changes to protect. Keyed on `dirty`, not on `draft`: an edit that
+   *  cancels itself out leaves a draft behind with nothing in it, and pausing for that would
+   *  stop updates while the screen says the schedule is saved.
+   *
+   *  Never held while `uncertain`. There the draft is already pinned and every control is
+   *  locked, so a poll can disturb nothing -- and holding would deadlock: `dirty` is measured
+   *  against `serverSlots`, which only a poll can refresh, so a lost reply would freeze the
+   *  page with no way back, Reset included (it is barred by `locked`). */
+  const holdPoll = dirty && uncertain === null;
+  /** Through a ref so the effects do not depend on the callback's identity: an inline arrow
+   *  from a caller would otherwise flip this false/true on every render, without end. */
+  const editingSignal = useRef(onEditingChange);
+  editingSignal.current = onEditingChange;
+  useEffect(() => { editingSignal.current?.(holdPoll); }, [holdPoll]);
+  useEffect(() => () => editingSignal.current?.(false), []);
 
   useEffect(() => { if (selected) panel.current?.focus(); }, [selected]);
 
@@ -126,6 +135,11 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [selected]);
 
+  /** Has the server moved any run this draft recorded a baseline for? */
+  function movedUnderDraft(base: Map<string, string | null>) {
+    for (const [key, recorded] of base) if (baseline(saved.get(key)) !== recorded) return true;
+    return false;
+  }
   /** Records a run's baseline the first time the draft touches it, and never again: re-recording
    *  would quietly adopt a change that landed underneath the draft instead of flagging it. */
   function touch(previous: Draft | null, slot: DaySlot) {
@@ -172,7 +186,15 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }
   function remove(slot: DaySlot) {
     if (!saved.has(slotKey(slot))) {
-      setDraft((previous) => previous ? { ...previous, slots: previous.slots.filter((row) => slotKey(row) !== slotKey(slot)) } : null);
+      setDraft((previous) => {
+        if (!previous) return null;
+        const base = new Map(previous.base);
+        base.delete(slotKey(slot));
+        const slots = previous.slots.filter((row) => slotKey(row) !== slotKey(slot));
+        // Nothing left that this draft touched, so leave no draft behind: an empty one
+        // keeps Reset on screen and would read as unsaved work that does not exist.
+        return base.size ? { ...previous, base, slots } : null;
+      });
       closeOptions();
     } else edit(slot, { deleted: true });
     setConfirmDelete(false);
@@ -296,7 +318,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
         {!saveUnavailableReason && entriesUnavailableReason && <p className="card-note">{entriesUnavailableReason}</p>}
         {feedback && <p className={feedback.error ? "caption-error" : "card-note"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
         {stale && !uncertain && <p className="caption-error" role="alert">The schedule changed while you were editing. Reset to load the latest times.</p>}
-        {draft && <p className="card-note" role="status">Live updates are paused while you have unsaved changes.</p>}
+        {holdPoll && <p className="card-note" role="status">Live updates are paused while you have unsaved changes.</p>}
         <p className="card-note" role="status">{dirty ? "Unsaved changes. The bot still runs the saved schedule until you save." : "Saved schedule. Pending updates retain their last-confirmed times."}</p>
       </div>
       <div className="card-pad">

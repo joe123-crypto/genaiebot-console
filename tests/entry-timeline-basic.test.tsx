@@ -120,7 +120,7 @@ describe("a bot without entry support", () => {
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("reports an open draft so the page can hold the poll still", () => {
+  it("reports unsaved changes so the page can hold the poll still", () => {
     const onEditingChange = vi.fn();
     mount({ onEditingChange });
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
@@ -129,6 +129,33 @@ describe("a bot without entry support", () => {
     expect(screen.getByText("Live updates are paused while you have unsaved changes.")).toBeDefined();
     click("Reset");
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  /** A draft that no longer differs from the server is not unsaved work. Holding the poll for
+   * one stopped updates for the rest of the session while the page said "Saved schedule." */
+  it("releases the poll when an edit is undone back to the saved time", () => {
+    const onEditingChange = vi.fn();
+    mount({ onEditingChange });
+    fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(bar(), { key: "ArrowLeft" });
+    expect(bar().getAttribute("aria-valuenow")).toBe("540");
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByText("Live updates are paused while you have unsaved changes.")).toBeNull();
+  });
+
+  /** Holding the poll while a reply is lost would deadlock: `dirty` is measured against the
+   * server's slots, and only a poll refreshes those. Reset is barred by `locked` there too. */
+  it("releases the poll while a save reply is uncertain", async () => {
+    const onEditingChange = vi.fn();
+    mock.save.mockRejectedValueOnce(new Error("lost reply"));
+    mount({ onEditingChange, entriesUnavailableReason: undefined });
+    fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+    click("Save changes");
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("may have been saved"));
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("button", { name: "Retry original request" })).toBeDefined();
   });
 
   /** The regression this mode was most likely to hide: entry bots report the last confirmed run
