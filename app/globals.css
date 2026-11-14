@@ -752,6 +752,14 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .campaign-group-option + .campaign-group-option { border-top: 1px solid var(--border); }
 .campaign-group-option:hover { background: var(--surface-muted); }
 .campaign-group-option > span { min-width: 0; overflow-wrap: anywhere; }
+.campaign-group-option .picker-campaign-count {
+  display: inline-block;
+  flex-shrink: 0;
+  max-width: 50%;
+  margin-left: auto;
+  white-space: normal;
+  text-align: right;
+}
 .campaign-group-option .cell-mono { display: block; }
 .campaign-group-option input { margin: 4px 0 0; accent-color: var(--primary); }
 .campaign-group-option input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
