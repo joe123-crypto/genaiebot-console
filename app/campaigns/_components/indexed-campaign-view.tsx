@@ -11,15 +11,18 @@ import { CampaignSwitch } from "./campaign-switch";
 import { loadCampaignGroupChoices } from "./group-choices";
 import { canWrite } from "@/src/lib/write-capabilities";
 import type { Campaign, AdAssets, PreviewRow } from "@/src/lib/types";
-import type { CampaignRow, LivePage, SyncStatus, LiveContext } from "@/src/lib/live-types";
+import type { CampaignRow, SyncStatus, LiveContext } from "@/src/lib/live-types";
 
 type Summary = { revision?: string; unchanged?: boolean; campaign: CampaignRow | null; context?: LiveContext; sync: SyncStatus };
+type Details = { campaign: Campaign; adAssets?: AdAssets };
+type DetailResult = { data: Details } | { error: string };
+
 export function IndexedCampaignView({ slug, initial, initialError, writable }: { slug: string; initial: Summary | null; initialError?: string; writable: boolean }) {
   const [summary, setSummary] = useState(initial);
   const [error, setError] = useState<string | null>(initialError ?? null);
   const latest = useRef(summary); latest.current = summary;
-  const [details, setDetails] = useState<{ campaign: Campaign; adAssets?: AdAssets } | null>(null);
-  const [detailPending, setDetailPending] = useState(false);
+  const [detailResult, setDetailResult] = useState<DetailResult | null>(null);
+  const [detailAttempt, setDetailAttempt] = useState(0);
   const [assignmentsOpen, setAssignmentsOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   async function read(signal?: AbortSignal) {
@@ -31,22 +34,44 @@ export function IndexedCampaignView({ slug, initial, initialError, writable }: {
   }
   useEffect(() => { if (initial) return; const controller = new AbortController(); void read(controller.signal); return () => controller.abort(); }, [initial]);
   useLivePoll(read);
-  async function openDetails() {
-    if (detailPending) return; setDetailPending(true);
-    try { const data = await liveFetch<{ campaign: Campaign; adAssets?: AdAssets }>("detail", new URLSearchParams({ slug })); setDetails(data); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Details unavailable."); }
-    finally { setDetailPending(false); }
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    async function loadDetails() {
+      try {
+        const { campaign, adAssets } = await liveFetch<{ campaign: Campaign | null; adAssets?: AdAssets }>(
+          "detail", new URLSearchParams({ slug }), signal,
+        );
+        if (signal.aborted) return;
+        setDetailResult(campaign ? { data: { campaign, adAssets } } : { error: "Captions and pictures are unavailable." });
+      } catch (reason) {
+        if (!signal.aborted) {
+          setDetailResult({ error: reason instanceof Error ? reason.message : "Captions and pictures are unavailable." });
+        }
+      }
+    }
+    void loadDetails();
+    return () => controller.abort();
+  }, [slug, detailAttempt]);
+
+  function retryDetails() {
+    setDetailResult(null);
+    setDetailAttempt(attempt => attempt + 1);
   }
+
   const writes = summary?.context?.writes;
   return <div ref={root}><PageHead title={summary?.campaign?.name || slug} actions={<Link prefetch={false} href="/campaigns">All campaigns</Link>} />
     <SyncNotice sync={summary?.sync} error={error} />
     {summary?.campaign === null ? <p role="status">This campaign no longer exists. Any open draft is retained.</p> : null}
     {summary?.campaign ? <CampaignSwitch slug={slug} title={summary.campaign.name} storeEnabled={summary.campaign.storeEnabled ?? summary.campaign.enabled}
       cronEnabled={summary.campaign.cronEnabled} gate={canWrite(writable, writes, "campaigns", "enabled")} /> : null}
-    <section className="card card-pad"><h2 className="card-title">Captions and pictures</h2>
-      {!details ? <button className="btn" disabled={detailPending} onClick={openDetails}>{detailPending ? "Loading…" : "Open captions and pictures"}</button> : <>
-        <CampaignImages images={details.campaign.images} assets={details.campaign.assets} adAssets={details.adAssets} assetDir="" writable={writable} writeUnavailableReason="Saved picture editing is not connected." />
-        <CaptionVariants slug={slug} captions={details.campaign.captions} writable={writable} samples={[]}
+    <section className="card card-pad" aria-labelledby="campaign-details-title"><h2 className="card-title" id="campaign-details-title">Captions and pictures</h2>
+      {!detailResult ? <p className="card-note" role="status">Loading captions and pictures…</p> : "error" in detailResult ? <>
+        <p className="caption-error" role="alert">{detailResult.error}</p>
+        <button type="button" className="btn" onClick={retryDetails}>Retry</button>
+      </> : <>
+        <CampaignImages images={detailResult.data.campaign.images} assets={detailResult.data.campaign.assets} adAssets={detailResult.data.adAssets} assetDir="" writable={writable} writeUnavailableReason="Saved picture editing is not connected." />
+        <CaptionVariants slug={slug} captions={detailResult.data.campaign.captions} writable={writable} samples={[]}
           saveUnavailableReason={canWrite(writable, writes, "campaigns", "captions").allowed ? undefined : "Caption saving is unavailable."} />
       </>}
     </section>
