@@ -2,9 +2,18 @@
 import { useEffect, useRef, useState } from "react";
 import { SyncNotice, useLivePage } from "./live-page";
 import { LoadMore, useDebounced } from "./use-live";
+import { plural } from "@/src/lib/format";
 import type { CampaignRow, Group } from "@/src/lib/live-types";
 import type { WriteOutcome } from "@/src/lib/write-outcome";
 export type PickerChoice = { id: string; name: string; account?: string; status?: Group["status"] };
+
+function activeCampaignLabel(group: Group, enabledCampaigns: Set<string> | undefined) {
+  if (!enabledCampaigns) return "Campaign count unavailable";
+  const paused = new Set(group.pausedPromos);
+  const count = [...new Set(group.promos)].filter(slug => enabledCampaigns.has(slug) && !paused.has(slug)).length;
+  return plural(count, "active campaign");
+}
+
 export function PaginatedPicker({ kind, exclude = [], close, choose }: {
   kind: "groups" | "campaigns"; exclude?: string[]; close: () => void;
   choose: (rows: PickerChoice[]) => void | Promise<WriteOutcome>;
@@ -30,7 +39,16 @@ export function PaginatedPicker({ kind, exclude = [], close, choose }: {
       if (previous?.isConnected) previous.focus();
     };
   }, []);
-  const choices: PickerChoice[] = data.rows.map(row => "jid" in row ? { id: row.jid, name: row.name || row.jid, account: row.account, status: row.status } : { id: row.slug, name: row.name || row.slug });
+  const campaigns = kind === "groups" ? data.page?.facets?.campaigns : undefined;
+  const enabledCampaigns = campaigns && new Set(campaigns.filter(campaign => campaign.enabled).map(campaign => campaign.slug));
+  const choices = data.rows.map(row => {
+    if ("jid" in row) {
+      const choice: PickerChoice = { id: row.jid, name: row.name || row.jid, account: row.account, status: row.status };
+      return { choice, campaignCountLabel: activeCampaignLabel(row, enabledCampaigns) };
+    }
+    const choice: PickerChoice = { id: row.slug, name: row.name || row.slug };
+    return { choice, campaignCountLabel: null };
+  });
   const selection = Array.from(selected.values()).filter(row => !exclude.includes(row.id));
 
   function dismiss() {
@@ -62,7 +80,7 @@ export function PaginatedPicker({ kind, exclude = [], close, choose }: {
       <input ref={input} id={`picker-${kind}`} className="modal-input" type="search" value={search} disabled={saving} onChange={event => setSearch(event.target.value)} />
       <SyncNotice sync={data.page?.sync} error={data.error} />
       <div className="campaign-group-options" role="group" aria-label={`Available ${kind}`} aria-busy={saving}>
-        {choices.filter(row => !exclude.includes(row.id)).map(row => <label key={row.id} className="campaign-group-option" data-live-id={row.id}>
+        {choices.filter(({ choice }) => !exclude.includes(choice.id)).map(({ choice: row, campaignCountLabel }) => <label key={row.id} className="campaign-group-option" data-live-id={row.id}>
           <input type="checkbox" checked={selected.has(row.id)} disabled={saving} onChange={event => {
             const { checked } = event.currentTarget;
             setSelected(previous => {
@@ -73,6 +91,7 @@ export function PaginatedPicker({ kind, exclude = [], close, choose }: {
             });
           }} />
           <span>{row.name} {row.account ? `· ${row.account}` : ""}</span>
+          {campaignCountLabel ? <span className="pill picker-campaign-count">{campaignCountLabel}</span> : null}
         </label>)}
       </div>
       <LoadMore next={data.page?.nextCursor} loading={data.loading} load={data.loadMore} />
