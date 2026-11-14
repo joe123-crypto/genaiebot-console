@@ -14,6 +14,8 @@ import type { DiscoveredGroup, Group, GroupStatus } from "@/src/lib/types";
  * They belong to the campaign page, where removing one has to take all three
  * fields out together.
  */
+export const MAX_GROUPS_PER_ASSIGNMENT = 100;
+
 export const GROUP_EDIT_FIELDS = [
   "name", "status", "activity", "account", "daily_cap", "note",
 ] as const;

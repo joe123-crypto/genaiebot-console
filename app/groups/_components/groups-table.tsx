@@ -1,7 +1,7 @@
 "use client";
 
 import { PaginatedPicker } from "@/app/_components/paginated-picker";
-import { addGroupCampaignAction } from "@/app/groups/actions";
+import { addGroupCampaignAction, addGroupCampaignsAction } from "@/app/groups/actions";
 import { liveFetch, notifyLiveChange, useLivePoll } from "@/app/_components/use-live";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import {
@@ -14,6 +14,7 @@ import { EditGroup } from "@/app/groups/_components/edit-group";
 import { AddGroupCampaign, type GroupCampaignOption } from "@/app/groups/_components/add-group-campaign";
 import { DmcHeading, DmcValue, GroupDetails, MemberValue } from "@/app/groups/_components/group-metrics";
 import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
+import { MAX_GROUPS_PER_ASSIGNMENT } from "@/src/domains/group-edit";
 import {
   DEFAULT_GROUP_FILTER,
   GROUP_FILTER_KEYS,
@@ -97,6 +98,8 @@ export function GroupsTable({
     useState<{ label: string; warnings: string[] } | null>(null);
 
   const [campaignGroup, setCampaignGroup] = useState<Group | null>(null);
+  const [selectedGroups, setSelectedGroups] = useState(() => new Map<string, string>());
+  const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
   const [extraGroups, setExtraGroups] = useState<Record<string, Group>>({});
   const [editorDeleted, setEditorDeleted] = useState(false);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
@@ -118,8 +121,20 @@ export function GroupsTable({
   useEffect(() => { filterChanged?.(filter); }, [filter, filterChanged]);
   const off = new Set(disabledPromos);
   const visible = remote ? groups : sortGroupsForTable(filterGroups(groups, filter));
-  const columns = writesEnabled ? 10 : 9;
+  const canAssign = writesEnabled && campaignGate.allowed;
+  const selectionFull = selectedGroups.size >= MAX_GROUPS_PER_ASSIGNMENT;
+  const columns = 9 + Number(writesEnabled) + Number(canAssign);
   const unfiltered = isDefaultGroupFilter(filter);
+
+  function selectGroup(group: Group, checked: boolean) {
+    setSelectedGroups((current) => {
+      if (checked && current.size >= MAX_GROUPS_PER_ASSIGNMENT) return current;
+      const next = new Map(current);
+      if (checked) next.set(group.jid, groupLabel(group));
+      else next.delete(group.jid);
+      return next;
+    });
+  }
 
   function set(key: keyof GroupFilter, value: string) {
     setFilter((current) => ({ ...current, [key]: value }));
@@ -141,6 +156,21 @@ export function GroupsTable({
         if (result.ok) notifyLiveChange();
         return result;
       }} /> : null}
+      {bulkPickerOpen ? <PaginatedPicker kind="campaigns" close={() => setBulkPickerOpen(false)} choose={async (rows) => {
+        const result = await addGroupCampaignsAction([...selectedGroups.keys()], rows.map((row) => row.id));
+        if (result.ok) setSelectedGroups(new Map());
+        if (result.ok || result.refreshLive) notifyLiveChange();
+        return result;
+      }}>
+        <details className="group-assignment-destinations">
+          <summary>Add to {selectedGroups.size} {selectedGroups.size === 1 ? "group" : "groups"}</summary>
+          <ul>
+            {[...selectedGroups].map(([jid, name]) => (
+              <li key={jid}>{name} <span className="cell-mono">{shortJid(jid)}</span></li>
+            ))}
+          </ul>
+        </details>
+      </PaginatedPicker> : null}
       {editingGroup ? <EditGroup key={editingGroup.jid} group={editingGroup} label={confirmLabel(editingGroup)}
         lines={editing.lines} tiers={editing.tiers} editable={editing.editableFields} gate={editorDeleted ? { allowed: false, reason: "This group no longer exists. Your draft is retained." } : editing.edit}
         initiallyOpen onDismiss={() => setEditingGroup(null)} /> : null}
@@ -238,6 +268,25 @@ export function GroupsTable({
         </p>
       </FilterSummary>
 
+      {canAssign ? (
+        <div className="group-assignment-controls">
+          <span className="card-note" role="status">
+            {selectedGroups.size} {selectedGroups.size === 1 ? "group" : "groups"} selected
+            {selectionFull ? ` (maximum ${MAX_GROUPS_PER_ASSIGNMENT})` : ""}
+          </span>
+          <button type="button" className="btn" disabled={selectedGroups.size === 0} onClick={() => {
+            setSelectedGroups(new Map());
+            search.current?.focus();
+          }}>
+            Clear selection
+          </button>
+          <button type="button" className="btn btn-primary" aria-haspopup="dialog"
+            disabled={selectedGroups.size === 0} onClick={() => setBulkPickerOpen(true)}>
+            Add campaigns
+          </button>
+        </div>
+      ) : null}
+
       <div
         className="table-wrap groups-table-wrap"
         role="region"
@@ -247,6 +296,7 @@ export function GroupsTable({
         <table className="data">
           <thead>
             <tr>
+              {canAssign ? <th scope="col" className="group-selection-cell"><span className="visually-hidden">Select group</span></th> : null}
               <th scope="col">Group</th>
               <th scope="col">Status</th>
               <th scope="col">Line</th>
@@ -267,6 +317,16 @@ export function GroupsTable({
             {visible.map((group) => (
               <Fragment key={group.jid}>
                 <tr data-live-id={group.jid}>
+                  {canAssign ? (
+                    <td className="group-selection-cell">
+                      {group.status === "active" || selectedGroups.has(group.jid) ? (
+                        <input type="checkbox" aria-label={`Select ${confirmLabel(group)} (${shortJid(group.jid)})`}
+                          checked={selectedGroups.has(group.jid)}
+                          disabled={selectionFull && !selectedGroups.has(group.jid)}
+                          onChange={(event) => selectGroup(group, event.currentTarget.checked)} />
+                      ) : null}
+                    </td>
+                  ) : null}
                   <td>
                     <div className="cell-strong">{groupLabel(group)}</div>
                     <div className="cell-mono">{shortJid(group.jid)}</div>

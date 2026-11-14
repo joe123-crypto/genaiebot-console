@@ -362,9 +362,9 @@ export async function getConfiguration({ fresh = false }: ReadOptions = {}): Pro
   catch (error) { if (!unsupportedRead(error)) throw error; return getOverview(undefined, { fresh }); }
 }
 
-export async function getCapabilities(): Promise<WriteCapabilities | undefined> {
-  try { return (await read<{ writes?: WriteCapabilities }>("capabilities")).writes; }
-  catch (error) { if (!unsupportedRead(error)) throw error; return (await getOverview()).writes; }
+export async function getCapabilities({ fresh = false }: ReadOptions = {}): Promise<WriteCapabilities | undefined> {
+  try { return (await read<{ writes?: WriteCapabilities }>("capabilities", undefined, undefined, fresh)).writes; }
+  catch (error) { if (!unsupportedRead(error)) throw error; return (await getOverview(undefined, { fresh })).writes; }
 }
 
 export type NavigationPayload = { campaignTotal: number; groupsNeedingReview: number };

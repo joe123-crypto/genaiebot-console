@@ -22,7 +22,7 @@ const capabilities: WriteCapabilities = {
   enabled: true, affectsProduction: true, fields: { groups: ["promos"] }, delete: [],
 };
 
-async function loadAction(writes = true) {
+async function loadActions(writes = true) {
   vi.resetModules();
   updateGroupBatch.mockReset().mockResolvedValue(null);
   for (const fn of [getGroups, getOverview, updateGroup, revalidate]) fn.mockReset();
@@ -46,12 +46,100 @@ async function loadAction(writes = true) {
   getGroups.mockResolvedValue({ groups: [group()] });
   getOverview.mockResolvedValue({ writes: capabilities, campaigns: [{ slug, enabled: true }] });
   updateGroup.mockResolvedValue({});
-  return (await import("@/app/groups/actions")).addGroupCampaignAction;
+  return import("@/app/groups/actions");
+}
+
+async function loadAction(writes = true) {
+  return (await loadActions(writes)).addGroupCampaignAction;
 }
 
 afterEach(() => {
   vi.resetModules();
   for (const name of ["@/src/config", "next/cache", "@/src/lib/bot-client"]) vi.doUnmock(name);
+});
+
+describe("addGroupCampaignsAction", () => {
+  const secondJid = "120363222@g.us";
+  const secondSlug = "web-design";
+  const context = { writes: capabilities, campaigns: [{ slug }, { slug: secondSlug }] };
+
+  it("appends missing memberships across groups with one transaction and deduplicates the inputs", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    getGroups.mockResolvedValue({ groups: [group({ promos: [slug] }), group({ jid: secondJid, promos: [secondSlug] })], context });
+    updateGroupBatch.mockResolvedValue({ done: [jid, secondJid], changed: 2 });
+
+    expect(await add([jid, secondJid, jid], [slug, secondSlug, slug])).toEqual({ ok: true });
+    expect(getGroups).toHaveBeenCalledExactlyOnceWith(undefined, { fresh: true, jids: [jid, secondJid] });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
+      { id: jid, fields: { promos: [slug, secondSlug] }, expected: { promos: [slug] } },
+      { id: secondJid, fields: { promos: [secondSlug, slug] }, expected: { promos: [secondSlug] } },
+    ], { by: "Joseph" });
+    expect(updateGroup).not.toHaveBeenCalled();
+    expect(revalidate.mock.calls).toEqual([["/groups"], ["/"], [`/campaigns/${slug}`], [`/campaigns/${secondSlug}`], ["/campaigns"]]);
+  });
+
+  it("rejects oversized and read-only batches before reading the bot", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    expect(await add(Array.from({ length: 101 }, (_, index) => `${index}@g.us`), [slug])).toMatchObject({ ok: false, detail: expect.stringContaining("100") });
+    expect(getGroups).not.toHaveBeenCalled();
+    const { addGroupCampaignsAction: readOnlyAdd } = await loadActions(false);
+    expect(await readOnlyAdd([jid, secondJid], [slug])).toMatchObject({ ok: false, detail: expect.stringContaining("read-only") });
+    expect(getGroups).not.toHaveBeenCalled();
+  });
+
+  it("identifies missing campaigns and unavailable groups without writing", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    getGroups.mockResolvedValueOnce({ groups: [group()], context })
+      .mockResolvedValueOnce({ groups: [group(), group({ jid: secondJid, name: "Paused Market", status: "on-hold", promos: [slug] })], context });
+    expect(await add([jid, secondJid], [slug])).toMatchObject({ ok: false, detail: expect.stringContaining(secondJid) });
+    expect(await add([jid, secondJid], [slug])).toMatchObject({ ok: false, detail: expect.stringContaining("Paused Market") });
+    getGroups.mockResolvedValue({ groups: [group(), group({ jid: secondJid })], context });
+    expect(await add([jid, secondJid], [slug, "deleted-campaign"])).toMatchObject({ ok: false, detail: expect.stringContaining("deleted-campaign") });
+    expect(updateGroupBatch).not.toHaveBeenCalled();
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
+  it("returns transactional conflicts without falling back to individual writes", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    const { WriteRefusedError } = await import("@/src/lib/bot-client");
+    getGroups.mockResolvedValue({ groups: [group(), group({ jid: secondJid })], context });
+    updateGroupBatch.mockRejectedValue(new WriteRefusedError("Group changed since the draft was checked.", [], 409));
+    expect(await add([jid, secondJid], [slug])).toMatchObject({ ok: false, detail: expect.stringContaining("changed") });
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
+  it("dry-runs the entire legacy batch before any commit and skips confirmed assignments on retry", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    const { BotUnavailableError } = await import("@/src/lib/bot-client");
+    const groups = [group({ promos: [] }), group({ jid: secondJid, promos: [] })];
+    getGroups.mockResolvedValue({ groups, context });
+    updateGroup.mockResolvedValueOnce({}).mockResolvedValueOnce({}).mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new BotUnavailableError("Connection lost."));
+    expect(await add([jid, secondJid], [slug])).toEqual({
+      ok: false, refreshLive: true, detail: `Confirmed assignments for 1 of 2 groups. Stopped at ${secondJid}. Connection lost.`,
+    });
+    expect(updateGroup.mock.calls.map(([id, , options]) => [id, options.dryRun ?? false])).toEqual([
+      [jid, true], [secondJid, true], [jid, false], [secondJid, false],
+    ]);
+    expect(revalidate).toHaveBeenCalledWith("/groups");
+
+    updateGroup.mockClear();
+    getGroups.mockResolvedValue({ groups: [group({ promos: [slug] }), groups[1]], context });
+    expect(await add([jid, secondJid], [slug])).toEqual({ ok: true });
+    expect(updateGroup.mock.calls.map(([id, , options]) => [id, options.dryRun ?? false])).toEqual([
+      [secondJid, true], [secondJid, false],
+    ]);
+  });
+
+  it("commits no legacy changes when the second group's dry run is refused", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    const { WriteRefusedError } = await import("@/src/lib/bot-client");
+    getGroups.mockResolvedValue({ groups: [group(), group({ jid: secondJid })], context });
+    updateGroup.mockResolvedValueOnce({}).mockRejectedValueOnce(new WriteRefusedError("Invalid membership.", [], 400));
+    expect(await add([jid, secondJid], [slug])).toMatchObject({ ok: false, detail: "Invalid membership." });
+    expect(updateGroup.mock.calls.map(([, , options]) => options.dryRun)).toEqual([true, true]);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
 });
 
 describe("addGroupCampaignAction", () => {
