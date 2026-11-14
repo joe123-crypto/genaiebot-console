@@ -29,12 +29,13 @@ function CampaignSelector({ group, campaigns, gate, blockedReason, trigger, clos
   const returnToTable = useRef(false);
   const id = useId();
   const [search, setSearch] = useState("");
-  const [saving, setSaving] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<Extract<WriteOutcome, { ok: false }> | null>(null);
   const [pending, startTransition] = useTransition();
   const query = search.trim().toLowerCase();
   const matches = campaigns.filter((campaign) =>
     `${campaignTitle(campaign.slug)} ${campaign.name} ${campaign.slug}`.toLowerCase().includes(query));
+  const selection = selected.filter((slug) => campaigns.some((campaign) => campaign.slug === slug));
 
   useEffect(() => {
     const element = dialog.current;
@@ -63,24 +64,26 @@ function CampaignSelector({ group, campaigns, gate, blockedReason, trigger, clos
     if (!inFlight.current) close();
   }
 
-  function add(slug: string) {
-    if (blockedReason || inFlight.current) return;
+  function add() {
+    if (blockedReason || inFlight.current || selection.length === 0) return;
     inFlight.current = true;
-    setSaving(slug);
+    returnToTable.current = campaigns.length === selection.length;
     setError(null);
     startTransition(async () => {
       try {
-        const outcome = await addGroupCampaignAction(group.jid, slug);
+        const outcome = await addGroupCampaignAction(group.jid, selection);
         if (outcome.ok) {
-        notifyLiveChange();
-          returnToTable.current = campaigns.length === 1;
+          notifyLiveChange();
           close();
-        } else setError(outcome);
+        } else {
+          returnToTable.current = false;
+          setError(outcome);
+        }
       } catch {
-        setError({ ok: false, detail: "The campaign could not be added. Try again." });
+        returnToTable.current = false;
+        setError({ ok: false, detail: "The selected campaigns could not be added. Try again." });
       } finally {
         inFlight.current = false;
-        setSaving(null);
       }
     });
   }
@@ -96,7 +99,7 @@ function CampaignSelector({ group, campaigns, gate, blockedReason, trigger, clos
           <X size={18} aria-hidden />
         </button>
       </div>
-      <p className="modal-body" id={`${id}-help`}>Select a campaign to add it immediately. Changes take effect from the campaign&apos;s next run.</p>
+      <p className="modal-body" id={`${id}-help`}>Changes take effect on each campaign&apos;s next run.</p>
       {gate.allowed && gate.warning ? <p className="modal-warning">{gate.warning}</p> : null}
       {blockedReason ? <p className="modal-warning" role="status">{blockedReason}</p> : null}
       <label className="modal-label" htmlFor={`${id}-search`}>Search campaigns</label>
@@ -105,11 +108,14 @@ function CampaignSelector({ group, campaigns, gate, blockedReason, trigger, clos
         onChange={(event) => setSearch(event.target.value)} />
       <div className="campaign-group-options" role="group" aria-label="Available campaigns" aria-busy={pending}>
         {matches.map((campaign) => (
-          <button type="button" key={campaign.slug} className="group-campaign-option"
-            disabled={pending || Boolean(blockedReason)} onClick={() => add(campaign.slug)}>
+          <label key={campaign.slug} className="campaign-group-option">
+            <input type="checkbox" checked={selection.includes(campaign.slug)}
+              disabled={pending || Boolean(blockedReason)} onChange={(event) => {
+                const { checked } = event.currentTarget;
+                setSelected(checked ? [...selection, campaign.slug] : selection.filter((slug) => slug !== campaign.slug));
+              }} />
             <span>{campaignTitle(campaign.slug)}{campaign.enabled ? "" : " (off)"}</span>
-            {saving === campaign.slug ? <span role="status">Adding…</span> : <Plus size={15} aria-hidden />}
-          </button>
+          </label>
         ))}
         {matches.length === 0 ? <p className="card-note">{campaigns.length === 0 ? "No more campaigns to add." : "No campaigns match your search."}</p> : null}
       </div>
@@ -119,6 +125,14 @@ function CampaignSelector({ group, campaigns, gate, blockedReason, trigger, clos
           {error.problems?.length ? <ul>{error.problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : null}
         </div>
       ) : null}
+      <div className="modal-actions">
+        {pending ? <span className="sr-only" role="status">Adding selected campaigns…</span> : null}
+        <button type="button" className="btn" disabled={pending} onClick={dismiss}>Cancel</button>
+        <button type="button" className="btn btn-primary"
+          disabled={pending || Boolean(blockedReason) || selection.length === 0} onClick={add}>
+          {pending ? "Adding…" : `Add ${selection.length} selected`}
+        </button>
+      </div>
     </dialog>
   );
 }

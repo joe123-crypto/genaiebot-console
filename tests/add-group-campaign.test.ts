@@ -28,6 +28,8 @@ const campaigns: GroupCampaignOption[] = [
 const props: Parameters<typeof AddGroupCampaign>[0] = { group, campaigns, gate: { allowed: true } };
 const trigger = () => screen.getByRole("button", { name: "Add campaign to Harare Market" }) as HTMLButtonElement;
 const options = () => screen.getByRole("group", { name: "Available campaigns" });
+const borehole = () => within(options()).getByRole("checkbox", { name: "Borehole Drilling" });
+const submit = () => screen.getByRole("button", { name: /^Add \d+ selected$/ }) as HTMLButtonElement;
 
 function mount(overrides: Partial<typeof props> = {}) {
   return render(createElement(AddGroupCampaign, { ...props, ...overrides }));
@@ -46,9 +48,9 @@ describe("AddGroupCampaign", () => {
     mount();
     fireEvent.click(trigger());
     expect(screen.getByRole("dialog").textContent).toContain("Add campaign to Harare Market");
-    expect(within(options()).queryByRole("button", { name: "Fruit Trees" })).toBeNull();
-    expect(within(options()).getByRole("button", { name: "Borehole Drilling" })).toBeTruthy();
-    expect(within(options()).getByRole("button", { name: "Skylight Solar (off)" })).toBeTruthy();
+    expect(within(options()).queryByRole("checkbox", { name: "Fruit Trees" })).toBeNull();
+    expect(within(options()).getByRole("checkbox", { name: "Borehole Drilling" })).toBeTruthy();
+    expect(within(options()).getByRole("checkbox", { name: "Skylight Solar (off)" })).toBeTruthy();
     expect(add).not.toHaveBeenCalled();
   });
 
@@ -58,20 +60,21 @@ describe("AddGroupCampaign", () => {
     const search = screen.getByRole("searchbox", { name: "Search campaigns" });
     for (const query of [" BOREHOLE DRILLING ", "borehole-drilling", "Water supply"]) {
       fireEvent.change(search, { target: { value: query } });
-      expect(within(options()).getAllByRole("button")).toHaveLength(1);
-      expect(within(options()).getByRole("button", { name: "Borehole Drilling" })).toBeTruthy();
+      expect(within(options()).getAllByRole("checkbox")).toHaveLength(1);
+      expect(within(options()).getByRole("checkbox", { name: "Borehole Drilling" })).toBeTruthy();
     }
     fireEvent.change(search, { target: { value: "unknown" } });
     expect(screen.getByText("No campaigns match your search.")).toBeTruthy();
   });
 
-  it("saves a selection immediately and returns focus to the plus button", async () => {
+  it("saves a selection on confirmation and returns focus to the plus button", async () => {
     mount();
     trigger().focus();
     fireEvent.click(trigger());
     expect(document.activeElement).toBe(screen.getByRole("searchbox"));
-    await act(async () => fireEvent.click(within(options()).getByRole("button", { name: "Borehole Drilling" })));
-    expect(add).toHaveBeenCalledWith(group.jid, "borehole-drilling");
+    fireEvent.click(borehole());
+    await act(async () => fireEvent.click(submit()));
+    expect(add).toHaveBeenCalledWith(group.jid, ["borehole-drilling"]);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger());
   });
@@ -94,12 +97,13 @@ describe("AddGroupCampaign", () => {
     add.mockReturnValue(new Promise<WriteOutcome>((done) => { resolve = done; }));
     mount();
     fireEvent.click(trigger());
-    const option = within(options()).getByRole("button", { name: "Borehole Drilling" });
-    fireEvent.click(option);
-    fireEvent.click(option);
+    fireEvent.click(borehole());
+    const save = submit();
+    fireEvent.click(save);
+    fireEvent.click(save);
     expect(add).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status").textContent).toBe("Adding…");
-    expect(within(options()).getAllByRole("button").every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByRole("status").textContent).toBe("Adding selected campaigns…");
+    expect(within(options()).getAllByRole("checkbox").every((button) => (button as HTMLInputElement).disabled)).toBe(true);
     expect((screen.getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Close campaign selector" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
@@ -112,10 +116,12 @@ describe("AddGroupCampaign", () => {
     add.mockResolvedValueOnce({ ok: false, detail: "The bot refused the change.", problems: ["Try again later."] });
     mount();
     fireEvent.click(trigger());
-    await act(async () => fireEvent.click(within(options()).getByRole("button", { name: "Borehole Drilling" })));
+    fireEvent.click(borehole());
+    await act(async () => fireEvent.click(submit()));
     expect(screen.getByRole("alert").textContent).toContain("The bot refused the change.");
     expect(screen.getByRole("alert").textContent).toContain("Try again later.");
-    await act(async () => fireEvent.click(within(options()).getByRole("button", { name: "Borehole Drilling" })));
+    expect((borehole() as HTMLInputElement).checked).toBe(true);
+    await act(async () => fireEvent.click(submit()));
     expect(add).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -124,8 +130,9 @@ describe("AddGroupCampaign", () => {
     add.mockRejectedValueOnce(new Error("Connection lost"));
     mount();
     fireEvent.click(trigger());
-    await act(async () => fireEvent.click(within(options()).getByRole("button", { name: "Borehole Drilling" })));
-    expect(screen.getByRole("alert").textContent).toBe("The campaign could not be added. Try again.");
+    fireEvent.click(borehole());
+    await act(async () => fireEvent.click(submit()));
+    expect(screen.getByRole("alert").textContent).toBe("The selected campaigns could not be added. Try again.");
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
@@ -146,10 +153,10 @@ describe("AddGroupCampaign", () => {
     const view = mount();
     fireEvent.click(trigger());
     view.rerender(createElement(AddGroupCampaign, { ...props, group: { ...group, promos: ["fruit-trees", "borehole-drilling"] } }));
-    expect(within(options()).queryByRole("button", { name: "Borehole Drilling" })).toBeNull();
+    expect(within(options()).queryByRole("checkbox", { name: "Borehole Drilling" })).toBeNull();
     view.rerender(createElement(AddGroupCampaign, { ...props, gate: { allowed: false, reason: "Writes are unavailable." } }));
     expect(screen.getByRole("status").textContent).toBe("Writes are unavailable.");
-    expect(within(options()).getAllByRole("button").every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(within(options()).getAllByRole("checkbox").every((button) => (button as HTMLInputElement).disabled)).toBe(true);
     expect(add).not.toHaveBeenCalled();
   });
 
@@ -169,7 +176,8 @@ describe("Groups table campaign controls", () => {
     };
     const view = render(createElement(GroupsTable, tableProps));
     fireEvent.click(trigger());
-    await act(async () => fireEvent.click(within(options()).getByRole("button", { name: "Borehole Drilling" })));
+    fireEvent.click(borehole());
+    await act(async () => fireEvent.click(submit()));
     view.rerender(createElement(GroupsTable, { ...tableProps, groups: [{ ...emptyGroup, promos: ["borehole-drilling"] }] }));
     expect(screen.queryByRole("button", { name: "Add campaign to Harare Market" })).toBeNull();
     expect(screen.getByText("No group matches these filters.")).toBeTruthy();
@@ -183,7 +191,8 @@ describe("Groups table campaign controls", () => {
     };
     const view = render(createElement(GroupsTable, tableProps));
     fireEvent.click(trigger());
-    await act(async () => fireEvent.click(within(options()).getByRole("button", { name: "Borehole Drilling" })));
+    fireEvent.click(borehole());
+    await act(async () => fireEvent.click(submit()));
     view.rerender(createElement(GroupsTable, {
       ...tableProps, groups: [{ ...group, promos: ["fruit-trees", "borehole-drilling"] }],
     }));

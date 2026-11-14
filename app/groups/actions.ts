@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
 import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, updateGroup, updateGroupBatch } from "@/src/lib/bot-client";
-import { emptyGroupDraft, planAssignmentWrites } from "@/src/lib/campaign-group-draft";
 import { canWrite } from "@/src/lib/write-capabilities";
 import {
   changedGroupFields,
@@ -45,13 +44,14 @@ async function vocabulary(): Promise<{ lines: string[]; tiers: string[] }> {
   };
 }
 
-/** Add one campaign without sending the browser's potentially stale membership list. */
-export async function addGroupCampaignAction(jid: string, slug: string): Promise<WriteOutcome> {
+/** Add campaigns using the group's current membership. */
+export async function addGroupCampaignAction(jid: string, selection: string | string[]): Promise<WriteOutcome> {
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof jid !== "string" || !jid.endsWith("@g.us")) {
     return { ok: false, detail: "No valid group was named." };
   }
-  if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+  const slugs = [...new Set(Array.isArray(selection) ? selection : [selection])];
+  if (slugs.length === 0 || slugs.some((slug) => typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(slug))) {
     return { ok: false, detail: "No valid campaign was named." };
   }
 
@@ -59,33 +59,32 @@ export async function addGroupCampaignAction(jid: string, slug: string): Promise
     const { groups, context } = await getGroups(undefined, { fresh: true, jid });
     // The fresh group read already loads and validates the campaign documents.
     // Reuse that vocabulary instead of looking up the same campaign again.
-    const [writes, campaign] = context
-      ? [context.writes, context.campaigns.find((campaign) => campaign.slug === slug)]
-      : await Promise.all([getCapabilities(), getCampaignState(slug)]);
+    const [writes, knownCampaigns] = context
+      ? [context.writes, context.campaigns]
+      : await Promise.all([getCapabilities(), Promise.all(slugs.map((slug) => getCampaignState(slug)))]);
     const gate = canWrite(WRITES_ENABLED, writes, "groups", "promos");
     if (!gate.allowed) return { ok: false, detail: gate.reason };
-    if (!campaign) {
+    const knownSlugs = new Set(knownCampaigns.map((campaign) => campaign?.slug));
+    if (slugs.some((slug) => !knownSlugs.has(slug))) {
       return { ok: false, detail: "This campaign is no longer on record." };
     }
 
-    const plan = planAssignmentWrites(slug, { ...emptyGroupDraft(), added: [jid] }, groups);
-    if (plan.failures.length > 0) return { ok: false, detail: plan.failures[0].detail };
-    if (plan.writes.length > 0) {
-      const current = groups.find((group) => group.jid === jid)!;
-      const result = await updateGroupBatch(plan.writes.map((write) => ({
-        id: write.jid, fields: write.fields, expected: { promos: current.promos },
-      })), { by: OPERATOR_NAME });
-      if (result) {
-        refresh();
-        revalidatePath(`/campaigns/${slug}`);
-        revalidatePath("/campaigns");
-        return { ok: true };
+    const current = groups.find((group) => group.jid === jid);
+    if (!current) return { ok: false, detail: "This group is no longer on record." };
+    const additions = slugs.filter((slug) => !current.promos.includes(slug));
+    if (additions.length > 0) {
+      if (current.status !== "active") {
+        return { ok: false, detail: `This group is ${current.status}, so it cannot be added to a campaign.` };
       }
-    }
-    // Compatibility only: older bots do not support transactional batches.
-    for (const write of plan.writes) {
-      await updateGroup(write.jid, write.fields, { by: OPERATOR_NAME, dryRun: true });
-      await updateGroup(write.jid, write.fields, { by: OPERATOR_NAME });
+      const fields = { promos: [...current.promos, ...additions] };
+      const result = await updateGroupBatch([{
+        id: jid, fields, expected: { promos: current.promos },
+      }], { by: OPERATOR_NAME });
+      if (!result) {
+        // Older bots support a single group write with a separate dry run.
+        await updateGroup(jid, fields, { by: OPERATOR_NAME, dryRun: true });
+        await updateGroup(jid, fields, { by: OPERATOR_NAME });
+      }
     }
   } catch (error) {
     return failedWrite(error);
@@ -93,7 +92,7 @@ export async function addGroupCampaignAction(jid: string, slug: string): Promise
 
   // Refresh even if another operator already added it, so the row catches up.
   refresh();
-  revalidatePath(`/campaigns/${slug}`);
+  for (const slug of slugs) revalidatePath(`/campaigns/${slug}`);
   revalidatePath("/campaigns");
   return { ok: true };
 }

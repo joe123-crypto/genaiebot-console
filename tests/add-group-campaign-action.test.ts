@@ -128,6 +128,32 @@ describe("addGroupCampaignAction", () => {
     expect(getGroups).toHaveBeenCalledExactlyOnceWith(undefined, { fresh: true, jid });
   });
 
+  it("adds multiple campaigns in one write and refreshes every selected campaign", async () => {
+    const add = await loadAction();
+    const secondSlug = "web-design";
+    getGroups.mockResolvedValue({ groups: [group()], context: {
+      writes: capabilities, campaigns: [{ slug }, { slug: secondSlug }, { slug: "borehole-drilling" }],
+    } });
+    updateGroupBatch.mockResolvedValue({ done: [jid], changed: 1 });
+
+    expect(await add(jid, [slug, secondSlug, slug, "borehole-drilling"])).toEqual({ ok: true });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
+      id: jid,
+      fields: { promos: ["borehole-drilling", slug, secondSlug] },
+      expected: { promos: ["borehole-drilling"] },
+    }], { by: "Joseph" });
+    expect(updateGroup).not.toHaveBeenCalled();
+    expect(revalidate).toHaveBeenCalledWith(`/campaigns/${slug}`);
+    expect(revalidate).toHaveBeenCalledWith(`/campaigns/${secondSlug}`);
+  });
+
+  it("refuses the entire selection when a campaign is missing", async () => {
+    const add = await loadAction();
+    expect(await add(jid, [slug, "missing"])).toEqual({ ok: false, detail: "This campaign is no longer on record." });
+    expect(updateGroupBatch).not.toHaveBeenCalled();
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
   it("never falls back to another write after an uncertain batch failure", async () => {
     const add = await loadAction();
     const { BotUnavailableError } = await import("@/src/lib/bot-client");
