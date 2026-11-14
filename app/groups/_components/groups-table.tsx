@@ -136,9 +136,10 @@ export function GroupsTable({
     <div className="card">
       {editorDeleted && editingGroup ? <p role="alert">This group no longer exists. Your open draft is retained.</p> : null}
       {assignmentError ? <p role="alert">{assignmentError}</p> : null}
-      {campaignGroup ? <PaginatedPicker kind="campaigns" multiple={false} exclude={campaignGroup.promos} close={() => setCampaignGroup(null)} choose={async ([row]) => {
-        const result = await addGroupCampaignAction(campaignGroup.jid, row.id);
-        if (result.ok) { setCampaignGroup(null); notifyLiveChange(); } else setAssignmentError(result.detail);
+      {campaignGroup ? <PaginatedPicker kind="campaigns" exclude={campaignGroup.promos} close={() => setCampaignGroup(null)} choose={async (rows) => {
+        const result = await addGroupCampaignAction(campaignGroup.jid, rows.map((row) => row.id));
+        if (result.ok) notifyLiveChange();
+        return result;
       }} /> : null}
       {editingGroup ? <EditGroup key={editingGroup.jid} group={editingGroup} label={confirmLabel(editingGroup)}
         lines={editing.lines} tiers={editing.tiers} editable={editing.editableFields} gate={editorDeleted ? { allowed: false, reason: "This group no longer exists. Your draft is retained." } : editing.edit}
@@ -320,7 +321,8 @@ export function GroupsTable({
                           </span>
                         );
                       })}
-                      {writesEnabled ? remote ? <button className="row-action" aria-label={`Add campaign to ${confirmLabel(group)}`}
+                      {writesEnabled ? remote ? <button type="button" className="row-action"
+                        aria-label={`Add campaign to ${confirmLabel(group)}`} aria-haspopup="dialog"
                         disabled={!campaignGate.allowed || group.status !== "active"} onClick={() => setCampaignGroup(group)}>+</button>
                         : <AddGroupCampaign group={group} campaigns={campaigns} gate={campaignGate} /> : null}
                     </div>
