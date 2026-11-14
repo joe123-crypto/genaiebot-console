@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SyncNotice, useLivePage } from "./live-page";
 import { LoadMore, useDebounced } from "./use-live";
 import { plural } from "@/src/lib/format";
@@ -14,9 +14,10 @@ function activeCampaignLabel(group: Group, enabledCampaigns: Set<string> | undef
   return plural(count, "active campaign");
 }
 
-export function PaginatedPicker({ kind, exclude = [], close, choose }: {
+export function PaginatedPicker({ kind, exclude = [], close, choose, children }: {
   kind: "groups" | "campaigns"; exclude?: string[]; close: () => void;
   choose: (rows: PickerChoice[]) => void | Promise<WriteOutcome>;
+  children?: ReactNode;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -76,7 +77,9 @@ export function PaginatedPicker({ kind, exclude = [], close, choose }: {
   }
 
   return <dialog ref={dialog} className="campaign-group-dialog" aria-label={`Choose ${kind}`} onCancel={event => { event.preventDefault(); dismiss(); }}>
-    <div ref={root}><h2 className="modal-title">Choose {kind}</h2><label className="modal-label" htmlFor={`picker-${kind}`}>Search {kind}</label>
+    <div ref={root}><h2 className="modal-title">Choose {kind}</h2>
+      {children}
+      <label className="modal-label" htmlFor={`picker-${kind}`}>Search {kind}</label>
       <input ref={input} id={`picker-${kind}`} className="modal-input" type="search" value={search} disabled={saving} onChange={event => setSearch(event.target.value)} />
       <SyncNotice sync={data.page?.sync} error={data.error} />
       <div className="campaign-group-options" role="group" aria-label={`Available ${kind}`} aria-busy={saving}>

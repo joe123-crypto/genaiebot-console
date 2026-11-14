@@ -2,17 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
-import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, updateGroup, updateGroupBatch } from "@/src/lib/bot-client";
+import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, updateGroup, updateGroupBatch, type GroupBatchChange } from "@/src/lib/bot-client";
 import { canWrite } from "@/src/lib/write-capabilities";
 import {
   changedGroupFields,
   currentGroupValues,
   groupEditProblems,
+  MAX_GROUPS_PER_ASSIGNMENT,
   newGroupFromDiscovered,
   type GroupEdit,
   type GroupEditField,
 } from "@/src/domains/group-edit";
 import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
+import { confirmLabel } from "@/src/lib/format";
 import type { Group } from "@/src/lib/types";
 
 /**
@@ -46,54 +48,108 @@ async function vocabulary(): Promise<{ lines: string[]; tiers: string[] }> {
 
 /** Add campaigns using the group's current membership. */
 export async function addGroupCampaignAction(jid: string, selection: string | string[]): Promise<WriteOutcome> {
+  return assignGroupCampaigns([jid], Array.isArray(selection) ? selection : [selection], false);
+}
+
+type GroupAssignmentOutcome = WriteOutcome & { refreshLive?: boolean };
+
+/** Add each selected campaign to each selected group. */
+export async function addGroupCampaignsAction(jids: string[], slugs: string[]): Promise<GroupAssignmentOutcome> {
+  return assignGroupCampaigns(jids, slugs, true);
+}
+
+async function assignGroupCampaigns(
+  groupIds: string[], campaignIds: string[], bulk: boolean,
+): Promise<GroupAssignmentOutcome> {
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
-  if (typeof jid !== "string" || !jid.endsWith("@g.us")) {
+  if (!Array.isArray(groupIds) || groupIds.length === 0 ||
+    groupIds.some((jid) => typeof jid !== "string" || !/^\d+(?:-\d+)?@g\.us$/.test(jid))) {
     return { ok: false, detail: "No valid group was named." };
   }
-  const slugs = [...new Set(Array.isArray(selection) ? selection : [selection])];
-  if (slugs.length === 0 || slugs.some((slug) => typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(slug))) {
+  const jids = [...new Set(groupIds)];
+  if (jids.length > MAX_GROUPS_PER_ASSIGNMENT) {
+    return { ok: false, detail: `Select up to ${MAX_GROUPS_PER_ASSIGNMENT} groups at a time.` };
+  }
+  if (!Array.isArray(campaignIds) || campaignIds.length === 0 ||
+    campaignIds.some((slug) => typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(slug))) {
     return { ok: false, detail: "No valid campaign was named." };
   }
+  const slugs = [...new Set(campaignIds)];
+  const by = OPERATOR_NAME;
+  const refreshAssignments = () => {
+    refresh();
+    for (const slug of slugs) revalidatePath(`/campaigns/${slug}`);
+    revalidatePath("/campaigns");
+  };
 
+  let attemptedWrite = false;
+  let legacyProgress: { confirmed: number; jid: string } | undefined;
   try {
-    const { groups, context } = await getGroups(undefined, { fresh: true, jid });
+    const { groups, context } = await getGroups(undefined, bulk ? { fresh: true, jids } : { fresh: true, jid: jids[0] });
     // The fresh group read already loads and validates the campaign documents.
     // Reuse that vocabulary instead of looking up the same campaign again.
     const [writes, knownCampaigns] = context
       ? [context.writes, context.campaigns]
-      : await Promise.all([getCapabilities(), Promise.all(slugs.map((slug) => getCampaignState(slug)))]);
+      : await Promise.all([
+        getCapabilities({ fresh: true }),
+        Promise.all(slugs.map((slug) => getCampaignState(slug, { fresh: true }))),
+      ]);
     const gate = canWrite(WRITES_ENABLED, writes, "groups", "promos");
     if (!gate.allowed) return { ok: false, detail: gate.reason };
     const knownSlugs = new Set(knownCampaigns.map((campaign) => campaign?.slug));
-    if (slugs.some((slug) => !knownSlugs.has(slug))) {
-      return { ok: false, detail: "This campaign is no longer on record." };
+    const missingCampaign = slugs.find((slug) => !knownSlugs.has(slug));
+    if (missingCampaign) {
+      return { ok: false, detail: bulk ? `Campaign ${missingCampaign} is no longer on record.` : "This campaign is no longer on record." };
     }
 
-    const current = groups.find((group) => group.jid === jid);
-    if (!current) return { ok: false, detail: "This group is no longer on record." };
-    const additions = slugs.filter((slug) => !current.promos.includes(slug));
-    if (additions.length > 0) {
-      if (current.status !== "active") {
-        return { ok: false, detail: `This group is ${current.status}, so it cannot be added to a campaign.` };
+    const byId = new Map(groups.map((group) => [group.jid, group]));
+    const changes: GroupBatchChange[] = [];
+    for (const jid of jids) {
+      const current = byId.get(jid);
+      if (!current) {
+        return { ok: false, detail: bulk ? `Group ${jid} is no longer on record.` : "This group is no longer on record." };
       }
-      const fields = { promos: [...current.promos, ...additions] };
-      const result = await updateGroupBatch([{
-        id: jid, fields, expected: { promos: current.promos },
-      }], { by: OPERATOR_NAME });
-      if (!result) {
-        // Older bots support a single group write with a separate dry run.
-        await updateGroup(jid, fields, { by: OPERATOR_NAME, dryRun: true });
-        await updateGroup(jid, fields, { by: OPERATOR_NAME });
+      const additions = slugs.filter((slug) => !current.promos.includes(slug));
+      if (current.status !== "active" && (bulk || additions.length > 0)) {
+        const label = bulk ? `${confirmLabel(current)} (${jid})` : "This group";
+        return { ok: false, detail: `${label} is ${current.status}, so it cannot be added to a campaign.` };
+      }
+      if (additions.length > 0) {
+        changes.push({ id: jid, fields: { promos: [...current.promos, ...additions] }, expected: { promos: current.promos } });
+      }
+    }
+
+    if (changes.length > 0) {
+      attemptedWrite = true;
+      if (!await updateGroupBatch(changes, { by })) {
+        attemptedWrite = false;
+        for (const { id, fields } of changes) {
+          await updateGroup(id, fields, { by, dryRun: true });
+        }
+        let confirmed = jids.length - changes.length;
+        for (const { id, fields } of changes) {
+          legacyProgress = { confirmed, jid: id };
+          attemptedWrite = true;
+          await updateGroup(id, fields, { by });
+          confirmed += 1;
+        }
       }
     }
   } catch (error) {
-    return failedWrite(error);
+    if (bulk && attemptedWrite) refreshAssignments();
+    const outcome = failedWrite(error);
+    if (!bulk || !attemptedWrite || outcome.ok) return outcome;
+    return {
+      ...outcome,
+      refreshLive: true,
+      detail: legacyProgress
+        ? `Confirmed assignments for ${legacyProgress.confirmed} of ${jids.length} groups. Stopped at ${legacyProgress.jid}. ${outcome.detail}`
+        : outcome.detail,
+    };
   }
 
   // Refresh even if another operator already added it, so the row catches up.
-  refresh();
-  for (const slug of slugs) revalidatePath(`/campaigns/${slug}`);
-  revalidatePath("/campaigns");
+  refreshAssignments();
   return { ok: true };
 }
 
