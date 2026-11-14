@@ -503,7 +503,10 @@ than an incorrect zero. Deploying console code alone cannot restore previews fro
 an older bot that omits their metadata.
 
 For an existing bot with the previous live-view patch already applied, apply
-only `genaebot-campaign-previews.patch`:
+only `genaebot-campaign-previews.patch`. It is regenerated against genaebot
+`60acf63` and touches the display index, the live API and their tests alone: the
+`include_assets` plumbing it used to carry through `console-read` and
+`console_campaigns.records` has since landed on main in its own right.
 
 ```bash
 git apply --check /path/to/genaiebot_console/integrations/genaebot-campaign-previews.patch
