@@ -188,6 +188,11 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
             </section>
           ))}
           <div className="customer-bot-actions">
+            {!reviewing && dirty && !checking && <button type="button" className="btn" disabled={pending} onClick={() => {
+              setDraft(freshDraft(live));
+              setRestored(false);
+              setFeedback(null);
+            }}>Discard draft</button>}
             {reviewing && <button type="button" className="btn" disabled={pending} onClick={() => setReviewing(false)}>Continue editing</button>}
             {checking ? <button type="button" className="btn btn-primary" disabled={pending} onClick={checkLive}>{pending ? "Checking…" : "Check live version"}</button>
               : conflict ? <button type="button" className="btn btn-primary" disabled={locked} onClick={useLatestAsBase}>Use latest as base</button>
