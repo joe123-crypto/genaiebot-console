@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { campaignCreateError, campaignDraftError, campaignSlug, uploadError, type NewCampaign } from "@/src/domains/campaign-create";
+import { CAMPAIGN_IMAGE_NAME_MAX, campaignCreateError, campaignDraftError, campaignImageFilename, campaignSlug, uploadError, type NewCampaign } from "@/src/domains/campaign-create";
 import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { daySlots, clashes } from "@/src/domains/schedule";
 import { campaign } from "./fixtures/campaign-detail";
@@ -31,6 +31,24 @@ describe("campaign creation", () => {
     expect(uploadError({ ...image, contentType: "image/webp" }, "demo")).toBeTruthy();
     expect(uploadError(image, "other")).toBeTruthy();
     expect(campaignCreateError({ ...input, images: [image, image] })).toBeTruthy();
+  });
+  it("keeps a picture name short enough for the bot to cache it", () => {
+    // The name that broke borehole-drilling-2: the bot caches
+    // "<digest>-<filename>" in one path component, and this one took the whole
+    // path past 255 bytes, so every send died before posting anything.
+    const advert = "Borehole-Drilling---Solar-Installation_-Complete-Water-and-Power-Solutions-for-Zimbabwe-Businesses--------__Are-you-ready-to-transition-to-complete-utility-independence_-Whether-it-s-for-your-home--farm--or-commercial-property--ge.jpeg";
+    const sha = "a".repeat(64);
+    const fitted = campaignImageFilename(advert, sha, "image/jpeg");
+    expect(fitted.length).toBeLessThanOrEqual(CAMPAIGN_IMAGE_NAME_MAX);
+    expect(fitted.startsWith("Borehole-Drilling")).toBe(true);
+    expect(fitted.endsWith(".jpg")).toBe(true);
+    const input = validCampaign(), image = input.images[0];
+    expect(uploadError({ ...image, filename: fitted }, "demo")).toBeUndefined();
+    expect(uploadError({ ...image, filename: advert }, "demo")).toBeTruthy();
+    // A usable name is still the operator's own, and an unusable one still
+    // falls back to the digest rather than being trimmed into nonsense.
+    expect(campaignImageFilename("borehole.JPEG", sha, "image/jpeg")).toBe("borehole.jpeg");
+    expect(campaignImageFilename("...", sha, "image/png")).toBe(`image-${sha.slice(0, 12)}.png`);
   });
   it("gates on all bot capabilities and live config", () => {
     const writes = { enabled: true, affectsProduction: true, fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true } };

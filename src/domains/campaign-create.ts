@@ -2,6 +2,13 @@ import type { Tracking } from "@/src/lib/types";
 
 export const CAMPAIGN_IMAGE_BYTES = 6 * 1024 * 1024;
 export const CAMPAIGN_IMAGE_ACCEPT = "image/jpeg,image/png";
+/** The bot caches a picture as `<64-char digest>-<filename>` in one path
+ *  component and writes it through a `.<pid>.<hex>.tmp` sibling, so a filename
+ *  long enough to push that past the filesystem's 255-byte limit makes every
+ *  send of the campaign fail before it posts anything -- which is what a
+ *  picture named after its whole advert once did. This leaves ~70 bytes spare
+ *  and still reads as a name in the bot's run log. */
+export const CAMPAIGN_IMAGE_NAME_MAX = 96;
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 export const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 export const CAMPAIGN_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -25,6 +32,22 @@ export type CreateCampaignOutcome = ({ ok: true } & CreateCampaignResult) | {
   /** Unknown outcomes must be recovered using the exact submitted payload. */
   outcome: "not-created" | "unknown";
 };
+/** The stored name for an uploaded picture: the operator's own filename where
+ *  it is usable, else one built from the digest. Shared with the create form so
+ *  what it uploads is exactly what `uploadError` accepts. */
+export function campaignImageFilename(name: string, sha256: string, contentType: CampaignImageUpload["contentType"]) {
+  const extension = contentType === "image/png" ? "png" : "jpg";
+  const safe = name.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^[^A-Za-z0-9]+/, "")
+    .replace(/\.(jpg|jpeg|png)$/i, (suffix) => suffix.toLowerCase());
+  // Room for the extension is taken off the cut, not added back after it, so a
+  // trimmed name still fits the budget rather than overshooting it and falling
+  // back to the digest.
+  const fitted = safe.length > CAMPAIGN_IMAGE_NAME_MAX
+    ? `${safe.slice(0, CAMPAIGN_IMAGE_NAME_MAX - extension.length - 1).replace(/[.\-_]+$/, "")}.${extension}`
+    : safe;
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png)$/.test(fitted) && fitted.length <= CAMPAIGN_IMAGE_NAME_MAX
+    ? fitted : `image-${sha256.slice(0, 12)}.${extension}`;
+}
 export function campaignSlug(name: string) {
   const slug = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64).replace(/-$/, "");
@@ -40,6 +63,7 @@ export function uploadError(value: unknown, slug: string): string | undefined {
   if (!["image/jpeg", "image/png"].includes(image.contentType)) return "Pictures must be JPEG or PNG.";
   if (!Number.isInteger(image.bytes) || image.bytes <= 0 || image.bytes > CAMPAIGN_IMAGE_BYTES) return "Each picture must be between 1 byte and 6 MiB.";
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png)$/i.test(image.filename)) return "Picture filenames must use letters, numbers, dots, dashes or underscores and end in .jpg or .png.";
+  if (image.filename.length > CAMPAIGN_IMAGE_NAME_MAX) return `Picture filenames must be at most ${CAMPAIGN_IMAGE_NAME_MAX} characters, so the bot can cache the picture.`;
   if (!/^[a-f0-9]{64}$/.test(image.sha256)) return "The picture checksum is invalid.";
   const extension = image.contentType === "image/png" ? "png" : "jpg";
   if (image.key !== `ads/${slug}/${image.sha256}.${extension}`) return "The picture does not belong to this campaign.";
