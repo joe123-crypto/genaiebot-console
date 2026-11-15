@@ -793,6 +793,26 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
 .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
+.customer-bot, .customer-bot-review { display: grid; gap: 14px; }
+.customer-bot-status, .customer-bot-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.customer-bot-status { justify-content: space-between; }
+.customer-bot-actions { justify-content: flex-end; }
+.customer-bot textarea, .customer-bot-compare pre {
+  width: 100%; padding: 12px; margin: 6px 0 0; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--surface-muted); color: var(--text);
+  font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.customer-bot textarea { display: block; min-height: 148px; resize: vertical; }
+.customer-bot textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.customer-bot-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 10px; }
+.customer-bot-compare pre { max-height: 360px; overflow: auto; }
+.customer-bot-compare mark { background: var(--primary-soft); color: inherit; }
+.customer-bot-error { margin: 0; color: var(--danger); }
+.customer-bot textarea + .customer-bot-error { margin-top: 6px; }
+.customer-bot-conflict { display: block; }
+.customer-bot-review > h2, .customer-bot-review > p, .customer-bot-conflict > p { margin: 0; }
+@media (max-width: 680px) { .customer-bot-compare { grid-template-columns: minmax(0, 1fr); } }
+
 .campaign-images { margin-bottom: 16px; }
 .campaign-images .caption-feedback .cell-mono { overflow-wrap: anywhere; }
 .campaign-image-actions { display: flex; gap: 8px; flex-wrap: wrap; }

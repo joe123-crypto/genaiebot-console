@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import {
+  Bot,
   House,
   Megaphone,
   MessageCircle,
@@ -18,6 +19,7 @@ const items: ReadonlyArray<{ href: string; label: string; icon: LucideIcon }> = 
   { href: "/", label: "Home", icon: House },
   { href: "/groups", label: "Groups", icon: Users },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
+  { href: "/customer-bot", label: "Customer Bot", icon: Bot },
   { href: "/lines", label: "WhatsApp Lines", icon: MessageCircle },
   { href: "/activity", label: "Activity", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: SlidersHorizontal },

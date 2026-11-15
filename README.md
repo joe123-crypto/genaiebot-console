@@ -89,6 +89,7 @@ npm run build
 | Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
 | Campaigns | Live. Searchable and filterable, with New campaign creation when the companion bot support is deployed. Each row can switch its campaign off and on. |
 | Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
+| Customer Bot | Review and publish the public WhatsApp bot's reply instructions and business knowledge. Requires the companion bot API update. |
 | Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
@@ -154,6 +155,21 @@ See [`integrations/README.md`](integrations/README.md) for its base revision,
 installation and verification. Until a bot with it is deployed, the bot does not
 list `captions` among its editable fields, so **Save changes** stays disabled with
 that reason and the editor works as a draft.
+
+## Editing the Customer Bot
+
+Open **Customer Bot** to edit the current reply instructions and the business
+knowledge document for public WhatsApp conversations. Drafts stay in the
+current browser tab. **Review changes** compares the two versions, and
+**Publish to WhatsApp bot** applies both editors together. The next eligible
+reply uses the new version, even in a chat that was already open. This page
+does not change campaign captions, the console caption assistant, borehole
+quote data, or CV payments.
+
+Deploy the companion bot support first (see [integration notes](integrations/README.md#customer-bot-instructions-and-knowledge)).
+The page uses the live bot API configured by `BOT_API_BASE_URL` and
+`BOT_API_TOKEN`, even when the console runs locally. The existing
+`CONSOLE_WRITES=1` switch enables publishing.
 
 ## Searching and filtering a list
 
