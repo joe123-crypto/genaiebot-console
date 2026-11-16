@@ -50,7 +50,8 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
       removeGate={writable ? canAct(writable, context?.actions, "removeDiscovery") : undefined} />
     <LoadMore next={discovery.page?.nextCursor} loading={discovery.loading} load={discovery.loadMore} />
     <GroupsTable groups={groups.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
-      disabledPromos={groups.page?.disabledPromos ?? []} writesEnabled={writable} editing={editing}
+      disabledPromos={groups.page?.disabledPromos ?? []} rotates={context?.capSettings?.rotation ?? true}
+      writesEnabled={writable} editing={editing}
       campaigns={groups.page?.facets?.campaigns ?? []} campaignGate={canWrite(writable, context?.writes, "groups", "promos")}
       removeGate={canWrite(writable, context?.writes, "groups", "promos", "paused_promos", "weekly")}
       scheduleGate={canWrite(writable, context?.writes, "groups", "promos", "weekly")}

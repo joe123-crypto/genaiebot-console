@@ -40,6 +40,10 @@ export default async function SettingsPage() {
         <CapSettingsForm
           settings={capSettings}
           gate={canWrite(WRITES_ENABLED, writes, "settings", "caps_enabled", "activity", "bands")}
+          /* Gated on its own: a bot that predates the rotation switch refuses
+             the field by name, and that must disable one checkbox rather than
+             the whole form. */
+          rotationGate={canWrite(WRITES_ENABLED, writes, "settings", "rotation_enabled")}
         />
       ) : (
         <Empty>This bot predates cap settings in the console. Deploy a newer genaebot to see and change them here.</Empty>

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  botDayLabel,
   campaignLabel,
   campaignTitle,
   clockLabel,
+  heldBackLabel,
   confirmLabel,
   minutesOfDay,
   plural,
@@ -118,5 +120,48 @@ describe("clockLabel", () => {
 
   it("rounds a fractional finish to the minute", () => {
     expect(clockLabel(65.6)).toBe("01:06");
+  });
+});
+
+describe("botDayLabel", () => {
+  it("names the bot's own day, not the reader's", () => {
+    expect(botDayLabel("2026-11-17")).toBe("Tue 17 Nov");
+    expect(botDayLabel("2026-01-01")).toBe("Thu 1 Jan");
+  });
+
+  it("does not slide a day for a reader west of the bot", () => {
+    // Formatted off the string's parts. Through a local `Date` this would read
+    // as the 16th in Harare and name the day before the advert goes out.
+    const tz = process.env.TZ;
+    process.env.TZ = "Pacific/Honolulu";
+    try {
+      expect(botDayLabel("2026-11-17")).toBe("Tue 17 Nov");
+    } finally {
+      process.env.TZ = tz;
+    }
+  });
+
+  it("returns null for anything that is not a bot day", () => {
+    for (const bad of ["", "tomorrow", "17-11-2026", "2026-11", "2026-13-40x"]) {
+      expect(botDayLabel(bad)).toBeNull();
+    }
+  });
+});
+
+describe("heldBackLabel", () => {
+  it("says when the campaign next posts", () => {
+    expect(heldBackLabel({ nextDay: "2026-11-17", rotates: true }))
+      .toBe("held back by today's cap — next posts Tue 17 Nov");
+  });
+
+  it("names the behaviour when the bot sends no day", () => {
+    expect(heldBackLabel({ rotates: true }))
+      .toBe("held back by today's cap — campaigns take turns");
+  });
+
+  it("says the campaign keeps waiting when turns are off", () => {
+    // Even with a day left over from a previous read, off means off.
+    expect(heldBackLabel({ nextDay: "2026-11-17", rotates: false }))
+      .toBe("held back by today's cap — turns are off, so this campaign always sits out");
   });
 });

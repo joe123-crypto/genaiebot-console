@@ -95,6 +95,41 @@ export function timelineClockLabel(minutes: number) {
   return `${clockLabel(whole % 1440)}${days > 0 ? ` (+${days} day${days === 1 ? "" : "s"})` : ""}`;
 }
 
+/** A bot calendar day (`YYYY-MM-DD`) as "Tue 17 Nov".
+ *
+ *  Formatted off the string's own parts rather than through a `Date`, which
+ *  would be read in the viewer's zone and could name the day before. The
+ *  rotation's days are the bot's, and an operator reading the console from
+ *  another clock still has to see the day the advert goes out. */
+export function botDayLabel(day: string): string | null {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day.trim());
+  if (!parts) return null;
+  const [, year, month, date] = parts;
+  const at = new Date(Date.UTC(Number(year), Number(month) - 1, Number(date)));
+  if (Number.isNaN(at.getTime())) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC", weekday: "short", day: "numeric", month: "short",
+  }).format(at);
+}
+
+/**
+ * Why a campaign assigned to a group is not posting there today, in a few
+ * words -- or null when it is.
+ *
+ * Three different things make a chip look inactive and an operator has to be
+ * able to tell them apart: a campaign switched off everywhere, one paused for
+ * this group, and one that is simply not this group's turn today. Only the last
+ * comes back on its own, which is the whole point of saying when.
+ */
+export function heldBackLabel(
+  { nextDay, rotates }: { nextDay?: string; rotates: boolean },
+): string {
+  const held = "held back by today's cap";
+  if (!rotates) return `${held} — turns are off, so this campaign always sits out`;
+  const when = nextDay ? botDayLabel(nextDay) : null;
+  return when ? `${held} — next posts ${when}` : `${held} — campaigns take turns`;
+}
+
 /**
  * Why a declared campaign is not posting, in a few words -- or null when it is.
  * Two switches decide it: the operator's own (in Firestore) and whether a cron

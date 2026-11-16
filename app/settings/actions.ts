@@ -24,10 +24,12 @@ import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/wri
 export async function saveCapSettingsAction(draft: CapDraft, expected: Required<CapChange>): Promise<WriteOutcome> {
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (!draft || typeof draft !== "object" || typeof draft.enabled !== "boolean" ||
+      typeof draft.rotation !== "boolean" ||
       typeof draft.defaultActivity !== "string" || !draft.bands || typeof draft.bands !== "object" ||
       Object.values(draft.bands).some((pair) => !Array.isArray(pair) || pair.length !== 2 ||
         pair.some((value) => typeof value !== "string")) ||
       !expected || typeof expected !== "object" || typeof expected.caps_enabled !== "boolean" ||
+      typeof expected.rotation_enabled !== "boolean" ||
       typeof expected.activity !== "string" || !expected.bands || typeof expected.bands !== "object" ||
       JSON.stringify(Object.keys(expected.bands).sort()) !== JSON.stringify(Object.keys(draft.bands).sort())) {
     return { ok: false, detail: "The change could not be read." };
@@ -45,7 +47,12 @@ export async function saveCapSettingsAction(draft: CapDraft, expected: Required<
     // What the operator changed is measured against what the form loaded, not
     // against the bot's settings now: a field they never touched must not look
     // edited just because someone else has since changed it.
-    const loaded = { enabled: expected.caps_enabled, defaultActivity: expected.activity, bands: expected.bands };
+    const loaded = {
+      enabled: expected.caps_enabled,
+      rotation: expected.rotation_enabled,
+      defaultActivity: expected.activity,
+      bands: expected.bands,
+    };
     const change = capChange(draft, loaded);
     const fields = Object.keys(change) as (keyof CapChange)[];
     if (fields.length === 0) return { ok: true };

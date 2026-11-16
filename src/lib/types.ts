@@ -33,8 +33,23 @@ export type Group = {
   cap: number | null;
   replyScore: number | null;
   allowedToday: string[];
+  /** How the group's allowance is shared out, present only when its cap holds
+   *  a campaign back. Absent from an older bot, which leaves the screen saying
+   *  a campaign is held back today without saying when it returns. */
+  rotation?: GroupRotation | null;
   /** Absent on bot versions before group telemetry. */
   metrics?: GroupMetrics;
+};
+
+/** The rotation behind a capped group's chips: how long one full turn takes,
+ *  and, for each campaign held back today, the next day it posts.
+ *
+ *  `nextDay` is empty when the operator has switched the rotation off -- then
+ *  the campaigns past the cap do not post again until it is switched back on,
+ *  and there is no day to name. */
+export type GroupRotation = {
+  cycleDays: number;
+  nextDay: Record<string, string>;
 };
 
 export type Tracking = {
@@ -236,6 +251,10 @@ export type CampaignDeletion = {
  *  form edits them. */
 export type CapSettings = {
   enabled: boolean;
+  /** Whether a capped group's campaigns take turns. Absent from a bot that
+   *  predates the switch, where they always do -- so every read of this goes
+   *  through `?? true`, never a bare truthiness check. */
+  rotation?: boolean;
   defaultActivity: string;
   bands: Record<string, [number, number]>;
 };
@@ -274,6 +293,11 @@ export type PreviewRow = {
   paused?: boolean;
   sendsToday: boolean;
   allowedToday: string[];
+  /** When this campaign's turn in this group comes round again, for a row the
+   *  cap holds back today. Null when there is no day to name -- it posts today,
+   *  the group is not capped, or turns are off and it never returns. Absent
+   *  from a bot that predates the rotation look-ahead. */
+  nextDay?: string | null;
   weekly: string[];
 };
 

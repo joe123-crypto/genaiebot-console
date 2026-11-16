@@ -12,9 +12,17 @@ import type { CapSettings } from "@/src/lib/types";
 
 export const CAPS_EXPLAINER =
   "Every group gets a daily allowance of adverts. Its tier picks a band, and replies to its adverts move the allowance inside that band. When a group's allowance is smaller than the number of campaigns that target it, the campaigns take turns.";
+export const ROTATION_OFF_NOTE =
+  "With turns off, the same campaigns are held back every day — and they stop posting to that group until this is switched back on.";
 export const NEXT_RUN_NOTE = "Changes apply from each campaign's next run.";
 
-export function CapSettingsForm({ settings, gate }: { settings: CapSettings; gate: WriteGate }) {
+export function CapSettingsForm({ settings, gate, rotationGate }: {
+  settings: CapSettings;
+  gate: WriteGate;
+  /** The rotation switch is a separate field to the bot, so it carries its own
+   *  gate: an older bot refuses it by name while accepting the rest. */
+  rotationGate?: WriteGate;
+}) {
   const [draft, setDraft] = useState<CapDraft>(() => draftFromSettings(settings));
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<{ detail: string; problems?: string[] } | null>(null);
@@ -35,6 +43,7 @@ export function CapSettingsForm({ settings, gate }: { settings: CapSettings; gat
   const change = problems.length === 0 ? capChange(draft, settings) : {};
   const changes = describeCapChange(change, settings);
   const editable = gate.allowed && !pending;
+  const rotationEditable = editable && (rotationGate?.allowed ?? true);
 
   function update(next: Partial<CapDraft>) {
     setDraft((current) => ({ ...current, ...next }));
@@ -78,7 +87,24 @@ export function CapSettingsForm({ settings, gate }: { settings: CapSettings; gat
         </label>
         {!draft.enabled ? (
           <p className="card-note">With caps off, every campaign that targets a group posts there every day.</p>
-        ) : null}
+        ) : (
+          <>
+            {/* Only while caps are on: with them off nothing is ever held back,
+                so there are no turns to take and the control would be inert. */}
+            <label className="cap-settings-switch">
+              <input type="checkbox" checked={draft.rotation} disabled={!rotationEditable}
+                onChange={(event) => update({ rotation: event.target.checked })} />
+              Let a capped group&apos;s campaigns take turns
+            </label>
+            {/* Only when this one field is the thing standing in the way. A
+                form that is read-only altogether has already said so once, and
+                saying it again beside one checkbox suggests a second cause. */}
+            {gate.allowed && rotationGate && !rotationGate.allowed ? (
+              <p className="card-note">{rotationGate.reason}</p>
+            ) : null}
+            {!draft.rotation ? <p className="card-note">{ROTATION_OFF_NOTE}</p> : null}
+          </>
+        )}
 
         <div className="form-field">
           <label className="modal-label" htmlFor="cap-default-tier">Tier for groups without one</label>
