@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { EntryTimeline } from "@/app/schedule/_components/entry-timeline";
@@ -22,6 +22,7 @@ const props = { slots: [basic("alpha", 540), basic("beta", 900)], nowMinutes: 48
 const bar = (name = "Alpha run 1 start time") => screen.getByRole("slider", { name });
 const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 const mount = (over: Partial<ComponentProps<typeof EntryTimeline>> = {}) => render(<EntryTimeline {...props} {...over} />);
+const overlappingSlots = (count: number) => Array.from({ length: count }, (_, index) => basic(`campaign-${index}`, 540 + index * 5));
 const drag = (element: HTMLElement, pixels: number) => {
   fireEvent.pointerDown(element, { button: 0, clientX: 500 });
   fireEvent.pointerMove(element, { clientX: 500 + pixels });
@@ -221,6 +222,53 @@ describe("a bot without entry support", () => {
     expect(screen.getByText("No overlaps.")).toBeDefined();
     fireEvent.keyDown(bar("Beta run 1 start time"), { key: "PageDown" });
     expect(screen.queryByText("No overlaps.")).toBeNull();
+  });
+
+  it("shows all five warnings when there is nothing to expand", () => {
+    const view = mount({ slots: overlappingSlots(6) });
+
+    expect(screen.getAllByText(/can still be sending at/)).toHaveLength(5);
+    expect(view.container.querySelector("summary")).toBeNull();
+  });
+
+  it("discloses the remaining warnings and closes with Escape", () => {
+    mount({ slots: overlappingSlots(9) });
+    const preview = screen.getByText("Two runs on one line could overlap.").parentElement!;
+    const toggle = screen.getByText("Show 3 more").closest("summary")!;
+    const disclosure = toggle.closest("details")!;
+
+    expect(within(preview).getAllByText(/can still be sending at/)).toHaveLength(5);
+    expect(disclosure.open).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(disclosure.open).toBe(true);
+    const extra = screen.getByRole("region", { name: "Additional overlap warnings" });
+    const warnings = within(extra).getAllByText(/can still be sending at/);
+    expect(warnings).toHaveLength(3);
+    expect(warnings[0].textContent).toContain("Campaign 5 can still be sending");
+    expect(warnings[2].textContent).toContain("Campaign 7 can still be sending");
+
+    extra.focus();
+    fireEvent.keyDown(extra, { key: "Escape" });
+    expect(disclosure.open).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("keeps the disclosure open through overlap updates until five warnings remain", () => {
+    const slots = overlappingSlots(9);
+    const view = mount({ slots });
+    fireEvent.click(screen.getByText("Show 3 more").closest("summary")!);
+
+    view.rerender(<EntryTimeline {...props} slots={slots.slice(0, 8)} />);
+    const extra = screen.getByRole("region", { name: "Additional overlap warnings" });
+    expect(extra.closest("details")?.open).toBe(true);
+    expect(within(extra).getAllByText(/can still be sending at/)).toHaveLength(2);
+
+    view.rerender(<EntryTimeline {...props} slots={slots.slice(0, 6)} />);
+    expect(view.container.querySelector("summary")).toBeNull();
+
+    view.rerender(<EntryTimeline {...props} slots={slots} />);
+    expect(screen.getByText("Show 3 more").closest("details")?.open).toBe(false);
   });
 
   it("keeps the counts beside the overlap card in both states", () => {

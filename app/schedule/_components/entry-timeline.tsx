@@ -7,6 +7,7 @@ import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
 import { botMinutes, displayClock, displayTimelineClock, zoneShiftMinutes } from "@/src/lib/timezone";
 import { useDisplayTimezone } from "@/app/_components/timezone-context";
+import { HomeDisclosure } from "@/app/_components/home-disclosure";
 import { CalendarCheck, CalendarOff, CheckCircle2, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
 import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleAction, saveScheduleEntriesAction } from "@/app/schedule/actions";
@@ -15,6 +16,7 @@ import type { ScheduleEntriesRequest, ScheduleEntryChange } from "@/src/lib/type
 const POP_WIDTH = 270;
 /** Rough popover height, only used to decide whether it opens below or above its bar. */
 const POP_ESTIMATE = 180;
+const OVERLAP_PREVIEW_COUNT = 5;
 
 type Draft = { date: string; base: Map<string, string | null>; slots: DaySlot[] };
 const ordered = (slots: DaySlot[]) => [...slots].sort((first, second) => slotKey(first).localeCompare(slotKey(second)));
@@ -60,7 +62,8 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
   const [accepted, setAccepted] = useState<{ base: string; slots: DaySlot[] } | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ key: string; trigger?: HTMLElement } | null>(null);
+  const selected = selection?.key;
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [pasteTime, setPasteTime] = useState("12:00");
@@ -69,6 +72,10 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const [dragging, setDragging] = useState<string | null>(null);
   const saving = useRef(false);
   const panel = useRef<HTMLDivElement>(null);
+  const timelineCard = useRef<HTMLElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const ruler = useRef<HTMLDivElement>(null);
+  const warningCard = useRef<HTMLDivElement>(null);
   const barRefs = useRef(new Map<string, HTMLSpanElement>());
   const drag = useRef<{ key: string; startX: number; minutes: number; width: number; moved: boolean; previous: Draft | null } | null>(null);
   const suppressClick = useRef(false);
@@ -98,6 +105,10 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const runningAt = new Map(running.map((slot) => [slotKey(slot), slot.minutes]));
   const upcoming = nextUp(activeView, nowMinutes);
   const found = clashes(dirty ? view : activeView);
+  const overlapWarnings = found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
+    On the {clash.account} line, {label(clash.current)} can still be sending at {displayTimelineClock(clash.finishes, shift)}, after {label(clash.next)} starts at {shown(clash.next)}.
+  </div>);
+  const moreWarnings = overlapWarnings.slice(OVERLAP_PREVIEW_COUNT);
   const nowOffset = `${nowMinutes / 1440 * 100}%`;
 
   /** A poll that lands mid-draft replaces `serverSlots`, so the page holds it still while
@@ -117,23 +128,72 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   useEffect(() => { editingSignal.current?.(holdPoll); }, [holdPoll]);
   useEffect(() => () => editingSignal.current?.(false), []);
 
-  useEffect(() => { if (selected) panel.current?.focus(); }, [selected]);
-
-  /** Fixed, not absolute: .timeline-scroll clips on both axes, so an in-flow popover is cut off. */
+  const hasMoreWarnings = moreWarnings.length > 0;
   useEffect(() => {
-    if (!selected) { setAnchor(null); return; }
+    const warning = warningCard.current;
+    const timeline = timelineCard.current;
+    if (!hasMoreWarnings || !warning || !timeline) return;
+
+    const measure = () => {
+      const remaining = timeline.getBoundingClientRect().bottom - warning.getBoundingClientRect().bottom;
+      warning.style.setProperty("--overlap-available-height", `${Math.max(0, remaining)}px`);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(warning);
+    observer?.observe(timeline);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      warning.style.removeProperty("--overlap-available-height");
+    };
+  }, [hasMoreWarnings]);
+
+  useEffect(() => { if (selection) panel.current?.focus({ preventScroll: true }); }, [selection]);
+
+  /** The fixed panel can follow its trigger without being clipped by the scroll area. */
+  useEffect(() => {
+    if (!selection) { setAnchor(null); return; }
+    const scrollArea = scroller.current;
+    const trigger = selection.trigger ?? barRefs.current.get(selection.key);
+    const options = panel.current;
+    if (!scrollArea || !trigger || !options) return;
+
     const place = () => {
-      const rect = barRefs.current.get(selected)?.getBoundingClientRect();
-      if (!rect) return;
-      const left = Math.max(12, Math.min(rect.left, window.innerWidth - POP_WIDTH - 12));
+      const rect = trigger.getBoundingClientRect();
+      const width = options.offsetWidth || POP_WIDTH;
+      const height = options.offsetHeight || POP_ESTIMATE;
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
       const below = rect.bottom + 8;
-      setAnchor({ left, top: below + POP_ESTIMATE > window.innerHeight ? Math.max(12, rect.top - POP_ESTIMATE - 8) : below });
+      const preferredTop = below + height + 12 <= window.innerHeight ? below : rect.top - height - 8;
+      const top = Math.max(12, Math.min(preferredTop, window.innerHeight - height - 12));
+      setAnchor({ left, top });
+    };
+    const followScroll = () => {
+      const viewport = scrollArea.getBoundingClientRect();
+      const rect = trigger.getBoundingClientRect();
+      const top = Math.max(viewport.top, ruler.current?.getBoundingClientRect().bottom ?? viewport.top);
+      if (rect.bottom <= top || rect.top >= viewport.bottom || rect.right <= viewport.left || rect.left >= viewport.right) {
+        if (options.contains(document.activeElement)) scrollArea.focus({ preventScroll: true });
+        setSelection(null);
+        setConfirmDelete(false);
+        return;
+      }
+      place();
     };
     place();
-    window.addEventListener("scroll", place, true);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    observer?.observe(options);
+    observer?.observe(scrollArea);
+    scrollArea.addEventListener("scroll", followScroll);
     window.addEventListener("resize", place);
-    return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
-  }, [selected]);
+    return () => {
+      observer?.disconnect();
+      scrollArea.removeEventListener("scroll", followScroll);
+      window.removeEventListener("resize", place);
+    };
+  }, [selection, selectedSlot?.minutes]);
 
   /** Has the server moved any run this draft recorded a baseline for? */
   function movedUnderDraft(base: Map<string, string | null>) {
@@ -155,8 +215,8 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }
   function move(slot: DaySlot, minutes: number) { edit(slot, { minutes, time: clockLabel(minutes) }); }
   function closeOptions() {
-    if (selected) barRefs.current.get(selected)?.focus();
-    setSelected(null);
+    if (selection) (selection.trigger ?? barRefs.current.get(selection.key))?.focus({ preventScroll: true });
+    setSelection(null);
     setConfirmDelete(false);
   }
   function reset() {
@@ -167,9 +227,9 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     setFeedback(null);
     closeOptions();
   }
-  function openOptions(slot: DaySlot) {
+  function openOptions(slot: DaySlot, trigger: HTMLElement) {
     if (suppressClick.current) { suppressClick.current = false; return; }
-    setSelected(slotKey(slot));
+    setSelection({ key: slotKey(slot), trigger });
     setPasteTime(displayClock(Math.min(1439, Math.ceil(runEndsAt(slot) / 5) * 5), shift));
     setConfirmDelete(false);
   }
@@ -180,7 +240,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     const entry: DaySlot = { ...source, entryId: crypto.randomUUID(), minutes, time: clockLabel(minutes), paused: false, skipped: false, deleted: false,
       confirmed: null, recurrence: { timezone, weekdays: [0, 1, 2, 3, 4, 5, 6] } };
     setDraft((previous) => ({ date, base: touch(previous, entry), slots: [...(previous?.slots ?? slots), entry] }));
-    setSelected(slotKey(entry));
+    setSelection({ key: slotKey(entry) });
     setConfirmDelete(false);
     setFeedback(null);
   }
@@ -286,7 +346,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
     setDragging(null);
   }
   function keyDown(event: KeyboardEvent<HTMLSpanElement>, slot: DaySlot) {
-    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); suppressClick.current = false; openOptions(slot); return; }
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); suppressClick.current = false; openOptions(slot, event.currentTarget); return; }
     if (event.key === "Escape") { closeOptions(); return; }
     if (slot.deleted) return;
     const step = event.shiftKey ? 1 : 5;
@@ -296,24 +356,38 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }
 
   return <>
-    <div className="schedule-summary">
-      {found.length > 0
-        ? <div className="banner" style={{ display: "block" }} role="status"><strong>Two runs on one line could overlap.</strong>
-            {found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
-              On the {clash.account} line, {label(clash.current)} can still be sending at {displayTimelineClock(clash.finishes, shift)}, after {label(clash.next)} starts at {shown(clash.next)}.
-            </div>)}</div>
-        : <div className="banner banner-ok" role="status"><CheckCircle2 size={17} aria-hidden style={{ flex: "0 0 auto", marginTop: 1 }} />
-            <span><strong>No overlaps.</strong> Every run finishes before the next one on its line starts.</span></div>}
-      {summary}
-    </div>
-    <section className="card" aria-labelledby="day-timeline-title">
-      <div className="card-head"><div><h2 className="card-title" id="day-timeline-title">Day timeline</h2>
-        <span className="card-note">Click a bar for options. Drag along its row to change the start time. Length shows the worst-case estimate; purple uses the ads line, blue the default line.</span></div>
+    <HomeDisclosure className="home-summary" label={`Summary · ${plural(found.length, "warning")}`}>
+      <div className="schedule-summary">
+        {overlapWarnings.length > 0
+          ? <div className="banner schedule-overlap" ref={warningCard}>
+              <div role="status"><strong>Two runs on one line could overlap.</strong>
+                {overlapWarnings.slice(0, OVERLAP_PREVIEW_COUNT)}
+              </div>
+              {hasMoreWarnings && <details className="schedule-overlap-disclosure" onKeyDown={(event) => {
+                const disclosure = event.currentTarget;
+                if (event.key !== "Escape" || !disclosure.open) return;
+                event.stopPropagation();
+                disclosure.open = false;
+                disclosure.querySelector("summary")?.focus();
+              }}>
+                <summary><span>Show {moreWarnings.length} more</span><span>Show fewer</span></summary>
+                <div className="schedule-overlap-extra" role="region" aria-label="Additional overlap warnings" tabIndex={0}>
+                  {moreWarnings}
+                </div>
+              </details>}
+            </div>
+          : <div className="banner banner-ok" role="status"><CheckCircle2 size={17} aria-hidden style={{ flex: "0 0 auto", marginTop: 1 }} />
+              <span><strong>No overlaps.</strong> Every run finishes before the next one on its line starts.</span></div>}
+        {summary}
+      </div>
+    </HomeDisclosure>
+    <section className="card day-timeline" ref={timelineCard} aria-labelledby="day-timeline-title">
+      <div className="card-head"><h2 className="card-title" id="day-timeline-title">Day timeline</h2>
         <div className="timeline-actions">{draft && <button type="button" className="btn" onClick={reset} disabled={locked}>Reset</button>}
           <button type="button" className="btn btn-primary" title={saveUnavailableReason} disabled={pending || Boolean(saveUnavailableReason) || !date || (!uncertain && (!dirty || stale))} onClick={save}>
             {pending ? "Saving…" : uncertain ? "Retry original request" : "Save changes"}</button></div>
       </div>
-      <div className="timeline-feedback">
+      <div className="timeline-feedback" tabIndex={0} role="group" aria-label="Schedule feedback">
         {saveUnavailableReason && <p className="card-note">{saveUnavailableReason}</p>}
         {!saveUnavailableReason && entriesUnavailableReason && <p className="card-note">{entriesUnavailableReason}</p>}
         {feedback && <p className={feedback.error ? "caption-error" : "card-note"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
@@ -321,15 +395,19 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
         {holdPoll && <p className="card-note" role="status">Live updates are paused while you have unsaved changes.</p>}
         <p className="card-note" role="status">{dirty ? "Unsaved changes. The bot still runs the saved schedule until you save." : "Saved schedule. Pending updates retain their last-confirmed times."}</p>
       </div>
-      <div className="card-pad">
-        <div className="timeline-status" role="status"><span className={`run-dot${running.length && !dirty ? " is-live" : ""}`} aria-hidden />
-          <span className="cell-mono">{displayClock(nowMinutes, shift)} in {displayZone}</span>
-          {shift !== 0 && <span className="card-note">Campaign day planned in {timezone}.</span>}
-          <span>{dirty ? "If saved: " : ""}{running.length ? `${[...new Set(running.map(label))].join(" and ")} could still be sending.`
-            : upcoming ? `Nothing sending. ${label(upcoming)} is next at ${shown(upcoming)}.` : "Nothing sending. The day's runs are over."}</span></div>
-        {copied && <p className="card-note" role="status">Copied {campaignTitle(copied)}. Click an empty time on its row or use Paste below. Added runs recur every day until deleted.</p>}
-        <div className="timeline-scroll"><div className="timeline-canvas">
-          <div className="timeline-row timeline-header"><strong className="cell-mono">Time · {displayZone}</strong><div className="timeline-axis timeline-ruler cell-mono">
+      <div className="card-pad timeline-body">
+        <div className="timeline-scroll" role="region" aria-label="Campaign timeline" tabIndex={0} ref={scroller}>
+          <div className="timeline-context">
+            <p className="card-note timeline-guide">Click a bar for options. Drag along its row to change the start time. Length shows the worst-case estimate. Purple uses the ads line and blue uses the default line.</p>
+            <div className="timeline-status" role="status"><span className={`run-dot${running.length && !dirty ? " is-live" : ""}`} aria-hidden />
+              <span className="cell-mono">{displayClock(nowMinutes, shift)} in {displayZone}</span>
+              {shift !== 0 && <span className="card-note">Campaign day planned in {timezone}.</span>}
+              <span>{dirty ? "If saved: " : ""}{running.length ? `${[...new Set(running.map(label))].join(" and ")} could still be sending.`
+                : upcoming ? `Nothing sending. ${label(upcoming)} is next at ${shown(upcoming)}.` : "Nothing sending. The day's runs are over."}</span></div>
+            {copied && <p className="card-note" role="status">Copied {campaignTitle(copied)}. Click an empty time on its row or use Paste below. Added runs recur every day until deleted.</p>}
+          </div>
+          <div className="timeline-canvas">
+          <div className="timeline-row timeline-header" ref={ruler}><strong className="cell-mono">Time · {displayZone}</strong><div className="timeline-axis timeline-ruler cell-mono">
             {Array.from({ length: 13 }, (_, index) => index * 2).map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{displayClock(hour * 60, shift)}</span>)}
             <span className="timeline-now-label" style={{ left: nowOffset }}>{displayClock(nowMinutes, shift)} now</span></div></div>
           {[...groups].map(([slug, campaignSlots]) => <div className="timeline-row" key={slug} data-campaign={slug}>
@@ -338,7 +416,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
               {campaignSlots.map((slot, index) => {
                 const base = saved.get(slotKey(slot)), moved = base && base.minutes !== slot.minutes;
                 return <div className="timeline-entry-label" key={slotKey(slot)}>
-                  <button type="button" className="timeline-label-button" onClick={() => { suppressClick.current = false; openOptions(slot); }} aria-label={`${label(slot)} run ${index + 1} options`}>
+                  <button type="button" className="timeline-label-button" aria-haspopup="dialog" onClick={(event) => { suppressClick.current = false; openOptions(slot, event.currentTarget); }} aria-label={`${label(slot)} run ${index + 1} options`}>
                     {campaignSlots.length > 1 && `${index + 1}. `}{moved && <><span className="timeline-was">{shown(base)}</span> → </>}<strong>{shown(slot)}</strong></button>
                   {" "}<span className="timeline-range">→ {displayTimelineClock(runEndsAt(slot), shift)} · {Math.round(worstCaseRunSeconds(slot.targetCount) / 60)}m</span>
                   {slot.deleted ? <span className="card-note"> · Removal {dirty ? "drafted" : "pending"}</span> : slot.paused ? <span className="card-note"> · Paused</span> : slot.skipped ? <span className="card-note"> · Skipped {date}</span> : null}
@@ -364,7 +442,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
                     aria-label={`${label(slot)} run ${index + 1} start time`} aria-valuemin={0} aria-valuemax={1439} aria-valuenow={slot.minutes}
                     aria-valuetext={`${shown(slot)}, to ${endsAt} at worst`} aria-haspopup="dialog" aria-controls={selected === key ? "timeline-options" : undefined}
                     title={`${shown(slot)} to ${endsAt} at worst — click for options or drag to change`}
-                    onClick={(event) => { event.stopPropagation(); openOptions(slot); }} onPointerDown={(event) => pointerDown(event, slot)}
+                    onClick={(event) => { event.stopPropagation(); openOptions(slot, event.currentTarget); }} onPointerDown={(event) => pointerDown(event, slot)}
                     onPointerMove={(event) => pointerMove(event, slot)} onPointerUp={(event) => pointerUp(event)} onPointerCancel={(event) => pointerUp(event, true)}
                     onKeyDown={(event) => keyDown(event, slot)}
                     style={{ left: `${slot.minutes / 1440 * 100}%`, right: "auto", width: `${Math.min(minutes, 1440 - slot.minutes) / 1440 * 100}%`, minWidth: 0 }}>

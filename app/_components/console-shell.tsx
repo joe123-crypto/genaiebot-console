@@ -6,6 +6,7 @@ import { PRODUCT_NAME } from "@/src/config";
 import type { Attention } from "@/src/domains/console";
 import { ConsoleNav, type NavCounts } from "@/app/_components/console-nav";
 import { AutoRefresh } from "@/app/_components/auto-refresh";
+import { HomeDisclosure } from "@/app/_components/home-disclosure";
 
 /**
  * The console frame: a fixed sidebar carrying the brand, an attention card that
@@ -17,16 +18,30 @@ export function ConsoleShell({
   counts,
   attention = [],
   operator,
+  homeLayout,
 }: {
   children: ReactNode;
   counts: NavCounts;
   attention?: Attention[];
   operator: { name: string; meta: string };
+  homeLayout?: boolean;
 }) {
   const initial = operator.name.trim().charAt(0).toUpperCase() || "?";
+  const navigation = <>
+    <ConsoleNav counts={counts} />
+    <div className="console-account">
+      <span className="console-avatar" aria-hidden>{initial}</span>
+      <span>
+        <span className="console-account-name">{operator.name}</span>
+        <br />
+        <span className="console-account-meta">{operator.meta}</span>
+        <AutoRefresh />
+      </span>
+    </div>
+  </>;
 
   return (
-    <div className="console-app">
+    <div className={homeLayout ? "console-app console-app-home" : "console-app"}>
       <aside className="console-sidebar">
         <div className="console-brand">
           <Image
@@ -68,17 +83,7 @@ export function ConsoleShell({
           </div>
         ) : null}
 
-        <ConsoleNav counts={counts} />
-
-        <div className="console-account">
-          <span className="console-avatar" aria-hidden>{initial}</span>
-          <span>
-            <span className="console-account-name">{operator.name}</span>
-            <br />
-            <span className="console-account-meta">{operator.meta}</span>
-            <AutoRefresh />
-          </span>
-        </div>
+        {homeLayout ? <HomeDisclosure className="home-menu" label="Menu">{navigation}</HomeDisclosure> : navigation}
       </aside>
 
       <section className="console-content">{children}</section>
