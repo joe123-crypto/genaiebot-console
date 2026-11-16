@@ -1,7 +1,7 @@
 "use client";
 
 import { PaginatedPicker } from "@/app/_components/paginated-picker";
-import { addGroupCampaignAction, addGroupCampaignsAction } from "@/app/groups/actions";
+import { addGroupCampaignAction, addGroupCampaignsAction, removeGroupCampaignAction } from "@/app/groups/actions";
 import { liveFetch, notifyLiveChange, useLivePoll } from "@/app/_components/use-live";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import {
@@ -62,6 +62,11 @@ const NO_EDITING: GroupEditing = {
 const NO_CAMPAIGNS: GroupCampaignOption[] = [];
 const NO_CAMPAIGN_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
 
+/** One chip, for the set of removals still in flight. */
+function removalKey(jid: string, promo: string) {
+  return `${jid}\n${promo}`;
+}
+
 type Props = {
   /** Every group on record. The table narrows them; it never refetches. */
   groups: Group[];
@@ -72,6 +77,9 @@ type Props = {
   editing?: GroupEditing;
   campaigns?: GroupCampaignOption[];
   campaignGate?: WriteGate;
+  /** Taking a campaign off a group, which rewrites three fields at once and is
+   *  therefore gated apart from adding one. */
+  removeGate?: WriteGate;
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: GroupFilter;
   remote?: { onFilter: (filter: GroupFilter) => void; total: number; lines: string[]; campaigns: GroupCampaignOption[]; tiers: string[] };
@@ -83,7 +91,8 @@ const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-membe
 
 export function GroupsTable({
   groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
-  campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES, remote,
+  campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES,
+  removeGate = NO_CAMPAIGN_WRITES, remote,
 }: Props) {
   const displayZone = useDisplayTimezone();
   const id = useId();
@@ -98,6 +107,9 @@ export function GroupsTable({
     useState<{ label: string; warnings: string[] } | null>(null);
 
   const [campaignGroup, setCampaignGroup] = useState<Group | null>(null);
+  /** Chips whose removal has been sent and not yet answered. Nothing here is
+   *  optimistic: the chip goes when the refreshed row stops naming it. */
+  const [removing, setRemoving] = useState<Set<string>>(() => new Set());
   const [selectedGroups, setSelectedGroups] = useState(() => new Map<string, string>());
   const [bulkPickerOpen, setBulkPickerOpen] = useState(false);
   const [extraGroups, setExtraGroups] = useState<Record<string, Group>>({});
@@ -122,6 +134,9 @@ export function GroupsTable({
   const off = new Set(disabledPromos);
   const visible = remote ? groups : sortGroupsForTable(filterGroups(groups, filter));
   const canAssign = writesEnabled && campaignGate.allowed;
+  // Removal is offered whatever the group's status: the bot refuses to add an
+  // on-hold group to a campaign, but never refuses to take one out.
+  const canRemove = writesEnabled && removeGate.allowed;
   const selectionFull = selectedGroups.size >= MAX_GROUPS_PER_ASSIGNMENT;
   const columns = 9 + Number(writesEnabled) + Number(canAssign);
   const unfiltered = isDefaultGroupFilter(filter);
@@ -134,6 +149,25 @@ export function GroupsTable({
       else next.delete(group.jid);
       return next;
     });
+  }
+
+  async function removeCampaign(group: Group, promo: string) {
+    const key = removalKey(group.jid, promo);
+    setRemoving((current) => new Set(current).add(key));
+    setAssignmentError(null);
+    try {
+      const result = await removeGroupCampaignAction(group.jid, promo);
+      if (result.ok) notifyLiveChange();
+      else setAssignmentError(result.detail);
+    } catch {
+      setAssignmentError("The removal was not sent, so the campaign is still assigned.");
+    } finally {
+      setRemoving((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
   }
 
   function set(key: keyof GroupFilter, value: string) {
@@ -359,10 +393,11 @@ export function GroupsTable({
                         const isPaused = (group.pausedPromos ?? []).includes(promo);
                         const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
                         const weekly = group.weekly[promo];
+                        const pending = removing.has(removalKey(group.jid, promo));
                         return (
                           <span
                             key={promo}
-                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}`}
+                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}${canRemove ? " tag-removable" : ""}${pending ? " tag-removing" : ""}`}
                             title={
                               isOff
                                 ? "campaign is switched off — it posts nowhere"
@@ -378,6 +413,17 @@ export function GroupsTable({
                             {campaignTitle(promo)}
                             {weekly ? ` · ${weekly.join("/")}` : ""}
                             {isPaused ? " · paused" : ""}
+                            {canRemove ? (
+                              <button
+                                type="button"
+                                className="tag-remove"
+                                disabled={pending}
+                                aria-label={`Remove ${campaignTitle(promo)} from ${confirmLabel(group)}`}
+                                onClick={() => { void removeCampaign(group, promo); }}
+                              >
+                                <span aria-hidden="true">×</span>
+                              </button>
+                            ) : null}
                           </span>
                         );
                       })}

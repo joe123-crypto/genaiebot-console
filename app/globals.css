@@ -422,6 +422,53 @@ table.data tbody tr:hover { background: var(--surface-muted); }
    muted, so it cannot be mistaken for one today's cap happened to hold back. */
 .tag-off { text-decoration: line-through; opacity: 0.6; }
 
+/* The x that takes a campaign off a group, revealed by hovering its chip. The
+   space it needs is reserved on every removable chip, so appearing moves no
+   text; and it sits inside the chip's own box rather than over its corner,
+   because .table-wrap scrolls and would clip anything overhanging the top row.
+   Being absolutely positioned also keeps .tag-off's line-through off it. */
+.tag-removable { position: relative; padding-right: 17px; }
+
+.tag-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  /* Fixed rather than the chip's full height: a chip whose text wraps is tall,
+     and the x belongs in its top right corner, not halfway down its side. */
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 5px 0 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+/* Hover is the ask; focus-within is the same control for a keyboard, which
+   never hovers. A touch screen has neither, so there it simply stays. */
+.tag-removable:hover .tag-remove,
+.tag-removable:focus-within .tag-remove { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .tag-remove { opacity: 1; pointer-events: auto; } }
+
+.tag-remove:hover:not(:disabled), .tag-remove:focus-visible {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.tag-remove:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.tag-remove:disabled { cursor: progress; }
+
+/* Sent, and waiting for the refreshed row to stop naming it. */
+.tag.tag-removing { opacity: 0.45; }
+
 /* ------------------------------------------------------------- timeline ---- */
 
 /* The pre-drag static timeline classes lived here; the live timeline uses
