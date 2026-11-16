@@ -6,7 +6,7 @@ import { notifyLiveChange } from "@/app/_components/use-live";
 import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import { Pause, Play, Plus, Trash2, X } from "lucide-react";
 import { applyCampaignGroupsAction, type ApplyGroupsOutcome } from "@/app/campaigns/actions";
-import { groupLabel, plural, shortJid } from "@/src/lib/format";
+import { botDayLabel, groupLabel, plural, shortJid } from "@/src/lib/format";
 import {
   draftedJids, emptyGroupDraft, groupDraftKey, hasGroupDraft, isPausedInDraft, parseGroupDraft,
   reconcileGroupDraft, togglePause, withoutJids,
@@ -151,6 +151,18 @@ function AddGroupsDialog({ groups, close, add }: {
 
 export const APPLY_EXPLAINER =
   "The bot checks every change before it makes any of them. They take effect from the campaign’s next run; a run already under way keeps what it started with.";
+
+/** Why this campaign is not posting to a group today, and when it will.
+ *
+ *  The groups table answers "who is held back here"; this screen answers the
+ *  narrower question an operator has while looking at one campaign: when does
+ *  THIS one reach THAT group again. A bot without the look-ahead sends no day,
+ *  and the pill falls back to naming who has the allowance instead. */
+function atCapTitle(live: CampaignGroupRow) {
+  const today = `today's allowance goes to ${live.allowedToday.join(", ")}`;
+  const when = live.nextDay ? botDayLabel(live.nextDay) : null;
+  return when ? `${today} — this campaign posts here again on ${when}` : today;
+}
 
 function draftSummary(draft: CampaignGroupDraft) {
   return [
@@ -470,7 +482,9 @@ function CampaignGroupEditor({ slug, liveGroups, knownGroups: initialKnownGroups
                   : live?.paused ? <span className="pill pill-info">Resumes · draft</span>
                   : !live ? <span className="cell-muted">—</span>
                     : live.sendsToday ? <span className="pill pill-success">Posts</span>
-                      : <span className="pill pill-warning" title={`today goes to ${live.allowedToday.join(", ")}`}>At cap</span>}</td>
+                      : <span className="pill pill-warning" title={atCapTitle(live)}>
+                          At cap{live.nextDay ? ` · ${botDayLabel(live.nextDay)}` : ""}
+                        </span>}</td>
                 <td className="cell-mono">{live?.ref ?? "—"}</td>
                 <td className="cell-muted">{live?.variant == null ? "—" : `${live.variant + 1}/${variantCount}`}</td>
                 <td className="cell-muted">{group.account}</td>

@@ -444,6 +444,20 @@ table.data tbody tr:hover { background: var(--surface-muted); }
    muted, so it cannot be mistaken for one today's cap happened to hold back. */
 .tag-off { text-decoration: line-through; opacity: 0.6; }
 
+/* One today's cap holds back: assigned and switched on, just not its turn. It
+   used to render as a plain .tag, which read as "dropped" -- the one state that
+   comes back on its own looked like the two that do not. Dashed rather than
+   struck through or faded for exactly that reason, and at full text colour: it
+   is waiting, not disabled. The marker inside carries the same message where
+   colour and border do not survive, so neither is doing the work alone. */
+.tag-held {
+  border-style: dashed;
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.tag-turn { opacity: 0.75; }
+
 /* The x that takes a campaign off a group, revealed by hovering its chip. The
    space it needs is reserved on every removable chip, so appearing moves no
    text; and it sits inside the chip's own box rather than over its corner,

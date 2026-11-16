@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  capChange, capDraftProblems, describeCapChange, draftFromSettings, storedSettings,
+  capChange, capDraftProblems, describeCapChange, draftFromSettings, rotates, storedSettings,
 } from "@/src/domains/cap-settings";
 import type { CapSettings } from "@/src/lib/types";
 
@@ -53,6 +53,38 @@ describe("cap settings", () => {
     expect(capDraftProblems(extra, SETTINGS).join(" ")).toMatch(/tiers themselves cannot be changed/);
   });
 
+  it("read a bot that predates the switch as already taking turns", () => {
+    // `undefined` is falsy: read bare, the form would open offering to turn on
+    // something already on -- and the save would then name a field that bot
+    // refuses. The whole feature degrades on this one default.
+    expect(SETTINGS.rotation).toBeUndefined();
+    expect(rotates(SETTINGS)).toBe(true);
+    expect(draftFromSettings(SETTINGS).rotation).toBe(true);
+    expect(storedSettings(SETTINGS).rotation_enabled).toBe(true);
+    expect(capChange(draftFromSettings(SETTINGS), SETTINGS)).toEqual({});
+  });
+
+  it("read an explicit switch as it stands", () => {
+    const off: CapSettings = { ...SETTINGS, rotation: false };
+    expect(rotates(off)).toBe(false);
+    expect(draftFromSettings(off).rotation).toBe(false);
+    expect(capChange(draftFromSettings(off), off)).toEqual({});
+  });
+
+  it("send the rotation switch under the bot's own field name", () => {
+    const draft = draftFromSettings(SETTINGS);
+    draft.rotation = false;
+    expect(capChange(draft, SETTINGS)).toEqual({ rotation_enabled: false });
+  });
+
+  it("say what switching the turns off costs", () => {
+    expect(describeCapChange({ rotation_enabled: false }, SETTINGS))
+      .toEqual(["Rotation off: the same campaigns are held back every day, "
+                + "and they stop posting to that group."]);
+    expect(describeCapChange({ rotation_enabled: true }, SETTINGS))
+      .toEqual(["Rotation on: a capped group's campaigns take turns, so each one sits out in turn."]);
+  });
+
   it("describe each change in plain words", () => {
     expect(describeCapChange({ caps_enabled: false, activity: "quiet",
                                bands: { busy: [6, 10], normal: [4, 6], quiet: [0, 2] } }, SETTINGS))
@@ -66,9 +98,13 @@ describe("cap settings", () => {
 
 describe("CapSettingsForm", () => {
   afterEach(() => { cleanup(); save.mockReset(); });
-  function mount(gate: Parameters<typeof CapSettingsForm>[0]["gate"] = { allowed: true }) {
-    return render(createElement(CapSettingsForm, { settings: SETTINGS, gate }));
+  function mount(gate: Parameters<typeof CapSettingsForm>[0]["gate"] = { allowed: true },
+                 rotationGate?: Parameters<typeof CapSettingsForm>[0]["rotationGate"],
+                 settings: CapSettings = SETTINGS) {
+    return render(createElement(CapSettingsForm, { settings, gate, rotationGate }));
   }
+
+  const turns = () => screen.getByRole("checkbox", { name: /take turns/ }) as HTMLInputElement;
 
   it("saves a band after a yes, sending what the form loaded as expected", async () => {
     save.mockResolvedValue({ ok: true });
@@ -104,6 +140,35 @@ describe("CapSettingsForm", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
     expect(save.mock.calls[0][0]).toMatchObject({ enabled: false });
     expect(within(screen.getByRole("alertdialog")).getByRole("alert").textContent).toMatch(/bands.quiet/);
+  });
+
+  it("offers the turns switch on, and saves it off after a yes", async () => {
+    save.mockResolvedValue({ ok: true });
+    mount();
+    expect(turns().checked).toBe(true);
+    fireEvent.click(turns());
+    expect(screen.getByText(/they stop posting to that group/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Save cap settings?" });
+    expect(within(dialog).getByText(/the same campaigns are held back every day/)).toBeTruthy();
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Save" })); });
+    expect(save.mock.calls[0][0]).toMatchObject({ rotation: false });
+    expect(save.mock.calls[0][1]).toEqual(storedSettings(SETTINGS));
+  });
+
+  it("hides the turns switch while caps are off, when nothing is ever held back", () => {
+    mount();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Cap how many adverts/ }));
+    expect(screen.queryByRole("checkbox", { name: /take turns/ })).toBeNull();
+  });
+
+  it("disables only the turns switch when the bot will not take that one field", () => {
+    mount({ allowed: true }, { allowed: false, reason: "The bot does not accept changes to rotation_enabled yet." });
+    expect(turns().disabled).toBe(true);
+    expect(screen.getByText(/does not accept changes to rotation_enabled/)).toBeTruthy();
+    // The rest of the form stays editable: one unsupported field must not
+    // take the bands and the default tier down with it.
+    expect((screen.getByLabelText("quiet at most") as HTMLInputElement).disabled).toBe(false);
   });
 
   it("is read-only, saying why, when the bot will not take the change", () => {

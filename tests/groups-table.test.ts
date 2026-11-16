@@ -403,3 +403,67 @@ describe("a link followed while already on the page", () => {
     expect(count()).toBe("Showing 3 of 4 groups");
   });
 });
+
+describe("a campaign held back by today's cap", () => {
+  afterEach(cleanup);
+
+  /** Four campaigns, an allowance of two: two post, two wait their turn. */
+  const norton = group({
+    jid: "120363304@g.us",
+    name: "Norton Group business",
+    promos: ["pos", "appliance-repairs", "toaster-construction", "genaie"],
+    cap: 2,
+    allowedToday: ["pos", "appliance-repairs"],
+    rotation: { cycleDays: 3, nextDay: { "toaster-construction": "2026-11-17" } },
+  });
+
+  /** The campaign chip itself: `span.tag`, not the `.tag-row` around it nor
+   *  the `.tag-turn` marker inside it. */
+  function chip(name: string) {
+    const found = [...document.querySelectorAll<HTMLElement>("span.tag")]
+      .filter((node) => node.textContent?.startsWith(name));
+    expect(found).toHaveLength(1);
+    return found[0];
+  }
+
+  function mountNorton(overrides: Partial<Parameters<typeof GroupsTable>[0]> = {}) {
+    return render(createElement(GroupsTable, {
+      ...props, groups: [norton], disabledPromos: ["genaie"], ...overrides,
+    }));
+  }
+
+  it("names the day it next posts, on the bot's own calendar", () => {
+    mountNorton();
+    expect(chip("Toaster Construction").title).toBe("held back by today's cap — next posts Tue 17 Nov");
+  });
+
+  it("is told apart from a campaign that posts and one that is switched off", () => {
+    mountNorton();
+    expect(chip("Pos").className).toContain("tag-on");
+    expect(chip("Genaie").className).toContain("tag-off");
+    const waiting = chip("Toaster Construction");
+    expect(waiting.className).toContain("tag-held");
+    expect(waiting.className).not.toContain("tag-off");
+    // The marker, so the three states do not rest on colour alone.
+    expect(waiting.textContent).toContain("⟳");
+    expect(chip("Pos").textContent).not.toContain("⟳");
+  });
+
+  it("says the campaign keeps waiting when turns are switched off", () => {
+    mountNorton({ rotates: false });
+    expect(chip("Toaster Construction").title)
+      .toBe("held back by today's cap — turns are off, so this campaign always sits out");
+    expect(screen.getByText(/turns are off in Settings/)).toBeTruthy();
+  });
+
+  it("falls back to naming the behaviour when the bot sends no look-ahead", () => {
+    mountNorton({ groups: [{ ...norton, rotation: undefined }] });
+    expect(chip("Toaster Construction").title).toBe("held back by today's cap — campaigns take turns");
+  });
+
+  it("promises nothing for a campaign the rotation does not cover", () => {
+    // Appliance Repairs posts today, so it carries no next day and no marker.
+    mountNorton();
+    expect(chip("Appliance Repairs").title).toBe("posts today");
+  });
+});

@@ -30,7 +30,7 @@ import {
   type GroupFilter,
   type GroupView,
 } from "@/src/domains/group-filter";
-import { campaignTitle, confirmLabel, groupLabel, shortJid } from "@/src/lib/format";
+import { campaignTitle, confirmLabel, groupLabel, heldBackLabel, shortJid } from "@/src/lib/format";
 import type { Group, GroupStatus } from "@/src/lib/types";
 
 /** What the row actions may do, worked out on the server from the console's
@@ -81,6 +81,10 @@ type Props = {
   /** Every group on record. The table narrows them; it never refetches. */
   groups: Group[];
   disabledPromos: string[];
+  /** Whether a capped group's campaigns take turns. A bot that predates the
+   *  switch reports nothing and always rotates, so this defaults to true --
+   *  never to the falsy `undefined`. */
+  rotates?: boolean;
   /** `WRITES_ENABLED` reads an unprefixed environment variable, so it is false
    *  in a browser bundle. The server page has to hand it over. */
   writesEnabled: boolean;
@@ -103,7 +107,7 @@ const VIEWS: GroupView[] = ["all", "needs-decision", "advertising", "no-campaign
 const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-member"];
 
 export function GroupsTable({
-  groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
+  groups, disabledPromos, rotates = true, writesEnabled, editing = NO_EDITING, initialFilter,
   campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES,
   removeGate = NO_CAMPAIGN_WRITES, scheduleGate = NO_CAMPAIGN_WRITES, remote,
 }: Props) {
@@ -313,7 +317,11 @@ export function GroupsTable({
           Groups needing a decision are listed first. A group the bot cannot post in returns{" "}
           <code>forbidden</code> at send time; one it has left returns <code>item-not-found</code>.
           Highlighted campaigns are the ones today&apos;s rotation gives the group&apos;s allowance
-          to.
+          to; one marked <span className="tag-turn" aria-hidden="true">⟳</span> is waiting its turn
+          {rotates
+            ? ", and its tooltip says when it next posts"
+            : " — but turns are off in Settings, so it keeps waiting"}. A struck-through campaign
+          is switched off or paused for the group, and waits for nothing.
         </p>
       </FilterSummary>
 
@@ -407,12 +415,16 @@ export function GroupsTable({
                         const isOff = off.has(promo);
                         const isPaused = (group.pausedPromos ?? []).includes(promo);
                         const sendsToday = !isOff && !isPaused && group.allowedToday.includes(promo);
+                        // Assigned, switched on, not paused -- just not this
+                        // group's turn today. The only one of the three dull
+                        // chips that comes back on its own.
+                        const isHeld = !isOff && !isPaused && !sendsToday;
                         const weekly = group.weekly[promo];
                         const pending = removing.has(removalKey(group.jid, promo));
                         return (
                           <span
                             key={promo}
-                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : ""}${canRemove ? " tag-removable" : ""}${pending ? " tag-removing" : ""}`}
+                            className={`tag${isOff || isPaused ? " tag-off" : sendsToday ? " tag-on" : isHeld ? " tag-held" : ""}${canRemove ? " tag-removable" : ""}${pending ? " tag-removing" : ""}`}
                             title={
                               isOff
                                 ? "campaign is switched off — it posts nowhere"
@@ -422,12 +434,19 @@ export function GroupsTable({
                                     ? `only on ${weekly.join(", ")}`
                                     : sendsToday
                                       ? "posts today"
-                                      : "held back by today's cap"
+                                      : heldBackLabel({
+                                          nextDay: group.rotation?.nextDay[promo],
+                                          rotates,
+                                        })
                             }
                           >
                             {campaignTitle(promo)}
                             {weekly ? ` · ${weekly.join("/")}` : ""}
                             {isPaused ? " · paused" : ""}
+                            {/* Says "waiting its turn" without leaning on
+                                colour, which is all that separates this chip
+                                from a plain one. */}
+                            {isHeld ? <span className="tag-turn" aria-hidden="true"> ⟳</span> : null}
                             {canRemove ? (
                               <button
                                 type="button"
