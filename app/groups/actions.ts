@@ -14,6 +14,7 @@ import {
   type GroupEditField,
 } from "@/src/domains/group-edit";
 import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
+import { planAssignmentWrites } from "@/src/lib/campaign-group-draft";
 import { confirmLabel } from "@/src/lib/format";
 import type { Group } from "@/src/lib/types";
 
@@ -35,6 +36,14 @@ function refresh() {
   // the table and the badge to agree a second after the change.
   revalidatePath("/groups");
   revalidatePath("/");
+}
+
+/** A changed assignment shows in three places: the groups table and its sidebar
+ *  count, the campaign list, and the campaign's own page. */
+function refreshAssignment(slugs: string[]) {
+  refresh();
+  for (const slug of slugs) revalidatePath(`/campaigns/${slug}`);
+  revalidatePath("/campaigns");
 }
 
 /** The lines and tiers a field may name, from the bot's own read model. */
@@ -76,11 +85,7 @@ async function assignGroupCampaigns(
   }
   const slugs = [...new Set(campaignIds)];
   const by = OPERATOR_NAME;
-  const refreshAssignments = () => {
-    refresh();
-    for (const slug of slugs) revalidatePath(`/campaigns/${slug}`);
-    revalidatePath("/campaigns");
-  };
+  const refreshAssignments = () => refreshAssignment(slugs);
 
   let attemptedWrite = false;
   let legacyProgress: { confirmed: number; jid: string } | undefined;
@@ -150,6 +155,65 @@ async function assignGroupCampaigns(
 
   // Refresh even if another operator already added it, so the row catches up.
   refreshAssignments();
+  return { ok: true };
+}
+
+/**
+ * Take one campaign off one group, from the chip in the groups table.
+ *
+ * The write clears the campaign from `promos`, `paused_promos` and `weekly`
+ * together: the bot refuses a removal that leaves a pause or a cadence naming a
+ * campaign the group is no longer in. `planAssignmentWrites` already works that
+ * out for the campaign page's Apply, so the arithmetic is shared rather than
+ * written a second time and kept in step by hand.
+ *
+ * Unlike adding, this does not ask whether the group is active. The bot refuses
+ * to add an on-hold group to a campaign; taking one out is always allowed, and
+ * an on-hold group still sitting in a campaign is exactly what an operator
+ * would want to fix.
+ */
+export async function removeGroupCampaignAction(jid: string, slug: string): Promise<WriteOutcome> {
+  if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
+  if (typeof jid !== "string" || !/^\d+(?:-\d+)?@g\.us$/.test(jid)) {
+    return { ok: false, detail: "No valid group was named." };
+  }
+  if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    return { ok: false, detail: "No valid campaign was named." };
+  }
+
+  try {
+    const { groups, context } = await getGroups(undefined, { fresh: true, jid });
+    const writes = context ? context.writes : await getCapabilities({ fresh: true });
+    const gate = canWrite(WRITES_ENABLED, writes, "groups", "promos", "paused_promos", "weekly");
+    if (!gate.allowed) return { ok: false, detail: gate.reason };
+
+    const current = groups.find((group) => group.jid === jid);
+    if (!current) return { ok: false, detail: "This group is no longer on record." };
+
+    const plan = planAssignmentWrites(slug, { version: 1, added: [], removed: [jid], paused: [] }, groups);
+    const write = plan.writes[0];
+    // Nothing to write means the campaign is already off the group -- another
+    // operator, or a second click on a chip the refresh has yet to take away.
+    // That is the wanted state, so it refreshes rather than reporting a failure.
+    if (write) {
+      const values: Record<string, unknown> = {
+        promos: current.promos, weekly: current.weekly, paused_promos: current.pausedPromos ?? [],
+      };
+      const change = {
+        id: jid,
+        fields: write.fields,
+        expected: Object.fromEntries(Object.keys(write.fields).map((field) => [field, values[field]])),
+      };
+      if (!await updateGroupBatch([change], { by: OPERATOR_NAME })) {
+        await updateGroup(jid, write.fields, { by: OPERATOR_NAME, dryRun: true });
+        await updateGroup(jid, write.fields, { by: OPERATOR_NAME });
+      }
+    }
+  } catch (error) {
+    return failedWrite(error);
+  }
+
+  refreshAssignment([slug]);
   return { ok: true };
 }
 
