@@ -297,3 +297,88 @@ describe("addGroupCampaignAction", () => {
     expect(revalidate).not.toHaveBeenCalled();
   });
 });
+
+describe("posting days", () => {
+  const withWeekly: WriteCapabilities = { ...capabilities, fields: { groups: ["promos", "weekly"] } };
+
+  it("writes the days beside the membership, in the bot's own spelling", async () => {
+    const add = await loadAction();
+    getOverview.mockResolvedValue({ writes: withWeekly, campaigns: [{ slug, enabled: true }] });
+    updateGroupBatch.mockResolvedValue({ done: [jid], changed: 1 });
+    expect(await add(jid, [slug], { [slug]: [1, 3] })).toEqual({ ok: true });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
+      id: jid,
+      fields: { promos: ["borehole-drilling", slug], weekly: { "borehole-drilling": ["mon"], [slug]: ["Tue", "Thu"] } },
+      expected: { promos: ["borehole-drilling"], weekly: { "borehole-drilling": ["mon"] } },
+    }], { by: "Joseph" });
+  });
+
+  it("clears the restriction when every day is chosen, without touching the membership", async () => {
+    const add = await loadAction();
+    getOverview.mockResolvedValue({ writes: withWeekly, campaigns: [{ slug: "borehole-drilling", enabled: true }] });
+    updateGroupBatch.mockResolvedValue({ done: [jid], changed: 1 });
+    expect(await add(jid, ["borehole-drilling"], { "borehole-drilling": [0, 1, 2, 3, 4, 5, 6] })).toEqual({ ok: true });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
+      id: jid, fields: { weekly: {} }, expected: { weekly: { "borehole-drilling": ["mon"] } },
+    }], { by: "Joseph" });
+  });
+
+  it("writes nothing when the days a campaign already has are chosen again", async () => {
+    const add = await loadAction();
+    getOverview.mockResolvedValue({ writes: withWeekly, campaigns: [{ slug: "borehole-drilling", enabled: true }] });
+    getGroups.mockResolvedValue({ groups: [group({ weekly: { "borehole-drilling": ["Mon", "Wed"] } })] });
+    expect(await add(jid, ["borehole-drilling"], { "borehole-drilling": [2, 0] })).toEqual({ ok: true });
+    expect(updateGroupBatch).not.toHaveBeenCalled();
+    expect(updateGroup).not.toHaveBeenCalled();
+  });
+
+  it("asks the bot for the weekly field only when days were chosen", async () => {
+    const add = await loadAction();
+    expect(await add(jid, [slug], { [slug]: [1] }))
+      .toEqual({ ok: false, detail: "The bot does not accept changes to weekly yet." });
+    expect(updateGroupBatch).not.toHaveBeenCalled();
+    expect(updateGroup).not.toHaveBeenCalled();
+    // The same bot still takes a plain add, which writes no days.
+    expect(await add(jid, [slug])).toEqual({ ok: true });
+    expect(updateGroup).toHaveBeenCalledWith(jid, { promos: ["borehole-drilling", slug] }, { by: "Joseph" });
+  });
+
+  it("rejects malformed days before reading the bot", async () => {
+    const add = await loadAction();
+    expect(await add(jid, [slug], { [slug]: [] })).toMatchObject({ ok: false, detail: expect.stringContaining("at least one day") });
+    expect(await add(jid, [slug], { other: [1] })).toMatchObject({ ok: false, detail: expect.stringContaining("not selected") });
+    expect(getGroups).not.toHaveBeenCalled();
+  });
+
+  it("refuses a days-only change to a group that is no longer active", async () => {
+    const add = await loadAction();
+    getOverview.mockResolvedValue({ writes: withWeekly, campaigns: [{ slug: "borehole-drilling", enabled: true }] });
+    getGroups.mockResolvedValue({ groups: [group({ status: "on-hold" })] });
+    expect(await add(jid, ["borehole-drilling"], { "borehole-drilling": [1] }))
+      .toEqual({ ok: false, detail: "This group is on-hold, so it cannot be added to a campaign." });
+    expect(updateGroupBatch).not.toHaveBeenCalled();
+  });
+
+  it("writes no weekly at all for a plain add, even where the bot reports none", async () => {
+    const add = await loadAction();
+    getGroups.mockResolvedValue({ groups: [{ ...group({ promos: [] }), weekly: undefined } as unknown as Group] });
+    updateGroupBatch.mockResolvedValue({ done: [jid], changed: 1 });
+    expect(await add(jid, [slug])).toEqual({ ok: true });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
+      { id: jid, fields: { promos: [slug] }, expected: { promos: [] } },
+    ], { by: "Joseph" });
+  });
+
+  it("carries the days through a bulk assignment", async () => {
+    const { addGroupCampaignsAction: add } = await loadActions();
+    const secondJid = "120363222@g.us";
+    getOverview.mockResolvedValue({ writes: withWeekly, campaigns: [{ slug }] });
+    getGroups.mockResolvedValue({ groups: [group({ promos: [], weekly: {} }), group({ jid: secondJid, promos: [], weekly: {} })] });
+    updateGroupBatch.mockResolvedValue({ done: [jid, secondJid], changed: 2 });
+    expect(await add([jid, secondJid], [slug], { [slug]: [4] })).toEqual({ ok: true });
+    expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
+      { id: jid, fields: { promos: [slug], weekly: { [slug]: ["Fri"] } }, expected: { promos: [], weekly: {} } },
+      { id: secondJid, fields: { promos: [slug], weekly: { [slug]: ["Fri"] } }, expected: { promos: [], weekly: {} } },
+    ], { by: "Joseph" });
+  });
+});

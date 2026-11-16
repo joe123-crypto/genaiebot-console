@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
-import { ALL_WEEKDAYS, WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignImageFilename, campaignSlug, campaignDraftError,
+import { Days } from "@/app/_components/weekdays";
+import { ALL_WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignImageFilename, campaignSlug, campaignDraftError,
   type CampaignDraft, type CampaignImageUpload } from "@/src/domains/campaign-create";
 import { CAMPAIGN_DRAFT_KEY, parseCampaignDraft } from "@/src/lib/campaign-draft";
 import { draftFiles, keepDraftFiles } from "@/src/lib/campaign-files";
@@ -13,13 +14,6 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type GroupChoice = Pick<Group, "jid" | "name" | "account" | "status">;
 type Picture = { id: string; file: File; preview: string; uploaded?: CampaignImageUpload };
-function Days({ value, onChange, allowed = ALL_WEEKDAYS, label }: {
-  value: number[]; onChange: (days: number[]) => void; allowed?: number[]; label: string;
-}) {
-  return <div className="campaign-weekdays" role="group" aria-label={label}>{WEEKDAYS.map((day, index) =>
-    <label key={day}><input type="checkbox" checked={value.includes(index)} disabled={!allowed.includes(index)}
-      onChange={(event) => onChange(event.target.checked ? [...value, index].sort() : value.filter((item) => item !== index))} />{day}</label>)}</div>;
-}
 export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean }) {
   const [lastGroups, setLastGroups] = useState(incomingGroups);
   if (!loadError && lastGroups !== incomingGroups) setLastGroups(incomingGroups);

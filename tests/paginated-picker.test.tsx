@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PaginatedPicker } from "@/app/_components/paginated-picker";
 import type { LiveFacets } from "@/src/lib/live-types";
@@ -75,5 +75,79 @@ describe("campaign counts in the group picker", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: /^Market · ads\s*Campaign count unavailable$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" }));
     expect(choose).toHaveBeenCalledWith([{ id: "1@g.us", name: "Market", account: "ads", status: "active" }]);
+  });
+});
+
+describe("posting days in the campaign picker", () => {
+  const schedule = { gate: { allowed: true } as const };
+  const campaignPage = Response.json({
+    rows: [{ slug: "fruit-trees", name: "Fruit Trees" }, { slug: "web-design", name: "Web Design" }],
+    revision: "1", sync: { stale: false, revision: "1", state: "live", syncedAt: null }, nextCursor: null,
+  });
+
+  function openPicker(props: Partial<Parameters<typeof PaginatedPicker>[0]> = {}) {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(campaignPage.clone()));
+    const choose = vi.fn();
+    render(<PaginatedPicker kind="campaigns" close={vi.fn()} choose={choose} {...props} />);
+    return choose;
+  }
+
+  it("offers days only for a ticked campaign, and sends them per campaign", async () => {
+    const choose = openPicker({ schedule });
+    const fruit = await screen.findByRole("checkbox", { name: /Fruit Trees/ });
+    expect(screen.queryByRole("checkbox", { name: "Only on certain days" })).toBeNull();
+
+    fireEvent.click(fruit);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only on certain days" }));
+    // It opens on the whole week, which is no restriction at all.
+    const days = screen.getByRole("group", { name: "Posting days for Fruit Trees" });
+    expect(screen.getByText(/clears any day restriction/)).toBeTruthy();
+    for (const day of ["Mon", "Wed", "Fri", "Sat", "Sun"]) {
+      fireEvent.click(within(days).getByRole("checkbox", { name: day }));
+    }
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Web Design/ }));
+    expect(screen.getAllByRole("checkbox", { name: "Only on certain days" })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 selected" }));
+    expect(choose).toHaveBeenCalledWith([
+      { id: "fruit-trees", name: "Fruit Trees", weekdays: [1, 3] },
+      { id: "web-design", name: "Web Design" },
+    ]);
+  });
+
+  it("holds the add while a restricted campaign names no day, and forgets days when unticked", async () => {
+    const choose = openPicker({ schedule });
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Fruit Trees/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only on certain days" }));
+    const days = screen.getByRole("group", { name: "Posting days for Fruit Trees" });
+    for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
+      fireEvent.click(within(days).getByRole("checkbox", { name: day }));
+    }
+    const add = screen.getByRole("button", { name: "Add 1 selected" }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    expect(screen.getByText(/Choose at least one day/)).toBeTruthy();
+    fireEvent.click(add);
+    expect(choose).not.toHaveBeenCalled();
+
+    // Unticking the campaign drops its days; ticking it again starts over.
+    fireEvent.click(screen.getByRole("checkbox", { name: /Fruit Trees/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Fruit Trees/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" }));
+    expect(choose).toHaveBeenCalledWith([{ id: "fruit-trees", name: "Fruit Trees" }]);
+  });
+
+  it("says why days are unavailable and still adds campaigns without them", async () => {
+    const choose = openPicker({ schedule: { gate: { allowed: false, reason: "The bot does not accept changes to weekly yet." } } });
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Fruit Trees/ }));
+    expect(screen.getByText("The bot does not accept changes to weekly yet.")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Only on certain days" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" }));
+    expect(choose).toHaveBeenCalledWith([{ id: "fruit-trees", name: "Fruit Trees" }]);
+  });
+
+  it("leaves a picker with no schedule offer alone", async () => {
+    openPicker();
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Fruit Trees/ }));
+    expect(screen.queryByRole("checkbox", { name: "Only on certain days" })).toBeNull();
   });
 });

@@ -210,6 +210,25 @@ marked **Partial** during the first 24 hours of collection or monitoring gaps;
 member counts older than two hours are marked **Stale**. These observations do
 not change the activity tier, caps, or campaign targeting.
 
+### Assigning campaigns, and the days they post on
+
+The **+** beside a row's chips adds campaigns to that one group; ticking rows and
+pressing **Add campaigns** adds them to up to a hundred groups at once. Both open
+the same dialog, and in it every ticked campaign can be given its own posting
+days: **Only on certain days** writes the group's `weekly` entry for that campaign
+alongside `promos`, in one change the bot either takes whole or refuses. The chip
+then reads `Fruit Trees · Tue/Thu`.
+
+A campaign left untouched sends no days at all, so a restriction set elsewhere
+survives a later add. Ticking all seven days is not a restriction but the absence
+of one: it clears the entry, and the campaign is daily again. That is also how an
+existing restriction is changed — tick the group, press **Add campaigns**, and
+choose the campaign it already has. Days the campaign's own schedule never fires
+on simply never post; nothing here moves its cron.
+
+The control needs the bot to accept `weekly` as well as `promos`. Where it does
+not, the dialog says so and adds campaigns without days.
+
 **More** expands a configured row to show its complete operator note, full ID,
 DMC window and coverage, and member observation time. It works in read-only
 mode and stays expanded across automatic refreshes. Note editing remains in
