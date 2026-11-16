@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
-import { ALL_WEEKDAYS, WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignSlug, campaignDraftError,
+import { ALL_WEEKDAYS, WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignImageFilename, campaignSlug, campaignDraftError,
   type CampaignDraft, type CampaignImageUpload } from "@/src/domains/campaign-create";
 import { CAMPAIGN_DRAFT_KEY, parseCampaignDraft } from "@/src/lib/campaign-draft";
 import { draftFiles, keepDraftFiles } from "@/src/lib/campaign-files";
@@ -102,10 +102,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
     const digest = await crypto.subtle.digest("SHA-256", await picture.file.arrayBuffer());
     const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     const contentType = picture.file.type as CampaignImageUpload["contentType"];
-    const extension = contentType === "image/png" ? "png" : "jpg";
-    const safeName = picture.file.name.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^[^A-Za-z0-9]+/, "")
-      .replace(/\.(jpg|jpeg|png)$/i, (suffix) => suffix.toLowerCase());
-    const filename = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png)$/.test(safeName) ? safeName : `image-${sha256.slice(0, 12)}.${extension}`;
+    const filename = campaignImageFilename(picture.file.name, sha256, contentType);
     return { filename, sha256, contentType, bytes: picture.file.size,
       key: `ads/${slug}/${sha256}.${contentType === "image/png" ? "png" : "jpg"}` };
   }

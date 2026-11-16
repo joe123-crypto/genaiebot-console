@@ -541,3 +541,38 @@ the read (`BOT_API_BASE_URL` and `BOT_API_TOKEN`). The console's existing
 copy. The bot uses one file on its volume for both texts, independent of
 the workspace overlay. Older bot builds ignore the file; deploying compatible
 code again resumes using it. Neither deploy publishes a draft or sends anything.
+
+## Picture names the bot can cache
+
+Deploy the paired `genaebot` fix before relying on any campaign whose pictures
+carry long filenames; for a checkout based on genaebot `5c80a9c` the change is
+in [genaebot-asset-filename-length.patch](genaebot-asset-filename-length.patch),
+which also applies cleanly to the deployed `d251e71`.
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-asset-filename-length.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-asset-filename-length.patch
+python3 workspace/lib/test_ad_assets.py
+```
+
+The bot caches a picture at `<cache>/<campaign>/<sha256>-<filename>` and writes
+it through a `.<pid>.<hex>.tmp` sibling. A filename long enough to push that
+component past the filesystem's 255-byte limit made `ad_assets.ensure` raise
+`AssetUnusable: [Errno 36] File name too long`, which aborts the whole run
+before it posts anything -- the campaign lost, not the picture. `Borehole
+Drilling 2` sent nothing from 2026-11-14 16:25 onward for this reason, on both
+its schedule entries, while the console reported every run as scheduled and
+confirmed. The patch trims the readable tail to fit, keeping the digest whole
+and the extension on the end.
+
+The console side of the same bug is `CAMPAIGN_IMAGE_NAME_MAX` in
+[src/domains/campaign-create.ts](../src/domains/campaign-create.ts): uploads are
+named through `campaignImageFilename`, and `uploadError` refuses a longer name,
+so a new picture cannot reach the bot with a name it cannot cache. The two caps
+are independent on purpose -- the console's keeps new uploads sane, the bot's
+keeps every already-stored name sendable. Deploy order does not matter and no
+campaign document changes, so a campaign already holding a long filename starts
+sending again on the bot deploy alone, with no edit in the console.
+
+Deploying the bot restarts the gateway, so pick a window with no send run in
+flight rather than one that merely avoids a cron minute.
