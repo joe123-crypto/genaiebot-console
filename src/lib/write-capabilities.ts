@@ -100,6 +100,9 @@ export function canAct(
   name: keyof ActionCapabilities,
 ): WriteGate {
   if (!consoleWrites) return { allowed: false, reason: READ_ONLY_REASON };
+  if (name === "removeDiscovery" && actions?.removeDiscovery === undefined) {
+    return { allowed: false, reason: "Deploy the companion bot update to remove discovered groups." };
+  }
   if (!actions) return { allowed: false, reason: NO_ACTIONS_REASON };
   if (!actions[name]) return { allowed: false, reason: ACTIONS_OFF_REASON };
   return { allowed: true };

@@ -1010,6 +1010,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
    a control meant to be clicked in its own right has to sit above it. Without
    this the overlay swallows the click and the row navigates instead. */
 .cell-actions { text-align: right; white-space: nowrap; position: relative; z-index: 2; }
+.discovered-group-actions { display: inline-flex; gap: 8px; }
 
 .row-action {
   display: inline-flex;

@@ -11,7 +11,7 @@ import { useId, type ReactNode } from "react";
  * accidental open does nothing.
  */
 export function ConfirmDialog({
-  title, children, warning, confirmLabel, danger = false, pending = false, error, onConfirm, onClose,
+  title, children, warning, confirmLabel, danger = false, pending = false, confirmDisabled = false, error, onConfirm, onClose,
 }: {
   title: string;
   children: ReactNode;
@@ -20,6 +20,7 @@ export function ConfirmDialog({
   confirmLabel: string;
   danger?: boolean;
   pending?: boolean;
+  confirmDisabled?: boolean;
   error?: { detail: string; problems?: string[] } | null;
   onConfirm: () => void;
   onClose: () => void;
@@ -44,7 +45,7 @@ export function ConfirmDialog({
         <div className="modal-actions">
           <button type="button" className="btn" onClick={close} disabled={pending} autoFocus>Cancel</button>
           <button type="button" className={`btn ${danger ? "btn-danger" : "btn-primary"}`}
-            onClick={onConfirm} disabled={pending}>
+            onClick={onConfirm} disabled={pending || confirmDisabled}>
             {pending ? "Saving…" : confirmLabel}
           </button>
         </div>

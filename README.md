@@ -366,6 +366,12 @@ beside retained observations, which are not proof of present membership. The
 section is hidden for older bot versions that omit the extra fields. This works
 with either the local or remote read adapter and needs no console write access.
 
+With console writes enabled and a companion bot that supports discovery removal,
+choose **Remove** on an Unassigned row and confirm. This dismisses the saved
+observations across all lines and browsers. A later scan that sees the group
+can bring it back. The **Add to bot** action still puts a discovered group on
+record for campaign assignment.
+
 ## Campaign group drafts
 
 The campaign’s **Where it goes** table supports browser-saved drafts. **Add groups**

@@ -213,6 +213,16 @@ Deploy the bot update first, then this console. Validate the bot with
 `./deploy/ci-check.sh` and the adapter-pinned integration tests; validate the
 console with `npm test`, `npm run typecheck` and `npm run build`.
 
+## Removing an Unassigned group
+
+Deploy the companion bot with `actions.removeDiscovery` before the console
+update. The console sends the row's `lastSeenAt` to
+`POST /internal/console/groups/<urlencoded jid>/remove-discovery` as
+`{"observedThrough": "..."}`. The route uses the group actions switch
+and the console write bearer token. It saves the cutoff under
+`$OPENCLAW_STATE_DIR/runtime/whatsapp-group-removals/` on the persistent volume.
+Both discovery views respect it, including when automatic scans are paused.
+
 ## Firestore scoped reads and group batches
 
 `genaebot-firestore-scoped-reads.patch` applies to genaebot

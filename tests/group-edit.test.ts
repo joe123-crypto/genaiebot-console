@@ -84,12 +84,13 @@ describe("newGroupFromDiscovered", () => {
 
 const updateGroup = vi.fn();
 const getGroups = vi.fn();
+const removeGroupDiscovery = vi.fn();
 const getOverview = vi.fn();
 const revalidate = vi.fn();
 
 async function loadActions(writes = true) {
   vi.resetModules();
-  for (const fn of [updateGroup, getGroups, getOverview, revalidate]) fn.mockReset();
+  for (const fn of [updateGroup, getGroups, getOverview, removeGroupDiscovery, revalidate]) fn.mockReset();
   getGroups.mockResolvedValue({ groups: [group()], discoveredGroups: [] });
   getOverview.mockResolvedValue({
     accounts: [{ id: "default" }, { id: "ads" }],
@@ -105,10 +106,15 @@ async function loadActions(writes = true) {
     }
     class WriteRefusedError extends BotUnavailableError {
       problems: string[];
-      constructor(detail: string, problems: string[]) { super(detail); this.problems = problems; }
+      status: number;
+      constructor(detail: string, problems: string[], status = 400) {
+        super(detail);
+        this.problems = problems;
+        this.status = status;
+      }
     }
     return {
-      updateGroup, getGroups, getOverview, getConfiguration: getOverview, deleteGroup: vi.fn(),
+      updateGroup, getGroups, getOverview, getConfiguration: getOverview, deleteGroup: vi.fn(), removeGroupDiscovery,
       BotUnavailableError, WriteRefusedError,
       WritesDisabledError: class extends Error { detail = "writes off"; },
     };
@@ -119,6 +125,49 @@ async function loadActions(writes = true) {
 afterEach(() => {
   vi.resetModules();
   for (const name of ["@/src/config", "next/cache", "@/src/lib/bot-client"]) vi.doUnmock(name);
+});
+
+describe("removeDiscoveredGroupAction", () => {
+  const jid = "120363111@g.us";
+  const observedThrough = "2026-11-08T06:00:00.000Z";
+  const actions = { leaveGroup: true, clearRecords: true, removeDiscovery: true };
+
+  it("rejects read-only, invalid, and unsupported requests", async () => {
+    const readOnly = await loadActions(false);
+    expect(await readOnly.removeDiscoveredGroupAction(jid, observedThrough)).toMatchObject({ ok: false });
+    expect(getGroups).not.toHaveBeenCalled();
+    const writable = await loadActions();
+    expect(await writable.removeDiscoveredGroupAction("invalid", observedThrough)).toMatchObject({ ok: false });
+    expect(await writable.removeDiscoveredGroupAction(jid, "invalid")).toMatchObject({ ok: false });
+    expect(getGroups).not.toHaveBeenCalled();
+    getGroups.mockResolvedValue({ groups: [], context: { actions: { leaveGroup: true, clearRecords: true } } });
+    expect(await writable.removeDiscoveredGroupAction(jid, observedThrough)).toMatchObject({ ok: false, detail: expect.stringContaining("companion bot") });
+    expect(removeGroupDiscovery).not.toHaveBeenCalled();
+  });
+
+  it("protects a newly saved group and submits the confirmed cutoff for an unsaved group", async () => {
+    const { removeDiscoveredGroupAction } = await loadActions();
+    getGroups.mockResolvedValueOnce({ groups: [group()], context: { actions } });
+    expect(await removeDiscoveredGroupAction(jid, observedThrough)).toMatchObject({ ok: false, refreshLive: true });
+    expect(removeGroupDiscovery).not.toHaveBeenCalled();
+    getGroups.mockResolvedValue({ groups: [], context: { actions } });
+    expect(await removeDiscoveredGroupAction(jid, observedThrough)).toEqual({ ok: true });
+    expect(getGroups).toHaveBeenLastCalledWith(undefined, { fresh: true, jid });
+    expect(removeGroupDiscovery).toHaveBeenCalledExactlyOnceWith(jid, observedThrough);
+    expect(updateGroup).not.toHaveBeenCalled();
+    expect(revalidate).toHaveBeenCalledExactlyOnceWith("/groups");
+  });
+
+  it("requests a refresh when the bot has a newer observation", async () => {
+    const { removeDiscoveredGroupAction } = await loadActions();
+    const { WriteRefusedError } = await import("@/src/lib/bot-client");
+    getGroups.mockResolvedValue({ groups: [], context: { actions } });
+    removeGroupDiscovery.mockRejectedValueOnce(new WriteRefusedError("Observation changed", [], 409));
+    expect(await removeDiscoveredGroupAction(jid, observedThrough)).toMatchObject({
+      ok: false, detail: "Observation changed", refreshLive: true,
+    });
+    expect(revalidate).not.toHaveBeenCalled();
+  });
 });
 
 describe("updateGroupAction", () => {
