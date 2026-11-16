@@ -15,6 +15,7 @@ import type { ScheduleEntriesRequest, ScheduleEntryChange } from "@/src/lib/type
 const POP_WIDTH = 270;
 /** Rough popover height, only used to decide whether it opens below or above its bar. */
 const POP_ESTIMATE = 180;
+const OVERLAP_PREVIEW_COUNT = 5;
 
 type Draft = { date: string; base: Map<string, string | null>; slots: DaySlot[] };
 const ordered = (slots: DaySlot[]) => [...slots].sort((first, second) => slotKey(first).localeCompare(slotKey(second)));
@@ -98,6 +99,10 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   const runningAt = new Map(running.map((slot) => [slotKey(slot), slot.minutes]));
   const upcoming = nextUp(activeView, nowMinutes);
   const found = clashes(dirty ? view : activeView);
+  const overlapWarnings = found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
+    On the {clash.account} line, {label(clash.current)} can still be sending at {displayTimelineClock(clash.finishes, shift)}, after {label(clash.next)} starts at {shown(clash.next)}.
+  </div>);
+  const moreWarnings = overlapWarnings.slice(OVERLAP_PREVIEW_COUNT);
   const nowOffset = `${nowMinutes / 1440 * 100}%`;
 
   /** A poll that lands mid-draft replaces `serverSlots`, so the page holds it still while
@@ -297,11 +302,24 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
 
   return <>
     <div className="schedule-summary">
-      {found.length > 0
-        ? <div className="banner" style={{ display: "block" }} role="status"><strong>Two runs on one line could overlap.</strong>
-            {found.map((clash) => <div key={`${clash.account}-${slotKey(clash.current)}-${slotKey(clash.next)}`}>
-              On the {clash.account} line, {label(clash.current)} can still be sending at {displayTimelineClock(clash.finishes, shift)}, after {label(clash.next)} starts at {shown(clash.next)}.
-            </div>)}</div>
+      {overlapWarnings.length > 0
+        ? <div className="banner schedule-overlap">
+            <div role="status"><strong>Two runs on one line could overlap.</strong>
+              {overlapWarnings.slice(0, OVERLAP_PREVIEW_COUNT)}
+            </div>
+            {moreWarnings.length > 0 && <details className="schedule-overlap-disclosure" onKeyDown={(event) => {
+              const disclosure = event.currentTarget;
+              if (event.key !== "Escape" || !disclosure.open) return;
+              event.stopPropagation();
+              disclosure.open = false;
+              disclosure.querySelector("summary")?.focus();
+            }}>
+              <summary><span>Show {moreWarnings.length} more</span><span>Show fewer</span></summary>
+              <div className="schedule-overlap-extra" role="region" aria-label="Additional overlap warnings" tabIndex={0}>
+                {moreWarnings}
+              </div>
+            </details>}
+          </div>
         : <div className="banner banner-ok" role="status"><CheckCircle2 size={17} aria-hidden style={{ flex: "0 0 auto", marginTop: 1 }} />
             <span><strong>No overlaps.</strong> Every run finishes before the next one on its line starts.</span></div>}
       {summary}

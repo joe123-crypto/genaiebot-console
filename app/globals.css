@@ -960,16 +960,46 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   margin-bottom: 18px;
 }
 
-/* The overlap card and its three counts share one row: the cards stretch to the
-   card's height rather than adding any of their own. */
-.schedule-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; margin-bottom: 18px; }
+/* The overlap card and the counts share a row when there is room. */
+.schedule-summary { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; margin-bottom: 18px; }
 .schedule-summary > .banner { flex: 1 1 380px; margin-bottom: 0; min-width: 0; }
 .banner-ok { border-color: var(--success-border); background: var(--success-soft); color: #12694f; }
+
+.schedule-overlap { position: relative; display: block; overflow-wrap: anywhere; }
+.schedule-overlap-disclosure { margin-top: 6px; }
+.schedule-overlap-disclosure > summary { width: fit-content; cursor: pointer; font-weight: 600; }
+.schedule-overlap-disclosure > summary:hover { text-decoration: underline; }
+.schedule-overlap-disclosure:not([open]) > summary > span:last-child,
+.schedule-overlap-disclosure[open] > summary > span:first-child { display: none; }
+
+/* Extend the card past its layout box with a continuous background and border. */
+.schedule-overlap:has(.schedule-overlap-disclosure[open]) {
+  z-index: 10;
+  border-bottom-color: transparent;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.schedule-overlap-extra {
+  position: absolute;
+  inset-inline: -1px;
+  top: calc(100% - 8px);
+  max-block-size: min(22rem, 50dvh);
+  overflow-y: auto;
+  padding: 0 14px 12px;
+  border: 1px solid var(--danger-border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--danger-soft);
+}
 
 .schedule-counts { display: flex; gap: 12px; flex: 1 1 360px; min-width: 0; }
 .schedule-count { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 12px 14px; }
 .schedule-count .stat-value { font-size: 22px; margin-top: 2px; }
 @media (max-width: 760px) { .schedule-counts { flex-wrap: wrap; } }
+
+/* When the cards stack, keep the warning card next to the timeline. */
+@container (width < 756px) {
+  .schedule-summary > .banner { order: 1; }
+}
 
 .banner pre {
   margin: 6px 0 0;
