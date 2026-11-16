@@ -1,6 +1,6 @@
 "use client";
 
-import { PaginatedPicker } from "@/app/_components/paginated-picker";
+import { PaginatedPicker, type PickerChoice } from "@/app/_components/paginated-picker";
 import { addGroupCampaignAction, addGroupCampaignsAction, removeGroupCampaignAction } from "@/app/groups/actions";
 import { liveFetch, notifyLiveChange, useLivePoll } from "@/app/_components/use-live";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
@@ -15,6 +15,7 @@ import { AddGroupCampaign, type GroupCampaignOption } from "@/app/groups/_compon
 import { DmcHeading, DmcValue, GroupDetails, MemberValue } from "@/app/groups/_components/group-metrics";
 import { READ_ONLY_REASON, type WriteGate } from "@/src/lib/write-capabilities";
 import { MAX_GROUPS_PER_ASSIGNMENT } from "@/src/domains/group-edit";
+import type { CampaignDays } from "@/src/domains/campaign-days";
 import {
   DEFAULT_GROUP_FILTER,
   GROUP_FILTER_KEYS,
@@ -62,6 +63,15 @@ const NO_EDITING: GroupEditing = {
 const NO_CAMPAIGNS: GroupCampaignOption[] = [];
 const NO_CAMPAIGN_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
 
+/** The posting days the dialog chose, for the campaigns it restricted. An
+ *  untouched row sends nothing, which leaves that campaign's days as they are;
+ *  a dialog that restricted nothing sends no days at all, so an add stays the
+ *  plain `promos` write it has always been. */
+function chosenDays(rows: PickerChoice[]): CampaignDays | undefined {
+  const days = rows.flatMap((row) => row.weekdays ? [[row.id, row.weekdays] as const] : []);
+  return days.length > 0 ? Object.fromEntries(days) : undefined;
+}
+
 /** One chip, for the set of removals still in flight. */
 function removalKey(jid: string, promo: string) {
   return `${jid}\n${promo}`;
@@ -80,6 +90,9 @@ type Props = {
   /** Taking a campaign off a group, which rewrites three fields at once and is
    *  therefore gated apart from adding one. */
   removeGate?: WriteGate;
+  /** Choosing the days a campaign posts on, which writes `weekly` alongside
+   *  `promos` and so needs the extra field the add gate does not ask for. */
+  scheduleGate?: WriteGate;
   /** Read from the URL on the server, and used only to seed the state below. */
   initialFilter: GroupFilter;
   remote?: { onFilter: (filter: GroupFilter) => void; total: number; lines: string[]; campaigns: GroupCampaignOption[]; tiers: string[] };
@@ -92,7 +105,7 @@ const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-membe
 export function GroupsTable({
   groups, disabledPromos, writesEnabled, editing = NO_EDITING, initialFilter,
   campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES,
-  removeGate = NO_CAMPAIGN_WRITES, remote,
+  removeGate = NO_CAMPAIGN_WRITES, scheduleGate = NO_CAMPAIGN_WRITES, remote,
 }: Props) {
   const displayZone = useDisplayTimezone();
   const id = useId();
@@ -185,17 +198,19 @@ export function GroupsTable({
     <div className="card">
       {editorDeleted && editingGroup ? <p role="alert">This group no longer exists. Your open draft is retained.</p> : null}
       {assignmentError ? <p role="alert">{assignmentError}</p> : null}
-      {campaignGroup ? <PaginatedPicker kind="campaigns" exclude={campaignGroup.promos} close={() => setCampaignGroup(null)} choose={async (rows) => {
-        const result = await addGroupCampaignAction(campaignGroup.jid, rows.map((row) => row.id));
-        if (result.ok) notifyLiveChange();
-        return result;
-      }} /> : null}
-      {bulkPickerOpen ? <PaginatedPicker kind="campaigns" close={() => setBulkPickerOpen(false)} choose={async (rows) => {
-        const result = await addGroupCampaignsAction([...selectedGroups.keys()], rows.map((row) => row.id));
-        if (result.ok) setSelectedGroups(new Map());
-        if (result.ok || result.refreshLive) notifyLiveChange();
-        return result;
-      }}>
+      {campaignGroup ? <PaginatedPicker kind="campaigns" exclude={campaignGroup.promos} schedule={{ gate: scheduleGate }}
+        close={() => setCampaignGroup(null)} choose={async (rows) => {
+          const result = await addGroupCampaignAction(campaignGroup.jid, rows.map((row) => row.id), chosenDays(rows));
+          if (result.ok) notifyLiveChange();
+          return result;
+        }} /> : null}
+      {bulkPickerOpen ? <PaginatedPicker kind="campaigns" schedule={{ gate: scheduleGate }}
+        close={() => setBulkPickerOpen(false)} choose={async (rows) => {
+          const result = await addGroupCampaignsAction([...selectedGroups.keys()], rows.map((row) => row.id), chosenDays(rows));
+          if (result.ok) setSelectedGroups(new Map());
+          if (result.ok || result.refreshLive) notifyLiveChange();
+          return result;
+        }}>
         <details className="group-assignment-destinations">
           <summary>Add to {selectedGroups.size} {selectedGroups.size === 1 ? "group" : "groups"}</summary>
           <ul>

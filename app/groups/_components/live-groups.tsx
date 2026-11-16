@@ -51,6 +51,7 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
       disabledPromos={groups.page?.disabledPromos ?? []} writesEnabled={writable} editing={editing}
       campaigns={groups.page?.facets?.campaigns ?? []} campaignGate={canWrite(writable, context?.writes, "groups", "promos")}
       removeGate={canWrite(writable, context?.writes, "groups", "promos", "paused_promos", "weekly")}
+      scheduleGate={canWrite(writable, context?.writes, "groups", "promos", "weekly")}
       initialFilter={initialFilter ?? DEFAULT_GROUP_FILTER} remote={{ onFilter: setFilter, total: groups.page?.total ?? 0,
         lines: groups.page?.facets?.lines ?? [], campaigns: groups.page?.facets?.campaigns ?? [], tiers: editing.tiers }} />
     <LoadMore next={groups.page?.nextCursor} loading={groups.loading} load={groups.loadMore} />

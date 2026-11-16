@@ -14,6 +14,7 @@ import {
   type GroupEditField,
 } from "@/src/domains/group-edit";
 import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
+import { campaignDaysProblem, isEveryDay, weekdayTokens, type CampaignDays } from "@/src/domains/campaign-days";
 import { planAssignmentWrites } from "@/src/lib/campaign-group-draft";
 import { confirmLabel } from "@/src/lib/format";
 import type { Group } from "@/src/lib/types";
@@ -56,19 +57,34 @@ async function vocabulary(): Promise<{ lines: string[]; tiers: string[] }> {
 }
 
 /** Add campaigns using the group's current membership. */
-export async function addGroupCampaignAction(jid: string, selection: string | string[]): Promise<WriteOutcome> {
-  return assignGroupCampaigns([jid], Array.isArray(selection) ? selection : [selection], false);
+export async function addGroupCampaignAction(
+  jid: string, selection: string | string[], days?: CampaignDays,
+): Promise<WriteOutcome> {
+  return assignGroupCampaigns([jid], Array.isArray(selection) ? selection : [selection], false, days);
 }
 
 type GroupAssignmentOutcome = WriteOutcome & { refreshLive?: boolean };
 
 /** Add each selected campaign to each selected group. */
-export async function addGroupCampaignsAction(jids: string[], slugs: string[]): Promise<GroupAssignmentOutcome> {
-  return assignGroupCampaigns(jids, slugs, true);
+export async function addGroupCampaignsAction(
+  jids: string[], slugs: string[], days?: CampaignDays,
+): Promise<GroupAssignmentOutcome> {
+  return assignGroupCampaigns(jids, slugs, true, days);
 }
 
+/**
+ * Add campaigns to groups, and set the days they post on where the dialog asked
+ * for them.
+ *
+ * `days` names only the campaigns the operator restricted: one left alone sends
+ * nothing and keeps whatever cadence it already has, so a bulk add never quietly
+ * undoes a restriction made elsewhere. All seven days is not a restriction but
+ * the absence of one -- the bot leaves such a group out of `weekly` entirely,
+ * and a stale entry listing every day would still count the group as weekly-only
+ * on the campaigns screen -- so it clears the entry instead of writing it.
+ */
 async function assignGroupCampaigns(
-  groupIds: string[], campaignIds: string[], bulk: boolean,
+  groupIds: string[], campaignIds: string[], bulk: boolean, days?: CampaignDays,
 ): Promise<GroupAssignmentOutcome> {
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (!Array.isArray(groupIds) || groupIds.length === 0 ||
@@ -84,6 +100,9 @@ async function assignGroupCampaigns(
     return { ok: false, detail: "No valid campaign was named." };
   }
   const slugs = [...new Set(campaignIds)];
+  const badDays = campaignDaysProblem(days, slugs);
+  if (badDays) return { ok: false, detail: badDays };
+  const schedules = Object.entries(days ?? {});
   const by = OPERATOR_NAME;
   const refreshAssignments = () => refreshAssignment(slugs);
 
@@ -99,7 +118,10 @@ async function assignGroupCampaigns(
         getCapabilities({ fresh: true }),
         Promise.all(slugs.map((slug) => getCampaignState(slug, { fresh: true }))),
       ]);
-    const gate = canWrite(WRITES_ENABLED, writes, "groups", "promos");
+    // Days are written as `weekly`, which an older bot's writer may not accept.
+    // Asking for it only when days were chosen keeps a plain add working there.
+    const gate = canWrite(WRITES_ENABLED, writes, "groups", "promos",
+      ...(schedules.length > 0 ? ["weekly"] : []));
     if (!gate.allowed) return { ok: false, detail: gate.reason };
     const knownSlugs = new Set(knownCampaigns.map((campaign) => campaign?.slug));
     const missingCampaign = slugs.find((slug) => !knownSlugs.has(slug));
@@ -115,12 +137,27 @@ async function assignGroupCampaigns(
         return { ok: false, detail: bulk ? `Group ${jid} is no longer on record.` : "This group is no longer on record." };
       }
       const additions = slugs.filter((slug) => !current.promos.includes(slug));
-      if (current.status !== "active" && (bulk || additions.length > 0)) {
+      if (current.status !== "active" && (bulk || additions.length > 0 || schedules.length > 0)) {
         const label = bulk ? `${confirmLabel(current)} (${jid})` : "This group";
         return { ok: false, detail: `${label} is ${current.status}, so it cannot be added to a campaign.` };
       }
-      if (additions.length > 0) {
-        changes.push({ id: jid, fields: { promos: [...current.promos, ...additions] }, expected: { promos: current.promos } });
+      const fields: Record<string, unknown> = {};
+      if (additions.length > 0) fields.promos = [...current.promos, ...additions];
+      // Only touched when days were chosen: an older bot may not report `weekly`
+      // at all, and a plain add must not start writing one on its own.
+      const currentWeekly = current.weekly ?? {};
+      if (schedules.length > 0) {
+        const weekly = { ...currentWeekly };
+        for (const [slug, chosen] of schedules) {
+          if (isEveryDay(chosen)) delete weekly[slug];
+          else weekly[slug] = weekdayTokens(chosen);
+        }
+        if (JSON.stringify(weekly) !== JSON.stringify(currentWeekly)) fields.weekly = weekly;
+      }
+      if (Object.keys(fields).length > 0) {
+        const values: Record<string, unknown> = { promos: current.promos, weekly: currentWeekly };
+        changes.push({ id: jid, fields,
+          expected: Object.fromEntries(Object.keys(fields).map((field) => [field, values[field]])) });
       }
     }
 

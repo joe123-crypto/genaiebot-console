@@ -796,8 +796,17 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .campaign-group-dialog-footer { margin-top: 16px; flex-wrap: wrap; }
 .campaign-group-options { margin-top: 14px; max-height: min(360px, 45dvh); overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .campaign-group-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px; cursor: pointer; }
-.campaign-group-option + .campaign-group-option { border-top: 1px solid var(--border); }
+/* Two shapes of list: bare labels, and the picker's rows, which carry a
+   campaign's posting days under their label. */
+.campaign-group-option + .campaign-group-option,
+.campaign-group-option-row + .campaign-group-option-row { border-top: 1px solid var(--border); }
 .campaign-group-option:hover { background: var(--surface-muted); }
+/* The posting days for one chosen campaign, indented under its own row so the
+   list still reads as a list of campaigns. */
+.campaign-group-option-schedule { padding: 0 12px 12px 38px; font-size: 13px; }
+.campaign-group-option-schedule .campaign-check { margin-top: 0; }
+.campaign-group-option-schedule .campaign-weekdays { margin-top: 8px; gap: 10px; }
+.campaign-group-option-schedule .card-note { margin-top: 8px; }
 .campaign-group-option > span { min-width: 0; overflow-wrap: anywhere; }
 .campaign-group-option .picker-campaign-count {
   display: inline-block;

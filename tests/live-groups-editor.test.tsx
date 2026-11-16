@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { GroupsTable } from "@/app/groups/_components/groups-table";
 import { DEFAULT_GROUP_FILTER } from "@/src/domains/group-filter";
@@ -64,13 +64,14 @@ it("adds campaigns selected across searches in one request and keeps them select
   fireEvent.click(submit);
   fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
   expect(screen.getByRole("dialog")).toBeTruthy();
-  expect(addCampaigns).toHaveBeenCalledExactlyOnceWith(group.jid, ["fruit-trees", "web-design"]);
+  // No day was restricted, so the add stays the plain membership write.
+  expect(addCampaigns).toHaveBeenCalledExactlyOnceWith(group.jid, ["fruit-trees", "web-design"], undefined);
 
   await act(async () => resolve({ ok: false, detail: "Try again later." }));
   expect(screen.getByRole("alert").textContent).toBe("Try again later.");
   expect(design.checked).toBe(true);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add 2 selected" })));
-  expect(addCampaigns).toHaveBeenLastCalledWith(group.jid, ["fruit-trees", "web-design"]);
+  expect(addCampaigns).toHaveBeenLastCalledWith(group.jid, ["fruit-trees", "web-design"], undefined);
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
@@ -115,11 +116,11 @@ it("keeps selected groups across loaded pages, filters and refreshes, and retrie
   fireEvent.click(screen.getByRole("checkbox", { name: "Web Design" }));
   const submit = screen.getByRole("button", { name: "Add 2 selected" });
   await act(async () => fireEvent.click(submit));
-  expect(bulkAdd).toHaveBeenCalledExactlyOnceWith([group.jid, west.jid, east.jid], ["cv", "web-design"]);
+  expect(bulkAdd).toHaveBeenCalledExactlyOnceWith([group.jid, west.jid, east.jid], ["cv", "web-design"], undefined);
   expect(screen.getByRole("alert").textContent).toBe("Connection lost.");
   expect(screen.getByText("3 groups selected")).toBeTruthy();
   await act(async () => fireEvent.click(submit));
-  expect(bulkAdd).toHaveBeenLastCalledWith([group.jid, west.jid, east.jid], ["cv", "web-design"]);
+  expect(bulkAdd).toHaveBeenLastCalledWith([group.jid, west.jid, east.jid], ["cv", "web-design"], undefined);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByText("0 groups selected")).toBeTruthy();
 });
@@ -149,3 +150,48 @@ it("enforces the group selection limit and hides bulk controls without write per
   expect(screen.queryByRole("checkbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Add campaigns" })).toBeNull();
 }, 30_000);
+
+it("sends the days chosen per campaign, from the row and from a bulk selection", async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
+  // A fresh body per call: each picker that opens reads the response itself.
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+    rows: [{ slug: "fruit-trees", name: "Fruit Trees" }, { slug: "web-design", name: "Web Design" }],
+  })));
+  addCampaigns.mockReset().mockResolvedValue({ ok: true });
+  bulkAdd.mockReset().mockResolvedValue({ ok: true });
+
+  render(<GroupsTable {...props} campaignGate={gate} scheduleGate={gate} groups={[group]} />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add campaign to Market" })));
+  fireEvent.click(screen.getByRole("checkbox", { name: /Fruit Trees/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Only on certain days" }));
+  const days = screen.getByRole("group", { name: "Posting days for Fruit Trees" });
+  for (const day of ["Mon", "Tue", "Thu", "Fri", "Sun"]) {
+    fireEvent.click(within(days).getByRole("checkbox", { name: day }));
+  }
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" })));
+  expect(addCampaigns).toHaveBeenCalledExactlyOnceWith(group.jid, ["fruit-trees"], { "fruit-trees": [2, 5] });
+
+  // The same choice, made for every group ticked in the table.
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Market (123)" }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add campaigns" })));
+  fireEvent.click(await screen.findByRole("checkbox", { name: /Web Design/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Only on certain days" }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" })));
+  expect(bulkAdd).toHaveBeenCalledExactlyOnceWith([group.jid], ["web-design"], { "web-design": [0, 1, 2, 3, 4, 5, 6] });
+});
+
+it("says why posting days are unavailable while still adding campaigns", async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ rows: [{ slug: "fruit-trees", name: "Fruit Trees" }] })));
+  addCampaigns.mockReset().mockResolvedValue({ ok: true });
+
+  render(<GroupsTable {...props} campaignGate={gate} groups={[group]} />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add campaign to Market" })));
+  fireEvent.click(screen.getByRole("checkbox", { name: /Fruit Trees/ }));
+  expect(screen.getByText(/read-only/)).toBeTruthy();
+  expect(screen.queryByRole("checkbox", { name: "Only on certain days" })).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add 1 selected" })));
+  expect(addCampaigns).toHaveBeenCalledExactlyOnceWith(group.jid, ["fruit-trees"], undefined);
+});
