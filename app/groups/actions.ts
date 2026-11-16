@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
-import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, updateGroup, updateGroupBatch, type GroupBatchChange } from "@/src/lib/bot-client";
-import { canWrite } from "@/src/lib/write-capabilities";
+import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, removeGroupDiscovery, updateGroup, updateGroupBatch, WriteRefusedError, type GroupBatchChange } from "@/src/lib/bot-client";
+import { canAct, canWrite } from "@/src/lib/write-capabilities";
 import {
   changedGroupFields,
   currentGroupValues,
@@ -393,5 +393,34 @@ export async function addDiscoveredGroupAction(jid: string): Promise<WriteOutcom
     return failedWrite(error);
   }
   refresh();
+  return { ok: true };
+}
+
+export async function removeDiscoveredGroupAction(
+  jid: string,
+  observedThrough: string,
+): Promise<WriteOutcome & { refreshLive?: boolean }> {
+  if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
+  if (typeof jid !== "string" || jid.length > 128 || !/^\d+(?:-\d+)?@g\.us$/.test(jid)) {
+    return { ok: false, detail: "No valid group was named." };
+  }
+  if (typeof observedThrough !== "string" || observedThrough.length > 40 || !Number.isFinite(Date.parse(observedThrough))) {
+    return { ok: false, detail: "The discovery observation time is invalid." };
+  }
+  try {
+    const { groups, context } = await getGroups(undefined, { fresh: true, jid });
+    if (groups.some(entry => entry.jid === jid)) {
+      return { ok: false, detail: "This group has been added to the bot.", refreshLive: true };
+    }
+    const gate = canAct(WRITES_ENABLED, context?.actions, "removeDiscovery");
+    if (!gate.allowed) return { ok: false, detail: gate.reason };
+    await removeGroupDiscovery(jid, observedThrough);
+  } catch (error) {
+    const outcome = failedWrite(error);
+    return error instanceof WriteRefusedError && error.status === 409
+      ? { ...outcome, refreshLive: true }
+      : outcome;
+  }
+  revalidatePath("/groups");
   return { ok: true };
 }

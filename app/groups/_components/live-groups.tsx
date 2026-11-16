@@ -45,7 +45,9 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
     <SyncNotice sync={groups.page?.sync} error={groups.error} />
     <SyncNotice sync={discovery.page?.sync} error={discovery.error} />
     <DiscoveredGroups groups={discovery.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
-      zone={displayZone} discovery={discovery.page?.discovery} addGate={writable ? canWrite(writable, context?.writes, "groups", "name", "source", "status", "promos", "daily_cap") : undefined} />
+      zone={displayZone} discovery={discovery.page?.discovery} total={discovery.page?.total}
+      addGate={writable ? canWrite(writable, context?.writes, "groups", "name", "source", "status", "promos", "daily_cap") : undefined}
+      removeGate={writable ? canAct(writable, context?.actions, "removeDiscovery") : undefined} />
     <LoadMore next={discovery.page?.nextCursor} loading={discovery.loading} load={discovery.loadMore} />
     <GroupsTable groups={groups.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
       disabledPromos={groups.page?.disabledPromos ?? []} writesEnabled={writable} editing={editing}

@@ -1,26 +1,26 @@
 import { Empty } from "@/app/_components/ui";
-import { ADD_EXPLAINER, AddDiscoveredGroup } from "@/app/groups/_components/add-discovered-group";
+import { ADD_EXPLAINER, DiscoveredGroupActions } from "@/app/groups/_components/discovered-group-actions";
 import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { DiscoveredGroup, GroupDiscovery } from "@/src/lib/types";
 import { DmcHeading, DmcValue, MemberValue } from "@/app/groups/_components/group-metrics";
 import { displayStamp } from "@/src/lib/timezone";
 import { BOT_TIMEZONE } from "@/src/config";
 
-/** Server-rendered inventory; these rows are deliberately outside ad settings
- *  until an operator adds one -- which puts it on record in no campaign. The
- *  Add column appears only when the console's writes are switched on. */
-export function DiscoveredGroups({ groups, discovery, addGate, zone = BOT_TIMEZONE }: {
+export function DiscoveredGroups({ groups, discovery, addGate, removeGate, total, zone = BOT_TIMEZONE }: {
   groups?: DiscoveredGroup[];
   discovery?: GroupDiscovery;
   addGate?: WriteGate;
+  removeGate?: WriteGate;
+  total?: number;
   zone?: string;
 }) {
   if (groups === undefined && discovery === undefined) return null;
   const rows = groups ?? [];
+  const showActions = addGate || removeGate;
   return (
     <section className="card" style={{ marginBottom: 16 }} aria-labelledby="unassigned-groups-title">
       <div className="card-head">
-        <h2 className="card-title" id="unassigned-groups-title">Unassigned <span className="pill">{rows.length}</span></h2>
+        <h2 className="card-title" id="unassigned-groups-title">Unassigned <span className="pill">{total ?? rows.length}</span></h2>
         <span className="card-note">Saved automatically. No campaigns are assigned automatically.</span>
       </div>
       {discovery ? (
@@ -47,7 +47,7 @@ export function DiscoveredGroups({ groups, discovery, addGate, zone = BOT_TIMEZO
             <thead>
               <tr>
                 <th scope="col">Group</th><th scope="col">Joined accounts</th><DmcHeading /><th scope="col">Members</th><th scope="col">Last seen</th>
-                {addGate ? <th><span className="visually-hidden">Actions</span></th> : null}
+                {showActions ? <th scope="col"><span className="visually-hidden">Actions</span></th> : null}
               </tr>
             </thead>
             <tbody>
@@ -61,9 +61,10 @@ export function DiscoveredGroups({ groups, discovery, addGate, zone = BOT_TIMEZO
                   <td><DmcValue metrics={group.metrics} /></td>
                   <td><MemberValue metrics={group.metrics} zone={zone} /></td>
                   <td className="cell-muted"><time dateTime={group.lastSeenAt}>{displayStamp(group.lastSeenAt, zone, "Unknown")}</time></td>
-                  {addGate ? (
+                  {showActions ? (
                     <td className="cell-actions">
-                      <AddDiscoveredGroup jid={group.jid} label={group.name || group.jid} gate={addGate} />
+                      <DiscoveredGroupActions jid={group.jid} label={group.name || group.jid}
+                        lastSeenAt={group.lastSeenAt} addGate={addGate} removeGate={removeGate} />
                     </td>
                   ) : null}
                 </tr>

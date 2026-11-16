@@ -164,6 +164,7 @@ export type ConfigShadow = {
 export type ActionCapabilities = {
   leaveGroup: boolean;
   clearRecords: boolean;
+  removeDiscovery?: boolean;
 };
 
 export type WriteCapabilities = {

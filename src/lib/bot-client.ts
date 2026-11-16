@@ -653,6 +653,24 @@ export async function groupAction(
   return runBridge<GroupActionResult>(ACTION_BRIDGE, [], { jid, ...body });
 }
 
+export async function removeGroupDiscovery(jid: string, observedThrough: string): Promise<void> {
+  if (!WRITES_ENABLED) throw new WritesDisabledError();
+  type Receipt = { ok: boolean; jid: string; observedThrough: string };
+  const unreadable = () => new BotUnavailableError(
+    "The bot returned an unreadable removal result. Refresh the list before trying again.",
+  );
+  let result: Receipt;
+  try {
+    result = WRITE_SOURCE === "remote"
+      ? await writeRemote<Receipt>(`groups/${encodeURIComponent(jid)}/remove-discovery`, { observedThrough })
+      : await runBridge<Receipt>(ACTION_BRIDGE, [], { jid, observedThrough });
+  } catch (error) {
+    if (error instanceof SyntaxError) throw unreadable();
+    throw error;
+  }
+  if (result?.ok !== true || result.jid !== jid || result.observedThrough !== observedThrough) throw unreadable();
+}
+
 /** Uses the bot's validated, audited config writer, rather than a console copy. */
 export async function updateCampaignCaptions(
   slug: string,
