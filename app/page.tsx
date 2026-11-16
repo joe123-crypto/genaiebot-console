@@ -16,6 +16,6 @@ export default async function ScheduleHomePage() {
   // When the two differ, the day is still the bot's -- the clock is only ours.
   const day = zone === BOT_TIMEZONE ? `The campaign day in ${BOT_TIMEZONE}.`
     : `The campaign day, planned in ${BOT_TIMEZONE} and shown in ${zone}.`;
-  return <Shell live><PageHead subtitle={`${day} Live updates every 30 seconds.`} />
+  return <Shell live homeLayout><PageHead subtitle={`${day} Live updates every 30 seconds.`} />
     <LiveScheduleView initial={initial} initialError={initialError} writable={WRITES_ENABLED} /></Shell>;
 }

@@ -56,6 +56,31 @@ describe("independent timeline entries", () => {
     fireEvent.keyDown(bar(), { key: "Enter" });
     expect(screen.getByRole("dialog")).toBeDefined();
   });
+  it("anchors options to the time label and dismisses them when it scrolls out of view", () => {
+    mount();
+    const timeline = screen.getByRole("region", { name: "Campaign timeline" });
+    const timeLabel = screen.getByRole("button", { name: "Alpha run 1 options" });
+    let labelTop = 170;
+    vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 400, 200));
+    vi.spyOn(timeLabel, "getBoundingClientRect").mockImplementation(() => new DOMRect(120, labelTop, 50, 20));
+
+    fireEvent.click(timeLabel);
+    expect(screen.getByRole("dialog").style.left).toBe("120px");
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(timeLabel);
+    fireEvent.click(timeLabel);
+
+    labelTop = 150;
+    fireEvent.scroll(timeline);
+    expect(screen.getByRole("dialog").style.top).toBe("178px");
+
+    labelTop = 70;
+    timeline.scrollTop = 100;
+    fireEvent.scroll(timeline);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(timeline);
+    expect(timeline.scrollTop).toBe(100);
+  });
   it("distinguishes drag from click and restores a cancelled drag", () => {
     mount(); const element = bar();
     fireEvent.pointerDown(element, { button: 0, clientX: 500 });
