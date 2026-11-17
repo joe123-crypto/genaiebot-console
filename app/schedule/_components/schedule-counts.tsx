@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { liveFetch, useLivePoll } from "@/app/_components/use-live";
+import { LiveError, liveFetch, useLivePoll } from "@/app/_components/use-live";
 import { plural } from "@/src/lib/format";
 import type { LineSummary } from "@/src/domains/console";
 import type { AccountsPayload } from "@/src/lib/account-types";
@@ -24,16 +24,19 @@ export function ScheduleCounts({ campaignsToday }: { campaignsToday: number }) {
   const [campaigns, setCampaigns] = useState<number | null>(null);
   const [linked, setLinked] = useState<Linked>(null);
   const [clicks, setClicks] = useState<ClickTotals | null>(null);
-  const [clicksUnavailable, setClicksUnavailable] = useState(false);
+  /** The status of the last failed read, 0 when it never reached the route. */
+  const [clicksFailed, setClicksFailed] = useState<number | null>(null);
 
   async function load(signal?: AbortSignal) {
     const readClicks = liveFetch<ClickTotals>("campaign-clicks", new URLSearchParams(), signal)
       .then(totals => {
         if (signal?.aborted) return;
         setClicks(totals);
-        setClicksUnavailable(false);
+        setClicksFailed(null);
       })
-      .catch(() => { if (!signal?.aborted) setClicksUnavailable(true); });
+      .catch((error: unknown) => {
+        if (!signal?.aborted) setClicksFailed(error instanceof LiveError ? error.status : 0);
+      });
     const [navigation, lines, accounts] = await Promise.allSettled([
       liveFetch<{ campaignTotal: number }>("navigation", new URLSearchParams(), signal),
       read<{ lines: LineSummary[] }>("/api/account-membership", signal),
@@ -58,6 +61,10 @@ export function ScheduleCounts({ campaignsToday }: { campaignsToday: number }) {
 
   /** A line whose status never arrived is not a disconnected line. */
   const unknown = linked !== null && linked.total === 0;
+  /** Totals are the one read a bot can refuse outright: a companion predating them
+   *  rejects the slugless form rather than failing. That is a missing update, not an
+   *  outage, and the card says so instead of reading as dead. */
+  const needsBot = clicksFailed === 400 || clicksFailed === 404;
 
   return <div className="schedule-counts" role="status">
     <div className="card card-pad schedule-count">
@@ -79,12 +86,17 @@ export function ScheduleCounts({ campaignsToday }: { campaignsToday: number }) {
       <div className="stat-label">Total link clicks</div>
       <div className="stat-value">{clicks ? formatCount.format(clicks.totalClicks) : "—"}</div>
       <div className="stat-note">
-        {clicksUnavailable ? clicks ? "All time · last available" : "All time · unavailable" : "All time"}
+        {clicksFailed === null ? "All time"
+          : clicks ? "All time · last available"
+          : needsBot ? "All time · needs the bot update"
+          : "All time · unavailable"}
       </div>
       <div className="stat-note">
-        {clicks && clicksUnavailable
+        {clicks && clicksFailed !== null
           ? `Last daily count · ${formatCount.format(clicks.todayClicks)}`
-          : `${clicks ? formatCount.format(clicks.todayClicks) : "—"} today${clicks?.todayPartial ? " (since update)" : ""}`}
+          : !clicks && needsBot
+            ? "Deploy the companion bot update for click totals."
+            : `${clicks ? formatCount.format(clicks.todayClicks) : "—"} today${clicks?.todayPartial ? " (since update)" : ""}`}
       </div>
     </div>
   </div>;
