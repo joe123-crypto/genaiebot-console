@@ -1046,10 +1046,10 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   background: var(--danger-soft);
 }
 
-.schedule-counts { display: flex; gap: 12px; flex: 1 1 360px; min-width: 0; }
-.schedule-count { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 12px 14px; }
+.schedule-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; flex: 1 1 440px; min-width: 0; }
+.schedule-count { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 12px 14px; overflow-wrap: anywhere; }
 .schedule-count .stat-value { font-size: 22px; margin-top: 2px; }
-@media (max-width: 760px) { .schedule-counts { flex-wrap: wrap; } }
+@media (max-width: 760px) { .schedule-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* When the cards stack, keep the warning card next to the timeline. */
 @container (width < 756px) {
@@ -1325,8 +1325,8 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .home-summary > .home-disclosure-panel { inset-inline-start: 0; width: min(36rem, 100%); }
   .home-summary .schedule-summary { flex-direction: column; gap: 10px; margin: 0; }
   .home-summary .schedule-summary > .banner { flex: none; order: 1; }
-  .home-summary .schedule-counts { flex: none; flex-wrap: nowrap; gap: 6px; }
-  .home-summary .schedule-count { padding: 8px; overflow-wrap: anywhere; }
+  .home-summary .schedule-counts { flex: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .home-summary .schedule-count { padding: 8px; }
   .home-summary .schedule-overlap:has(.schedule-overlap-disclosure[open]) {
     border-color: var(--danger-border);
     border-radius: var(--radius);
