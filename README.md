@@ -86,7 +86,7 @@ npm run build
 
 | Screen | State |
 |---|---|
-| Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
+| Overview | Live. Group counts, today's planned ads, slots, per-line reach. All-time and daily link clicks require the companion bot update that reports totals; without it the card says so rather than showing a count. |
 | Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
 | Campaigns | Live. Searchable and filterable, with New campaign creation when the companion bot support is deployed. Each row can switch its campaign off and on. |
 | Campaign preview | Live. Campaign Details shows estimated link clicks as a total and by group. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
@@ -94,6 +94,11 @@ npm run build
 | Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
 | Activity | Not wired up. Send history and ad replies live on the Railway volume. |
+
+Overview's total and a campaign's own total are not the same measure and will not
+add up: the bot filters Overview to group links so rollout smoke-test links stay
+out of it, while a campaign's report counts every link it issued. Daily counting
+starts when the bot process boots, so the first day is marked partial.
 
 Writes are off by default. Set `CONSOLE_WRITES=1` in an environment where console
 access is controlled. Edits go to the bot's config writer -- the same console API

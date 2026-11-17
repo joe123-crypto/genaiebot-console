@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScheduleCounts } from "@/app/schedule/_components/schedule-counts";
 
 const mock = vi.hoisted(() => ({ live: vi.fn(), poll: vi.fn() }));
-vi.mock("@/app/_components/use-live", () => ({ liveFetch: mock.live, useLivePoll: mock.poll }));
+/** Partial: the card tells a refused read from a failed one by the real LiveError. */
+vi.mock("@/app/_components/use-live", async importOriginal => ({
+  ...await importOriginal<typeof import("@/app/_components/use-live")>(),
+  liveFetch: mock.live, useLivePoll: mock.poll,
+}));
 
 const lines = [{ id: "default", groupCount: 180 }, { id: "ads", groupCount: 132 }];
 const accounts = [{ id: "default", connected: true }, { id: "ads", connected: true }, { id: "spare", connected: false }];

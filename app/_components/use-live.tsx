@@ -45,9 +45,16 @@ export function useDebounced<T>(value: T, delay: number) {
   useEffect(() => { const timer = setTimeout(() => setSettled(value), delay); return () => clearTimeout(timer); }, [value, delay]);
   return settled;
 }
+/** Carries the response status, so a caller can tell a bot that is too old for the
+ *  read it asked for (the route passes a 4xx straight through) from one that is
+ *  merely synchronizing or down. Still an Error with the same message: callers
+ *  that only report `.message` need no change. */
+export class LiveError extends Error {
+  constructor(message: string, readonly status: number) { super(message); this.name = "LiveError"; }
+}
 export async function liveFetch<T>(view: string, query: URLSearchParams, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/live/${view}?${query}`, { cache: "no-store", signal });
-  if (!response.ok) { const data = await response.json(); throw new Error(data.error || "Live updates unavailable."); }
+  if (!response.ok) { const data = await response.json(); throw new LiveError(data.error || "Live updates unavailable.", response.status); }
   return response.json();
 }
 export function notifyLiveChange() { window.dispatchEvent(new Event("genaie:changed")); }
