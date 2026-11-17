@@ -170,14 +170,14 @@ a { color: inherit; text-decoration: none; }
   padding: 28px 32px 56px;
 }
 
-.console-app-home {
+:is(.console-app-home, .console-app-campaigns) {
   height: 100dvh;
   min-height: 0;
   grid-template-rows: minmax(0, 1fr);
   overflow: clip;
 }
-.console-app-home > .console-sidebar { height: 100%; min-height: 0; }
-.console-app-home > .console-content {
+:is(.console-app-home, .console-app-campaigns) > .console-sidebar { height: 100%; min-height: 0; }
+:is(.console-app-home, .console-app-campaigns) > .console-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1274,11 +1274,11 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 }
 
 @media (max-width: 1100px), (max-height: 740px) {
-  .console-app-home {
+  :is(.console-app-home, .console-app-campaigns) {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
-  .console-app-home > .console-sidebar {
+  :is(.console-app-home, .console-app-campaigns) > .console-sidebar {
     position: relative;
     z-index: 51;
     height: auto;
@@ -1289,10 +1289,10 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  .console-app-home .console-brand { padding: 0; }
-  .console-app-home .console-brand-mark { height: 30px; }
-  .console-app-home > .console-content { padding: 12px 16px; }
-  .console-app-home .page-head { margin-bottom: 10px; }
+  :is(.console-app-home, .console-app-campaigns) .console-brand { padding: 0; }
+  :is(.console-app-home, .console-app-campaigns) .console-brand-mark { height: 30px; }
+  :is(.console-app-home, .console-app-campaigns) > .console-content { padding: 12px 16px; }
+  :is(.console-app-home, .console-app-campaigns) .page-head { margin-bottom: 10px; }
   .console-app-home > .console-content > .banner {
     max-block-size: min(5rem, 12dvh);
     margin-bottom: 10px;
@@ -1506,3 +1506,23 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   padding: 8px 11px; font-size: 12.5px; line-height: 1.6;
 }
 .caption-shrink { margin: 9px 0 0; }
+
+/* Campaign list fills the viewport; only its rows scroll. */
+.console-app-campaigns > .console-content > .page-head { flex: none; }
+.campaigns-viewport { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.campaigns-notices { flex: none; max-block-size: min(8rem, 18dvh); overflow: auto; overflow-wrap: anywhere; }
+.campaigns-notices:empty { display: none; }
+.campaigns-viewport > .campaigns-table { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.campaigns-viewport .filter-bar, .campaigns-viewport .filter-summary { flex: none; }
+.campaigns-viewport .table-wrap { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
+.campaigns-viewport table.data th { position: sticky; top: 0; z-index: 2; }
+.campaigns-end { height: 1px; }
+.campaigns-viewport > .card-pad { flex: none; padding: 10px 0 0; }
+.campaigns-viewport > .card-pad:empty { display: none; }
+@media (max-width: 1100px), (max-height: 740px) {
+  .campaigns-viewport .filter-bar { flex-wrap: nowrap; overflow-x: auto; padding: 10px 12px; gap: 10px; }
+  .campaigns-viewport .filter-field, .campaigns-viewport .filter-actions { flex-shrink: 0; }
+  .campaigns-viewport .filter-field-search { min-width: 200px; }
+  .campaigns-viewport .filter-summary { padding: 8px 12px; }
+  .campaigns-notices { max-block-size: min(5rem, 12dvh); }
+}

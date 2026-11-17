@@ -2,8 +2,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ConsoleShell } from "./console-shell";
 import { liveFetch, useLivePoll } from "./use-live";
-export function LiveShell({ children, operator, homeLayout }: {
-  children: ReactNode; operator: { name: string; meta: string }; homeLayout?: boolean;
+export function LiveShell({ children, operator, homeLayout, campaignsLayout }: {
+  children: ReactNode; operator: { name: string; meta: string }; homeLayout?: boolean; campaignsLayout?: boolean;
 }) {
   const [counts, setCounts] = useState<{ campaigns?: number; groupsNeedingReview?: number }>({});
   async function read(signal?: AbortSignal) {
@@ -13,5 +13,5 @@ export function LiveShell({ children, operator, homeLayout }: {
   }
   useEffect(() => { const controller = new AbortController(); void read(controller.signal); return () => controller.abort(); }, []);
   useLivePoll(read);
-  return <ConsoleShell counts={counts} operator={operator} homeLayout={homeLayout}>{children}</ConsoleShell>;
+  return <ConsoleShell counts={counts} operator={operator} homeLayout={homeLayout} campaignsLayout={campaignsLayout}>{children}</ConsoleShell>;
 }

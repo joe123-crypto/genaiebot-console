@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 export const LIVE_INTERVAL = 30_000;
 export function useLivePoll(read: (signal: AbortSignal) => Promise<void>, enabled = true) {
@@ -78,13 +78,17 @@ export function useVisibleIds(root: React.RefObject<HTMLElement | null>, key: st
   return ids;
 }
 
-export function LoadMore({ next, loading, load }: { next: string | null | undefined; loading: boolean; load: () => void }) {
+export function LoadMore({ next, loading, load, scrollRoot, target }: {
+  next: string | null | undefined; loading: boolean; load: () => void;
+  scrollRoot?: RefObject<HTMLElement | null>; target?: RefObject<HTMLElement | null>;
+}) {
   const sentinel = useRef<HTMLDivElement>(null);
   const callback = useRef(load); callback.current = load;
   useEffect(() => {
-    if (!next || loading || !sentinel.current || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) callback.current(); }, { rootMargin: "100px" });
-    observer.observe(sentinel.current); return () => observer.disconnect();
-  }, [next, loading]);
+    const element = target ? target.current : sentinel.current;
+    if (!next || loading || !element || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) callback.current(); }, { root: scrollRoot?.current ?? null, rootMargin: "100px" });
+    observer.observe(element); return () => observer.disconnect();
+  }, [next, loading, scrollRoot, target]);
   return <div ref={sentinel} className="card-pad">{next ? <button className="btn" disabled={loading} onClick={load}>{loading ? "Loading…" : "Load more"}</button> : null}</div>;
 }
