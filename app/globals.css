@@ -1420,6 +1420,11 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .cap-settings-bands .modal-input { max-width: 110px; }
 .cap-settings .modal-actions { margin-top: 16px; }
 
+/* A campaign's click counts: the total first, the per-group breakdown on demand. */
+.campaign-clicks-groups > summary { cursor: pointer; font-size: 14px; font-weight: 650; }
+.campaign-clicks-groups > summary span { margin-left: 8px; font-weight: 400; }
+.campaign-clicks-groups > .table-wrap { margin-top: 10px; }
+
 /* Campaign creation: ordinary settings first, optional details below. */
 .new-campaign { max-width: 1040px; }
 .campaign-create-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 18px; }

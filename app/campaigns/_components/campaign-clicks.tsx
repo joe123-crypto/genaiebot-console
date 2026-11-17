@@ -43,14 +43,19 @@ export function CampaignClicks({ slug }: { slug: string }) {
     {!report && !unavailable ? <p className="card-note" role="status">Loading click counts…</p> : null}
     {report ? <>
       <p><strong>{formatCount.format(report.totalClicks)}</strong> total clicks</p>
-      {report.groups.length ? <div className="table-wrap">
-        <table className="data" aria-label="Link clicks by group">
-          <thead><tr><th scope="col">Group</th><th scope="col">Clicks</th></tr></thead>
-          <tbody>{report.groups.map(group => <tr key={group.jid}>
-            <td>{group.name}</td><td>{formatCount.format(group.clicks)}</td>
-          </tr>)}</tbody>
-        </table>
-      </div> : null}
+      {report.groups.length ? <details className="campaign-clicks-groups">
+        <summary>Clicks by group <span className="card-note">
+          {report.groups.length} {report.groups.length === 1 ? "group" : "groups"}
+        </span></summary>
+        <div className="table-wrap">
+          <table className="data" aria-label="Link clicks by group">
+            <thead><tr><th scope="col">Group</th><th scope="col">Clicks</th></tr></thead>
+            <tbody>{report.groups.map(group => <tr key={group.jid}>
+              <td>{group.name}</td><td>{formatCount.format(group.clicks)}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </details> : null}
     </> : null}
   </section>;
 }
