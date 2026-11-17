@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHead } from "@/app/_components/ui";
 import { SyncNotice, useLivePage } from "@/app/_components/live-page";
 import { liveFetch, LoadMore, useLivePoll } from "@/app/_components/use-live";
+import { CampaignClicks } from "./campaign-clicks";
 import { CampaignGroups } from "./campaign-groups";
 import { CampaignImages } from "./campaign-images";
 import { CaptionVariants } from "./caption-variants";
@@ -65,6 +66,7 @@ export function IndexedCampaignView({ slug, initial, initialError, writable }: {
     {summary?.campaign === null ? <p role="status">This campaign no longer exists. Any open draft is retained.</p> : null}
     {summary?.campaign ? <CampaignSwitch slug={slug} title={summary.campaign.name} storeEnabled={summary.campaign.storeEnabled ?? summary.campaign.enabled}
       cronEnabled={summary.campaign.cronEnabled} gate={canWrite(writable, writes, "campaigns", "enabled")} /> : null}
+    {summary?.campaign ? <CampaignClicks key={slug} slug={slug} /> : null}
     <section className="card card-pad" aria-labelledby="campaign-details-title"><h2 className="card-title" id="campaign-details-title">Captions and pictures</h2>
       {!detailResult ? <p className="card-note" role="status">Loading captions and pictures…</p> : "error" in detailResult ? <>
         <p className="caption-error" role="alert">{detailResult.error}</p>
