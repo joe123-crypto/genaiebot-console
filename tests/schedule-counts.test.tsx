@@ -77,7 +77,7 @@ describe("the counts beside the overlap card", () => {
     clicks = null;
     await refresh();
     expect(value("Total link clicks")).toBe("5");
-    expect(screen.getByText("2 today")).toBeDefined();
+    expect(screen.getByText("Last daily count · 2")).toBeDefined();
     expect(screen.getByText("All time · last available")).toBeDefined();
   });
 });

@@ -82,7 +82,9 @@ export function ScheduleCounts({ campaignsToday }: { campaignsToday: number }) {
         {clicksUnavailable ? clicks ? "All time · last available" : "All time · unavailable" : "All time"}
       </div>
       <div className="stat-note">
-        {clicks ? formatCount.format(clicks.todayClicks) : "—"} today{clicks?.todayPartial ? " (since update)" : ""}
+        {clicks && clicksUnavailable
+          ? `Last daily count · ${formatCount.format(clicks.todayClicks)}`
+          : `${clicks ? formatCount.format(clicks.todayClicks) : "—"} today${clicks?.todayPartial ? " (since update)" : ""}`}
       </div>
     </div>
   </div>;
