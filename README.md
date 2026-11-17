@@ -24,8 +24,9 @@ genaebot's own state, through one of two adapters in
 Both adapters therefore execute **the same script**, which lives in genaebot
 rather than here. That is deliberate: the bridge imports the bot's own
 `promo_membership`, `promo_caps` and `promo_broadcast` modules rather than
-reimplementing them, so a caption preview is the exact text the cron would send,
-with the same ref code, the same `wa.me` link and the same daily cap decision.
+reimplementing them, so a caption preview uses the same text, ref code and
+daily cap decision as the cron. It shows the direct `wa.me` destination.
+Tracked links are issued when the bot sends the campaign.
 It never changes operator config, contacts the gateway, or records a cap snapshot.
 The bot maintains private config display caches and outage snapshots on its volume.
 
@@ -88,7 +89,7 @@ npm run build
 | Overview | Live. Group counts, today's planned ads, slots, per-line reach. |
 | Groups | Live. One searchable, filterable table: DMC, members, caps, rotation, expandable notes. |
 | Campaigns | Live. Searchable and filterable, with New campaign creation when the companion bot support is deployed. Each row can switch its campaign off and on. |
-| Campaign preview | Live. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
+| Campaign preview | Live. Campaign Details shows estimated link clicks as a total and by group. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
 | Customer Bot | Review and publish the public WhatsApp bot's reply instructions and business knowledge. Requires the companion bot API update. |
 | Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
