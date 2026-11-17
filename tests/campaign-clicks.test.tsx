@@ -18,11 +18,19 @@ describe("campaign click counts", () => {
       ],
     }));
     vi.stubGlobal("fetch", fetch);
-    render(<CampaignClicks slug="appliance-repairs" />);
+    const view = render(<CampaignClicks slug="appliance-repairs" />);
 
     const panel = screen.getByRole("region", { name: "Estimated link clicks" });
-    const table = await within(panel).findByRole("table", { name: "Link clicks by group" });
+    const summary = await within(panel).findByText(/Clicks by group/);
     expect(within(panel).getByText("5")).toBeTruthy();
+    // The breakdown stays out of the way until it is asked for.
+    const disclosure = view.container.querySelector("details")!;
+    expect(disclosure.open).toBe(false);
+    expect(summary.textContent).toContain("2 groups");
+
+    fireEvent.click(summary.closest("summary")!);
+    expect(disclosure.open).toBe(true);
+    const table = within(panel).getByRole("table", { name: "Link clicks by group" });
     expect(within(table).getByRole("row", { name: "Market 4" })).toBeTruthy();
     expect(within(table).getByRole("row", { name: "Town 1" })).toBeTruthy();
     expect(fetch).toHaveBeenCalledWith("/api/live/campaign-clicks?slug=appliance-repairs",
