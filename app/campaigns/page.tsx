@@ -14,6 +14,6 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
   let initialError: string | undefined;
   try { initial = await getLiveView("campaigns", campaignFilterQuery(filter)); }
   catch (error) { if (!(error instanceof BotUnavailableError)) throw error; initialError = error.detail; }
-  return <Shell live><PageHead title="Campaigns" actions={<Link prefetch={false} className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
+  return <Shell live campaignsLayout><PageHead title="Campaigns" actions={<Link prefetch={false} className="btn btn-primary" href="/campaigns/new">New campaign</Link>} />
     <LiveCampaigns initial={initial} initialError={initialError} filter={filter} writable={WRITES_ENABLED} /></Shell>;
 }

@@ -11,18 +11,21 @@ export function LiveCampaigns({ initial, initialError, filter: initialFilter, wr
   initial: LivePage<CampaignRow> | null; initialError?: string; filter: CampaignFilter; writable: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
+  const scrollRoot = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState(initialFilter);
   const q = useDebounced(filter.q, 300);
-  const data = useLivePage("campaigns", initial, campaignFilterQuery({ ...filter, q }).toString(), row => row.slug, root, initialError);
+  const data = useLivePage("campaigns", initial, campaignFilterQuery({ ...filter, q }).toString(), row => row.slug, root, initialError, scrollRoot);
   const writes = data.page?.context?.writes;
   const deleteGate = canDeleteCampaign(writable, writes);
-  return <div ref={root}><SyncNotice sync={data.page?.sync} error={data.error} />
+  return <div ref={root} className="campaigns-viewport"><div className="campaigns-notices"><SyncNotice sync={data.page?.sync} error={data.error} />
     {/* Only once a payload has arrived: with no `writes` yet the gate reports an older bot,
         which would be a wrong reason to show beside a plain connection failure. */}
     {writable && data.page && !deleteGate.allowed ? <div className="banner" role="status">Deleting campaigns is unavailable. {deleteGate.reason}</div> : null}
     {(data.page?.deletions ?? []).map(deletion => <div className="banner" role="status" key={deletion.slug}>{deletion.name} deleted. {deletion.cleanup === "complete" ? "Cleanup complete." : "Cleanup is pending; the bot retries automatically."} {deletion.detail}</div>)}
-    <CampaignsTable campaigns={data.rows} initialFilter={initialFilter} writesEnabled={writable}
+    </div>
+    <CampaignsTable scrollRef={scrollRoot} endRef={end} campaigns={data.rows} initialFilter={initialFilter} writesEnabled={writable}
       switchGate={canWrite(writable, writes, "campaigns", "enabled")} deleteGate={deleteGate}
       remote={{ onFilter: setFilter, total: data.page?.total ?? 0, lines: data.page?.facets?.lines ?? [] }} />
-    <LoadMore next={data.page?.nextCursor} loading={data.loading} load={data.loadMore} /></div>;
+    <LoadMore scrollRoot={scrollRoot} target={end} next={data.page?.nextCursor} loading={data.loading} load={data.loadMore} /></div>;
 }

@@ -19,12 +19,14 @@ export function ConsoleShell({
   attention = [],
   operator,
   homeLayout,
+  campaignsLayout,
 }: {
   children: ReactNode;
   counts: NavCounts;
   attention?: Attention[];
   operator: { name: string; meta: string };
   homeLayout?: boolean;
+  campaignsLayout?: boolean;
 }) {
   const initial = operator.name.trim().charAt(0).toUpperCase() || "?";
   const navigation = <>
@@ -41,7 +43,7 @@ export function ConsoleShell({
   </>;
 
   return (
-    <div className={homeLayout ? "console-app console-app-home" : "console-app"}>
+    <div className={homeLayout ? "console-app console-app-home" : campaignsLayout ? "console-app console-app-campaigns" : "console-app"}>
       <aside className="console-sidebar">
         <div className="console-brand">
           <Image
@@ -83,7 +85,7 @@ export function ConsoleShell({
           </div>
         ) : null}
 
-        {homeLayout ? <HomeDisclosure className="home-menu" label="Menu">{navigation}</HomeDisclosure> : navigation}
+        {homeLayout || campaignsLayout ? <HomeDisclosure className="home-menu" label="Menu">{navigation}</HomeDisclosure> : navigation}
       </aside>
 
       <section className="console-content">{children}</section>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import { Repeat2 } from "lucide-react";
 import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
@@ -31,6 +31,8 @@ import type { Campaign } from "@/src/lib/types";
 type TableCampaign = Omit<CampaignRow, "captionCount"> &
   Partial<Pick<Campaign, "captions" | "images" | "assets" | "script">> & { captionCount?: number };
 type Props = {
+  scrollRef?: RefObject<HTMLDivElement | null>;
+  endRef?: RefObject<HTMLDivElement | null>;
   /** Every campaign, in the order the bridge sends them — which is the order
    *  they run through the day. Nothing here reorders them. */
   campaigns: TableCampaign[];
@@ -53,7 +55,7 @@ const NO_WRITES: WriteGate = { allowed: false, reason: READ_ONLY_REASON };
 
 export function CampaignsTable({
   campaigns, initialFilter, writesEnabled = false,
-  switchGate = NO_WRITES, deleteGate = NO_WRITES, remote,
+  switchGate = NO_WRITES, deleteGate = NO_WRITES, remote, scrollRef, endRef,
 }: Props) {
   const id = useId();
   // The hook decides which incoming filters are news: a link navigated to
@@ -82,7 +84,7 @@ export function CampaignsTable({
   }
 
   return (
-    <div className="card">
+    <div className="card campaigns-table">
       <FilterBar label="Filter campaigns">
         <FilterSearch
           id={`${id}-q`}
@@ -145,8 +147,9 @@ export function CampaignsTable({
 
       <div
         className="table-wrap"
+        ref={scrollRef}
         role="region"
-        aria-label="Campaigns, scroll horizontally for the full row"
+        aria-label="Campaigns, scroll for more rows and the full row"
         tabIndex={0}
       >
         <table className="data">
@@ -267,6 +270,7 @@ export function CampaignsTable({
             ) : null}
           </tbody>
         </table>
+        {endRef ? <div ref={endRef} className="campaigns-end" aria-hidden="true" /> : null}
       </div>
     </div>
   );
