@@ -13,6 +13,6 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
   let initialError: string | undefined;
   try { initial = await getLiveView("groups", groupFilterQuery(filter)); }
   catch (error) { if (!(error instanceof BotUnavailableError)) throw error; initialError = error.detail; }
-  return <Shell live><PageHead title="Groups" subtitle="Live observations and campaign assignments." />
+  return <Shell live groupsLayout><PageHead title="Groups" subtitle="Live observations and campaign assignments." />
     <LiveGroups initial={initial} initialError={initialError} filter={filter} writable={WRITES_ENABLED} /></Shell>;
 }

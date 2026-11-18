@@ -34,9 +34,9 @@ describe("targeted live polling", () => {
     view.unmount(); expect(signals[1].aborted).toBe(true); expect(vi.getTimerCount()).toBe(0);
   });
 });
-function Page({ query = "" }: { query?: string }) {
+function Page({ query = "", internalScroll = false }: { query?: string; internalScroll?: boolean }) {
   const root = useRef<HTMLDivElement>(null);
-  const data = useLivePage("groups", { rows: [{ jid: "1@g.us", name: "Initial" }], revision: "1", sync, nextCursor: "next" }, query, row => row.jid, root);
+  const data = useLivePage("groups", { rows: [{ jid: "1@g.us", name: "Initial" }], revision: "1", sync, nextCursor: "next" }, query, row => row.jid, root, undefined, internalScroll ? root : undefined);
   return <div ref={root}>{data.rows.map(row => <p data-live-id={row.jid} key={row.jid}>{row.name}</p>)}
     {data.error ? <p role="alert">{data.error}</p> : null}<button onClick={data.loadMore}>More</button></div>;
 }
@@ -66,4 +66,25 @@ describe("indexed page requests", () => {
     await advance(20);
     expect(screen.queryByText("Late")).toBeNull(); expect(screen.getByText("Filtered")).toBeTruthy();
   });
+});
+
+it.each([false, true])("anchors live updates inside the list without scrolling a closed panel or the window (hidden=%s)", async (hidden) => {
+  const windowScroll = vi.fn(); vi.stubGlobal("scrollBy", windowScroll);
+  let release!: (response: Response) => void;
+  const fetch = vi.fn((_url: string) => new Promise<Response>(resolve => { release = resolve; }));
+  vi.stubGlobal("fetch", fetch);
+  const view = render(<Page internalScroll />);
+  const root = view.container.firstElementChild as HTMLDivElement;
+  const row = root.querySelector("[data-live-id]") as HTMLElement;
+  const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 400, width: 400, height: bottom - top, x: 0, y: top, toJSON() {} });
+  vi.spyOn(root, "getBoundingClientRect").mockReturnValue(rect(100, 300));
+  vi.spyOn(row, "getClientRects").mockImplementation(() => (row.hidden ? [] : [rect(110, 150)]) as unknown as DOMRectList);
+  vi.spyOn(row, "getBoundingClientRect").mockImplementation(() => rect(row.textContent === "Updated" ? 140 : 110, 180));
+  root.scrollTop = 200;
+  await advance(30_000);
+  expect(fetch.mock.calls[0][0]).toContain("anchor=1%40g.us");
+  row.hidden = hidden;
+  await act(async () => { release(Response.json({ rows: [{ jid: "1@g.us", name: "Updated" }], revision: "2", sync })); });
+  expect(root.scrollTop).toBe(hidden ? 200 : 230);
+  expect(windowScroll).not.toHaveBeenCalled();
 });

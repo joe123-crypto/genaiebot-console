@@ -34,7 +34,7 @@ export function useLivePage<T>(view: string, initial: LivePage<T> | null, query:
     if (pending.reset) { pending.element.scrollTop = 0; return; }
     const anchor = Array.from(root.current?.querySelectorAll<HTMLElement>("[data-live-id]") ?? [])
       .find(row => row.dataset.liveId === pending.id);
-    if (anchor && pending.top !== undefined) pending.element.scrollTop += anchor.getBoundingClientRect().top - pending.top;
+    if (anchor && !anchor.closest("[hidden]") && pending.top !== undefined) pending.element.scrollTop += anchor.getBoundingClientRect().top - pending.top;
   }, [rows, root]);
   const request = useCallback(async (signal?: AbortSignal, more = false, reset = false) => {
     if (busy.current) return;
@@ -50,10 +50,10 @@ export function useLivePage<T>(view: string, initial: LivePage<T> | null, query:
     const scroller = scrollRoot?.current;
     const queryChanged = displayedQuery.current !== current.query;
     // The cells are sticky; the thead itself scrolls out of view.
-    const visibleTop = scroller ? (scroller.querySelector("thead th")?.getBoundingClientRect().bottom ?? scroller.getBoundingClientRect().top) : 0;
+    const visibleTop = scroller ? Math.max(scroller.getBoundingClientRect().top, scroller.querySelector("thead th")?.getBoundingClientRect().bottom ?? 0) : 0;
     const visibleBottom = scroller?.getBoundingClientRect().bottom ?? Infinity;
     const anchor = root.current && !(scroller && queryChanged) ? Array.from(root.current.querySelectorAll<HTMLElement>("[data-live-id]"))
-      .find(row => { const bounds = row.getBoundingClientRect(); return bounds.bottom > visibleTop && bounds.top < visibleBottom; }) : undefined;
+      .find(row => { const bounds = row.getBoundingClientRect(); return !row.closest("[hidden]") && bounds.bottom > visibleTop && bounds.top < visibleBottom; }) : undefined;
     const anchorId = anchor?.dataset.liveId;
     const anchorTop = anchor?.getBoundingClientRect().top;
     if (more && current.page?.nextCursor) params.set("cursor", current.page.nextCursor);

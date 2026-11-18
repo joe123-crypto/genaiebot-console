@@ -13,11 +13,11 @@ import { displayTimezone } from "@/src/lib/display-timezone";
  * from the bot, so when it is unreachable the frame still renders and the page
  * itself shows why.
  */
-export async function Shell({ children, overview, summary, live, homeLayout, campaignsLayout }: {
-  children: ReactNode; overview?: Overview; summary?: NavigationPayload; live?: boolean; homeLayout?: boolean; campaignsLayout?: boolean;
+export async function Shell({ children, overview, summary, live, homeLayout, campaignsLayout, groupsLayout }: {
+  children: ReactNode; overview?: Overview; summary?: NavigationPayload; live?: boolean; homeLayout?: boolean; campaignsLayout?: boolean; groupsLayout?: boolean;
 }) {
   const zone = await displayTimezone();
-  if (live) return <TimezoneProvider zone={zone}><LiveShell operator={{ name: OPERATOR_NAME, meta: "Operator" }} homeLayout={homeLayout} campaignsLayout={campaignsLayout}>{children}</LiveShell></TimezoneProvider>;
+  if (live) return <TimezoneProvider zone={zone}><LiveShell operator={{ name: OPERATOR_NAME, meta: "Operator" }} homeLayout={homeLayout} campaignsLayout={campaignsLayout} groupsLayout={groupsLayout}>{children}</LiveShell></TimezoneProvider>;
   let counts: { campaigns?: number; groupsNeedingReview?: number } = {};
   let attention: Attention[] = [];
   if (overview) {
@@ -43,7 +43,7 @@ export async function Shell({ children, overview, summary, live, homeLayout, cam
         counts={counts}
         attention={attention}
         operator={{ name: OPERATOR_NAME, meta: "Operator" }}
-        homeLayout={homeLayout} campaignsLayout={campaignsLayout}
+        homeLayout={homeLayout} campaignsLayout={campaignsLayout} groupsLayout={groupsLayout}
       >
         {children}
       </ConsoleShell>

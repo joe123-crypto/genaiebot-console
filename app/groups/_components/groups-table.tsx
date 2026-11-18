@@ -3,7 +3,7 @@
 import { PaginatedPicker, type PickerChoice } from "@/app/_components/paginated-picker";
 import { addGroupCampaignAction, addGroupCampaignsAction, removeGroupCampaignAction } from "@/app/groups/actions";
 import { liveFetch, notifyLiveChange, useLivePoll } from "@/app/_components/use-live";
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
 import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
@@ -78,6 +78,8 @@ function removalKey(jid: string, promo: string) {
 }
 
 type Props = {
+  pagination?: ReactNode;
+  scrollRef?: RefObject<HTMLDivElement | null>;
   /** Every group on record. The table narrows them; it never refetches. */
   groups: Group[];
   disabledPromos: string[];
@@ -109,7 +111,7 @@ const STATUSES: GroupStatus[] = ["active", "on-hold", "admin-only", "not-a-membe
 export function GroupsTable({
   groups, disabledPromos, rotates = true, writesEnabled, editing = NO_EDITING, initialFilter,
   campaigns = NO_CAMPAIGNS, campaignGate = NO_CAMPAIGN_WRITES,
-  removeGate = NO_CAMPAIGN_WRITES, scheduleGate = NO_CAMPAIGN_WRITES, remote,
+  removeGate = NO_CAMPAIGN_WRITES, scheduleGate = NO_CAMPAIGN_WRITES, remote, pagination, scrollRef,
 }: Props) {
   const displayZone = useDisplayTimezone();
   const id = useId();
@@ -146,6 +148,8 @@ export function GroupsTable({
     try { const result = await liveFetch<{ group: Group | null }>("group", new URLSearchParams({ ids: editingGroup.jid }), signal);
       if (!signal.aborted) setEditorDeleted(result.group === null); } catch { /* Saves still require live validation. */ }
   }, Boolean(remote && editingGroup));
+  // New searches start at the first result; live row updates keep their position.
+  useEffect(() => { if (scrollRef?.current) scrollRef.current.scrollTop = 0; }, [filter, scrollRef]);
   const filterChanged = remote?.onFilter;
   useEffect(() => { filterChanged?.(filter); }, [filter, filterChanged]);
   const off = new Set(disabledPromos);
@@ -199,7 +203,7 @@ export function GroupsTable({
   }
 
   return (
-    <div className="card">
+    <div className="card groups-results">
       {editorDeleted && editingGroup ? <p role="alert">This group no longer exists. Your open draft is retained.</p> : null}
       {assignmentError ? <p role="alert">{assignmentError}</p> : null}
       {campaignGroup ? <PaginatedPicker kind="campaigns" exclude={campaignGroup.promos} schedule={{ gate: scheduleGate }}
@@ -345,9 +349,10 @@ export function GroupsTable({
       ) : null}
 
       <div
+        ref={scrollRef}
         className="table-wrap groups-table-wrap"
         role="region"
-        aria-label="Groups, scroll horizontally for counts and actions"
+        aria-label="Groups, scroll for more groups, counts and actions"
         tabIndex={0}
       >
         <table className="data">
@@ -523,6 +528,7 @@ export function GroupsTable({
             ) : null}
           </tbody>
         </table>
+        {pagination}
       </div>
     </div>
   );

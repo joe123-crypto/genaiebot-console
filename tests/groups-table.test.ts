@@ -467,3 +467,13 @@ describe("a campaign held back by today's cap", () => {
     expect(chip("Appliance Repairs").title).toBe("posts today");
   });
 });
+
+it("returns to the first result after filters change, but preserves position on live updates", () => {
+  const scrollRef = { current: null as HTMLDivElement | null };
+  const view = render(createElement(GroupsTable, { ...props, scrollRef }));
+  scrollRef.current!.scrollTop = 500;
+  view.rerender(createElement(GroupsTable, { ...props, groups: [...groups], scrollRef }));
+  expect(scrollRef.current!.scrollTop).toBe(500);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Market" } });
+  expect(scrollRef.current!.scrollTop).toBe(0);
+});
