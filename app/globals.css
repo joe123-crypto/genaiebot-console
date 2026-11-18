@@ -1526,3 +1526,85 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .campaigns-viewport .filter-summary { padding: 8px 12px; }
   .campaigns-notices { max-block-size: min(5rem, 12dvh); }
 }
+
+/* Groups keeps its controls in view while each inventory scrolls independently. */
+.console-app-groups > .console-content > .live-groups {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.live-groups > :not(.groups-results) { flex: none; }
+.live-groups > .banner { margin: 0; max-height: 12dvh; overflow: auto; }
+.live-groups > .groups-results {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.groups-results > :not(.groups-table-wrap) { flex: none; }
+.groups-results > .groups-table-wrap { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
+.groups-table-wrap thead th { position: sticky; top: 0; z-index: 2; }
+.groups-results .filter-summary p { margin: 0; }
+.groups-results .filter-summary > p:not([role]) { max-height: 3em; overflow: auto; }
+.groups-results > [role="alert"], .groups-results > .groups-table-notice { max-height: 12dvh; overflow: auto; }
+.unassigned-groups { position: relative; z-index: 10; }
+/* Confirmation backdrops must cover compact navigation as well as the results. */
+.unassigned-groups:has([aria-modal="true"]) { z-index: 60; }
+.unassigned-groups > .card-head { padding-block: 12px; gap: 12px; }
+.unassigned-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; color: inherit; background: none; font: inherit; cursor: pointer; }
+.unassigned-toggle svg { transform: rotate(-90deg); }
+.unassigned-toggle svg.is-open { transform: none; }
+.unassigned-toggle:focus-visible, .unassigned-panel:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.unassigned-panel {
+  position: absolute;
+  inset-inline: -1px;
+  top: 100%;
+  max-height: min(60dvh, var(--unassigned-space, 60dvh));
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.unassigned-panel[hidden] { display: none; }
+@media (max-width: 1100px), (max-height: 740px) {
+  .console-app-groups > .console-content > .live-groups { gap: 10px; }
+  .console-app-groups .page-head { flex: none; }
+  .unassigned-groups > .card-head { padding: 10px 12px; }
+  .unassigned-groups > .card-head > .card-note { display: none; }
+  .groups-results .filter-bar { padding: 10px 12px; gap: 8px; }
+  .groups-results .filter-summary { padding: 8px 12px; }
+  .groups-results .group-assignment-controls { padding: 8px 12px; gap: 8px; }
+}
+@media (max-width: 600px) {
+  .groups-results .filter-bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+  .groups-results .filter-field-search { grid-column: 1 / -1; }
+  .groups-results .filter-actions { margin: 0; }
+  .groups-results .filter-bar input, .groups-results .filter-bar select { width: 100%; }
+  .groups-results .filter-actions .btn { width: 100%; padding-inline: 4px; }
+  .groups-results .filter-summary > p:not([role]) { max-height: 1.5em; }
+  .groups-results .group-assignment-controls .btn { font-size: 12px; padding: 6px 8px; }
+}
+@media (max-height: 500px) {
+  .console-app-groups > .console-sidebar { padding-block: 4px; }
+  .console-app-groups > .console-content { padding-block: 8px; }
+  .console-app-groups .page-sub { display: none; }
+  .console-app-groups .page-head { margin-bottom: 6px; }
+  .console-app-groups > .console-content > .live-groups { gap: 6px; }
+  .unassigned-groups > .card-head { padding-block: 6px; }
+  .groups-results .filter-summary { padding-block: 4px; }
+  .groups-results .filter-summary > p:not([role]) { max-height: 1.5em; }
+  .groups-results .group-assignment-controls { padding-block: 4px; }
+}
+@media (max-height: 500px) and (min-width: 601px) {
+  .groups-results .filter-bar {
+    display: grid;
+    grid-template-columns: minmax(190px, 2fr) repeat(4, minmax(0, 1fr)) auto;
+    padding-block: 6px;
+  }
+  .groups-results .filter-actions { margin: 0; }
+}

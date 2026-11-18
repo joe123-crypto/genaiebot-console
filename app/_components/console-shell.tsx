@@ -20,6 +20,7 @@ export function ConsoleShell({
   operator,
   homeLayout,
   campaignsLayout,
+  groupsLayout,
 }: {
   children: ReactNode;
   counts: NavCounts;
@@ -27,6 +28,7 @@ export function ConsoleShell({
   operator: { name: string; meta: string };
   homeLayout?: boolean;
   campaignsLayout?: boolean;
+  groupsLayout?: boolean;
 }) {
   const initial = operator.name.trim().charAt(0).toUpperCase() || "?";
   const navigation = <>
@@ -43,7 +45,7 @@ export function ConsoleShell({
   </>;
 
   return (
-    <div className={homeLayout ? "console-app console-app-home" : campaignsLayout ? "console-app console-app-campaigns" : "console-app"}>
+    <div className={groupsLayout ? "console-app console-app-home console-app-groups" : homeLayout ? "console-app console-app-home" : campaignsLayout ? "console-app console-app-campaigns" : "console-app"}>
       <aside className="console-sidebar">
         <div className="console-brand">
           <Image
@@ -85,7 +87,7 @@ export function ConsoleShell({
           </div>
         ) : null}
 
-        {homeLayout || campaignsLayout ? <HomeDisclosure className="home-menu" label="Menu">{navigation}</HomeDisclosure> : navigation}
+        {homeLayout || campaignsLayout || groupsLayout ? <HomeDisclosure className="home-menu" label="Menu">{navigation}</HomeDisclosure> : navigation}
       </aside>
 
       <section className="console-content">{children}</section>

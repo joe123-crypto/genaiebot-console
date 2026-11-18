@@ -16,11 +16,13 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
 }) {
   const displayZone = useDisplayTimezone();
   const root = useRef<HTMLDivElement>(null);
+  const groupsScroll = useRef<HTMLDivElement>(null);
+  const discoveryScroll = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState(initialFilter);
   const q = useDebounced(filter.q, 300);
   const query = groupFilterQuery({ ...filter, q }).toString();
-  const groups = useLivePage("groups", initial, query, row => row.jid, root, initialError);
-  const discovery = useLivePage<DiscoveredGroup>("discoveries", null, "", row => row.jid, root);
+  const groups = useLivePage("groups", initial, query, row => row.jid, groupsScroll, initialError, groupsScroll);
+  const discovery = useLivePage<DiscoveredGroup>("discoveries", null, "", row => row.jid, discoveryScroll, undefined, discoveryScroll);
   const ids = useVisibleIds(root, [...groups.rows, ...discovery.rows].map(row => row.jid).join(","));
   const [metrics, setMetrics] = useState<Record<string, GroupMetrics>>({});
   const idsKey = ids.sort().join(",");
@@ -41,15 +43,16 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
     leave: canAct(writable, context?.actions, "leaveGroup"), clearRecords: canAct(writable, context?.actions, "clearRecords"),
     lines: context?.accounts.map(line => line.id) ?? [], tiers: groups.page?.facets?.tiers ?? ["busy", "normal", "quiet"],
   };
-  return <div ref={root}>
+  return <div ref={root} className="live-groups">
     <SyncNotice sync={groups.page?.sync} error={groups.error} />
     <SyncNotice sync={discovery.page?.sync} error={discovery.error} />
-    <DiscoveredGroups groups={discovery.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
+    <DiscoveredGroups scrollRef={discoveryScroll}
+      pagination={<LoadMore next={discovery.page?.nextCursor} loading={discovery.loading} load={discovery.loadMore} />} groups={discovery.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
       zone={displayZone} discovery={discovery.page?.discovery} total={discovery.page?.total}
       addGate={writable ? canWrite(writable, context?.writes, "groups", "name", "source", "status", "promos", "daily_cap") : undefined}
       removeGate={writable ? canAct(writable, context?.actions, "removeDiscovery") : undefined} />
-    <LoadMore next={discovery.page?.nextCursor} loading={discovery.loading} load={discovery.loadMore} />
-    <GroupsTable groups={groups.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
+    <GroupsTable scrollRef={groupsScroll}
+      pagination={<LoadMore next={groups.page?.nextCursor} loading={groups.loading} load={groups.loadMore} />} groups={groups.rows.map(row => ({ ...row, metrics: metrics[row.jid] ?? row.metrics }))}
       disabledPromos={groups.page?.disabledPromos ?? []} rotates={context?.capSettings?.rotation ?? true}
       writesEnabled={writable} editing={editing}
       campaigns={groups.page?.facets?.campaigns ?? []} campaignGate={canWrite(writable, context?.writes, "groups", "promos")}
@@ -57,6 +60,5 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
       scheduleGate={canWrite(writable, context?.writes, "groups", "promos", "weekly")}
       initialFilter={initialFilter ?? DEFAULT_GROUP_FILTER} remote={{ onFilter: setFilter, total: groups.page?.total ?? 0,
         lines: groups.page?.facets?.lines ?? [], campaigns: groups.page?.facets?.campaigns ?? [], tiers: editing.tiers }} />
-    <LoadMore next={groups.page?.nextCursor} loading={groups.loading} load={groups.loadMore} />
   </div>;
 }

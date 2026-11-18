@@ -72,6 +72,7 @@ it("refreshes Unassigned with the server total and reflects removal on a fresh v
   const page = <LiveGroups initial={initial} filter={DEFAULT_GROUP_FILTER} writable />;
   const view = render(page);
   await screen.findByRole("heading", { name: "Unassigned 12" });
+  fireEvent.click(screen.getByRole("button", { name: "Unassigned 12" }));
   const dialog = openRemoval();
   await act(async () => fireEvent.click(dialog.getByRole("button", { name: "Remove from Unassigned" })));
   await screen.findByRole("heading", { name: "Unassigned 11" });

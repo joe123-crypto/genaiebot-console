@@ -36,7 +36,8 @@ describe("automatic group discovery", () => {
     expect(html).toContain("ads, default");
     expect(html).toContain("2026-11-08 08:00 Africa/Harare");
     expect(html).toContain("No campaigns are assigned automatically");
-    expect(html).not.toContain("<button");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Add to bot");
     expect(html).not.toContain("Delete");
   });
 

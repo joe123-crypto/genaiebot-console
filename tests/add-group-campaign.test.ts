@@ -181,7 +181,7 @@ describe("Groups table campaign controls", () => {
     view.rerender(createElement(GroupsTable, { ...tableProps, groups: [{ ...emptyGroup, promos: ["borehole-drilling"] }] }));
     expect(screen.queryByRole("button", { name: "Add campaign to Harare Market" })).toBeNull();
     expect(screen.getByText("No group matches these filters.")).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole("region", { name: "Groups, scroll horizontally for counts and actions" }));
+    expect(document.activeElement).toBe(screen.getByRole("region", { name: "Groups, scroll for more groups, counts and actions" }));
   });
 
   it("returns focus to the table when the saved assignment disables the plus button", async () => {
@@ -198,7 +198,7 @@ describe("Groups table campaign controls", () => {
     }));
     await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
     expect(trigger().disabled).toBe(true);
-    expect(document.activeElement).toBe(screen.getByRole("region", { name: "Groups, scroll horizontally for counts and actions" }));
+    expect(document.activeElement).toBe(screen.getByRole("region", { name: "Groups, scroll for more groups, counts and actions" }));
   });
 
   it("shows plus beside badges and for groups with no campaigns only when writes are enabled", () => {
