@@ -155,7 +155,7 @@ describe("a bot without entry support", () => {
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
     click("Save changes");
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("may have been saved"));
-    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    await waitFor(() => expect(onEditingChange).toHaveBeenLastCalledWith(false));
     expect(screen.getByRole("button", { name: "Retry original request" })).toBeDefined();
   });
 

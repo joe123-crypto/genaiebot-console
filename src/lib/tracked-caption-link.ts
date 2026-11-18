@@ -18,9 +18,13 @@ export function sameTracking(left: Tracking = {}, right: Tracking = {}) {
   return JSON.stringify(Object.entries(left).sort()) === JSON.stringify(Object.entries(right).sort());
 }
 
+const WHATSAPP_URL = /https?:\/\/(?:wa\.me\/|api\.whatsapp\.com\/send\?)[^\s<>]+/gi;
+function withoutTrailingPunctuation(url: string) {
+  return url.replace(/[.,;:!?)\]>*_~]+$/, "");
+}
+
 export function whatsappLinks(text: string): string[] {
-  const links = text.match(/https?:\/\/(?:wa\.me\/|api\.whatsapp\.com\/send\?)[^\s<>]+/gi) ?? [];
-  return [...new Set(links.map((link) => link.replace(/[.,;:!?)\]>*_~]+$/, "")))];
+  return [...new Set((text.match(WHATSAPP_URL) ?? []).map(withoutTrailingPunctuation))];
 }
 
 /** The bot resolves this placeholder per group and registers its redirect. */
@@ -28,7 +32,10 @@ export function proposeTrackedLink(text: string, number: string, slug: string, n
   const normalized = internationalNumber(number);
   if (!normalized) throw new Error("Enter an international WhatsApp number, including its country code.");
   const nextTracking: Tracking = { ...tracking, prefix: tracking.prefix || slug, label: tracking.label ?? name, number: normalized };
-  const caption = replace ? text.split(replace).join("{ref_link}")
+  const caption = replace ? text.replace(WHATSAPP_URL, (matched) => {
+      const url = withoutTrailingPunctuation(matched);
+      return url === replace ? `{ref_link}${matched.slice(url.length)}` : matched;
+    })
     : text.includes("{ref_link}") ? text
     : `${text}${text ? text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n" : ""}👉 Tap to chat on WhatsApp: {ref_link}`;
   return { caption, tracking: nextTracking };

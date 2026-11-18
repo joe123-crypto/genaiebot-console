@@ -222,3 +222,27 @@ it("keeps assistant tracking settings with creation details and submits the trac
   await create();
   expect(mocks.create.mock.calls[0][0]).toMatchObject({ tracking: { number: "+26370000003" }, captions: ["Sale offer\n\n👉 Tap to chat on WhatsApp: {ref_link}"] });
 });
+
+
+it.each(["ordinary AI edit", "tracked-link edit"])("creates an untracked campaign after undoing an %s", async (kind) => {
+  stash();
+  const view = render(<CampaignCaptionStep {...props} />);
+  write("Original offer");
+  if (kind === "ordinary AI edit") {
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Make it shorter" })));
+  } else {
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add tracked WhatsApp link" })));
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+26370000003" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+  fireEvent.click(screen.getByRole("button", { name: "Undo AI edit" }));
+  expect(text().value).toBe("Original offer");
+  await keep();
+  expect(JSON.parse(sessionStorage.getItem(CAMPAIGN_DRAFT_KEY)!).draft.tracking).toBeUndefined();
+  view.unmount();
+  render(<CampaignCaptionStep {...props} />);
+  expect(screen.queryByText(/could not be restored/)).toBeNull();
+  await create();
+  expect(mocks.create).toHaveBeenCalledWith({ ...draft, captions: ["Original offer"] });
+});

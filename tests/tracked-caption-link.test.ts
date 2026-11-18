@@ -20,3 +20,13 @@ describe("tracked caption links", () => {
     expect(proposeTrackedLink(caption, "+26370000003", "sale", "Sale").caption).toBe(caption);
   });
 });
+
+
+it("keeps distinct links that share the selected URL as a prefix", () => {
+  const selected = "https://wa.me/26370000001";
+  const other = `${selected}0`;
+  const query = `${selected}?text=hello`;
+  const caption = `Chat (${selected}). Other: ${other} Query: ${query} Again: *${selected}*`;
+  expect(proposeTrackedLink(caption, "+26370000003", "sale", "Sale", {}, selected).caption)
+    .toBe(`Chat ({ref_link}). Other: ${other} Query: ${query} Again: *{ref_link}*`);
+});

@@ -85,7 +85,11 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
       ? [...current, { id: nextId.current++, text }]
       : current.map((item) => item.id === editing.id ? { ...item, text } : item));
     if (editing.tracking) {
-      const next = { ...draft!, tracking: editing.tracking };
+      // Undo may restore an untracked caption. Creation omits empty tracking,
+      // because a defined tracking object must carry a reference prefix.
+      const next = { ...draft! };
+      if (Object.keys(editing.tracking).length) next.tracking = editing.tracking;
+      else delete next.tracking;
       setDraft(next);
       try {
         const kept = JSON.parse(sessionStorage.getItem(CAMPAIGN_DRAFT_KEY) ?? "{}");
