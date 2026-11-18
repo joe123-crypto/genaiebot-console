@@ -1,0 +1,259 @@
+diff --git a/deploy/test_tracked_caption_links.py b/deploy/test_tracked_caption_links.py
+new file mode 100644
+index 0000000..60753fc
+--- /dev/null
++++ b/deploy/test_tracked_caption_links.py
+@@ -0,0 +1,71 @@
++"""Posting/preview parity and safe tracking edits, without live services."""
++import datetime
++import os
++import re
++import unittest
++from unittest.mock import patch
++
++from test_console_read import BridgeCase, DAY
++import campaign_clicks
++import operator_config
++import operator_writer
++import promo_broadcast
++import promo_fixture
++
++
++class TrackedPreviewTests(BridgeCase):
++    def test_preview_reuses_the_posting_redirect_without_counting_a_click(self):
++        env = self.bridge_env(GENAIE_CAMPAIGN_CLICK_BASE_URL="https://click.example.test")
++        with patch.dict(os.environ, env, clear=True):
++            base = campaign_clicks.base_url()
++            self.assertIsNotNone(base)
++            preview = self.ok("preview", "alpha", "--date", DAY,
++                              GENAIE_CAMPAIGN_CLICK_BASE_URL=base)
++            store = campaign_clicks.ClickStore()
++            wrapper = promo_broadcast.campaign_link_wrapper(preview["tracking"], "alpha")
++            for row in preview["groups"]:
++                number = row["contactNumber"]
++                _, caption, _ = promo_broadcast.caption_for(
++                    row["jid"], preview["captions"], day=datetime.date.fromisoformat(DAY),
++                    tracking=preview["tracking"], bot_number=number,
++                    wrap_link=lambda destination: wrapper(row["jid"], row["name"], destination))
++                self.assertEqual(caption, row["caption"])
++                link_id = re.search(r"/go/([a-f0-9]+)", caption).group(1)
++                self.assertTrue(store.destination(link_id).startswith("https://wa.me/"))
++            self.assertEqual(store.report("alpha")["totalClicks"], 0)
++            link_id = re.search(r"/go/([a-f0-9]+)", preview["groups"][0]["caption"]).group(1)
++            store.increment(link_id)
++            self.assertEqual(store.report("alpha")["totalClicks"], 1)
++            again = self.ok("preview", "alpha", "--date", DAY, GENAIE_CAMPAIGN_CLICK_BASE_URL=base)
++            self.assertEqual(preview["groups"], again["groups"])
++            self.assertEqual(store.report("alpha")["totalClicks"], 1)
++
++    def test_unconfigured_tracking_keeps_direct_link_fallback(self):
++        preview = self.ok("preview", "alpha", "--date", DAY, GENAIE_CAMPAIGN_CLICK_BASE_URL="")
++        self.assertTrue(all("https://wa.me/" in row["caption"] for row in preview["groups"]))
++
++
++class TrackingEditsTests(unittest.TestCase):
++    def test_writer_prepares_captions_and_destination_as_one_change(self):
++        config = promo_fixture.membership()
++        raw = {name: [(key, operator_config.encode_fields(value)) for key, value in rows]
++               for name, rows in operator_writer.documents(config, {slug: True for slug in config["promos"]}).items()}
++        tracking = {"prefix": "ALPHA", "number": "+26370000003"}
++        fields, before, _, _ = operator_writer.prepare(raw, "campaigns", "alpha", {
++            "captions": ["Offer {ref_link}"], "tracking": tracking})
++        self.assertEqual(fields["tracking"], tracking)
++        self.assertEqual(fields["captions"], ["Offer {ref_link}"])
++        self.assertNotEqual(before["tracking"], tracking)
++        source = {"membership": {"promos": {"alpha": fields}}}
++        self.assertEqual(operator_config.campaign_tracking(source, "alpha", {}), tracking)
++
++    def test_refuses_invalid_destinations_and_preserves_template_settings(self):
++        tracking = {"prefix": "ALPHA", "number": "+26370000003", "prefill": "Hello {ref}", "link_line": "Chat {ref_link}"}
++        self.assertEqual(operator_config.validate_tracking(tracking), tracking)
++        for invalid in ({"number": "+26370000003"}, {"prefix": "A", "number": "123"}, {"prefix": "A", "url": "https://bad.test"}):
++            with self.assertRaises(operator_config.ConfigInvalid):
++                operator_config.validate_tracking(invalid)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/workspace/bin/console-read b/workspace/bin/console-read
+index 4583d8b..9cf72e2 100755
+--- a/workspace/bin/console-read
++++ b/workspace/bin/console-read
+@@ -381,6 +381,7 @@ def preview(slug, day):
+     contact_account = (m.get("defaults") or {}).get("contact_account")
+     entries = promo_membership.groups(m)
+ 
++    link_wrapper = promo_broadcast.campaign_link_wrapper(tracking, slug)
+     rows = []
+     for jid in all_jids:
+         group = entries.get(jid, {})
+@@ -406,6 +407,7 @@ def preview(slug, day):
+             variant, rendered, ref = promo_broadcast.caption_for(
+                 jid, captions, day=caption_day, allowed=weekdays,
+                 tracking=tracking, bot_number=bot_number,
++                wrap_link=partial(link_wrapper, jid, group.get("name")) if link_wrapper else None,
+             )
+ 
+         paused = slug in promo_membership.paused_of(group)
+@@ -635,7 +637,7 @@ def campaign_edit_state(slug, captions_only=False):
+         captions = operator_config.validate_captions(doc["captions"])
+     except operator_config.ConfigInvalid as exc:
+         raise BridgeError(str(exc)) from exc
+-    return {"slug": slug, "enabled": enabled, "captions": captions, "tracking": {}, "groups": []}
++    return {"slug": slug, "enabled": enabled, "captions": captions, "tracking": operator_config.validate_tracking(doc.get("tracking", {})), "groups": []}
+ 
+ 
+ def navigation():
+diff --git a/workspace/lib/console_live_api.py b/workspace/lib/console_live_api.py
+index e1d7ed9..b52deb5 100644
+--- a/workspace/lib/console_live_api.py
++++ b/workspace/lib/console_live_api.py
+@@ -234,7 +234,8 @@ class LiveViews:
+                     records = self.bridge.campaign_records(day, only_slug=slug, include_assets=False)
+                     campaign = records[0] if records else None
+                     return {"campaign": {key: campaign[key] for key in ("slug", "name", "source")} if campaign else None,
+-                            "captions": campaign["captions"] if campaign else [], "writes": model["context"]["writes"], "sync": sync}
++                            "captions": campaign["captions"] if campaign else [],
++                            "tracking": campaign.get("tracking", {}) if campaign else {}, "writes": model["context"]["writes"], "sync": sync}
+                 if route == "detail":
+                     records = self.bridge.campaign_records(day, only_slug=slug, include_assets=False)
+                     campaign = records[0] if records else None
+diff --git a/workspace/lib/operator_config.py b/workspace/lib/operator_config.py
+index 1df21e7..e2064f1 100644
+--- a/workspace/lib/operator_config.py
++++ b/workspace/lib/operator_config.py
+@@ -552,6 +552,26 @@ def validate_captions(captions):
+     return list(captions)
+ 
+ 
++def validate_tracking(tracking):
++    """Same tracking contract for creation, editing, previews and posting."""
++    import re
++    if (not isinstance(tracking, dict) or
++            set(tracking) - {"prefix", "label", "number", "prefill", "link_line"} or
++            any(not isinstance(value, str) or len(value) > 1000 for value in tracking.values())):
++        raise ConfigInvalid("invalid tracking settings")
++    if tracking:
++        if not re.fullmatch(r"[A-Za-z0-9-]{1,64}", tracking.get("prefix", "")):
++            raise ConfigInvalid("tracking requires a ref prefix")
++        if tracking.get("number") and not re.fullmatch(r"\+[1-9][0-9]{6,14}", tracking["number"]):
++            raise ConfigInvalid("use an international contact number")
++    return dict(tracking)
++
++
++def campaign_tracking(source, slug, fallback):
++    meta = ((source.get("membership") or {}).get("promos") or {}).get(slug) or {}
++    return validate_tracking(meta["tracking"]) if "tracking" in meta else fallback
++
++
+ def campaign_captions(source, slug, fallback):
+     """The campaign's copy, from the same resolved config its targeting came
+     from, so one run cannot post this week's caption to last week's roster.
+diff --git a/workspace/lib/operator_writer.py b/workspace/lib/operator_writer.py
+index 875793f..b7ccbe3 100644
+--- a/workspace/lib/operator_writer.py
++++ b/workspace/lib/operator_writer.py
+@@ -70,7 +70,7 @@ EDITABLE = {
+     "groups": ("name", "source", "status", "activity", "account", "daily_cap",
+                "promos", "paused_promos", "weekly", "note"),
+     "lines": ("number",),
+-    "campaigns": ("enabled", "comment", "weekly_comment", "dir", "captions"),
++    "campaigns": ("enabled", "comment", "weekly_comment", "dir", "captions", "tracking"),
+     "settings": ("activity", "caps_enabled", "rotation_enabled", "contact_account",
+                  "bands"),
+ }
+@@ -326,6 +326,11 @@ def prepare(raw, collection, doc_id, patch):
+     if before is None:
+         current[operator_config.RANK] = next_rank(_decoded(raw, collection))
+     fields = apply_fields(collection, current, patch)
++    if collection == "campaigns" and "tracking" in patch:
++        try:
++            operator_config.validate_tracking(patch["tracking"])
++        except operator_config.ConfigInvalid as ex:
++            raise WriteRefused(str(ex)) from ex
+     problems = reinterpreted(collection, patch, fields)
+     if problems:
+         raise WriteRefused("this change would be read differently from how it was "
+@@ -411,11 +416,14 @@ def write(collection, doc_id, patch, actor, env=None, *, opener=None, signer=Non
+     read at all -- a write must never be applied to a guess at the current state.
+     """
+     env = os.environ if env is None else env
+-    if collection == "campaigns" and "captions" in patch:
++    if collection == "campaigns" and ("captions" in patch or "tracking" in patch):
+         if (env.get("GENAIE_CONFIG_SOURCE") or "").strip().lower() != "firestore":
+             raise WriteRefused("caption editing requires Firestore", status=409)
+         try:
+-            operator_config.validate_captions(patch["captions"])
++            if "captions" in patch:
++                operator_config.validate_captions(patch["captions"])
++            if "tracking" in patch:
++                operator_config.validate_tracking(patch["tracking"])
+         except operator_config.ConfigInvalid as ex:
+             raise WriteRefused(str(ex)) from ex
+     import campaign_deletion
+diff --git a/workspace/lib/promo_broadcast.py b/workspace/lib/promo_broadcast.py
+index 4ba51a9..ba1ab68 100644
+--- a/workspace/lib/promo_broadcast.py
++++ b/workspace/lib/promo_broadcast.py
+@@ -663,6 +663,23 @@ def caption_for(jid, variants, day=None, allowed=None, tracking=None,
+                                 bot_number=bot_number), ref)
+ 
+ 
++def campaign_link_wrapper(tracking, campaign):
++    """One redirect renderer for posting and console previews.
++
++    Registering a preview reuses the same durable destination as a send. It
++    never increments a count; only the public redirect handler does that.
++    """
++    try:
++        base = campaign_clicks.base_url() if tracking else None
++    except ValueError:
++        sys.stderr.write("WARN: Invalid campaign click base URL; using direct WhatsApp links.\n")
++        base = None
++    if not base:
++        return None
++    store = campaign_clicks.ClickStore()
++    return partial(_tracked_link, base, store, campaign)
++
++
+ def _tracked_link(base, store, campaign, jid, name, destination):
+     try:
+         link_id = store.register(campaign, jid, name, destination)
+@@ -1147,6 +1164,11 @@ def broadcast(*, text, image, state_file, promo_name, send_delay=None, argv=None
+             return 0
+ 
+     variants = operator_config.campaign_captions(source, promo_config.promo_key(promo_name), variants)
++    # Console campaigns already pass their resolved tracking into broadcast.
++    # Repository campaigns need the same override lookup as their caption copy.
++    campaign_meta = ((source.get("membership") or {}).get("promos") or {}).get(promo_config.promo_key(promo_name), {})
++    if campaign_meta.get("kind") != "console":
++        tracking = operator_config.campaign_tracking(source, promo_config.promo_key(promo_name), tracking)
+     variant_images = {index: path for index, path in variant_images.items() if index < len(variants)}
+ 
+     targets = source["doc"]
+@@ -1294,12 +1316,7 @@ def broadcast(*, text, image, state_file, promo_name, send_delay=None, argv=None
+     attempted = 0
+     import campaign_deletion
+     campaign_slug = promo_config.promo_key(promo_name)
+-    try:
+-        click_base = campaign_clicks.base_url() if tracking else None
+-    except ValueError:
+-        sys.stderr.write("WARN: Invalid campaign click base URL; using direct WhatsApp links.\n")
+-        click_base = None
+-    click_store = campaign_clicks.ClickStore() if click_base else None
++    link_wrapper = campaign_link_wrapper(tracking, campaign_slug)
+     group_config = source["membership"].get("groups") or {}
+     for position, jid in enumerate(pending):
+         account = account_for(jid)
+@@ -1326,9 +1343,9 @@ def broadcast(*, text, image, state_file, promo_name, send_delay=None, argv=None
+                 print("Campaign deleted; stopping remaining sends.")
+                 break
+             wrap_link = None
+-            if click_store is not None:
++            if link_wrapper is not None:
+                 name = (group_config.get(jid) or {}).get("name")
+-                wrap_link = partial(_tracked_link, click_base, click_store, campaign_slug, jid, name)
++                wrap_link = partial(link_wrapper, jid, name)
+             idx, caption, _ = caption_for(jid, variants, day=day, allowed=weekly.get(jid),
+                                           tracking=tracking, bot_number=number, wrap_link=wrap_link)
+             ok, out = send_ad(jid, caption, variant_images.get(idx, image_path),

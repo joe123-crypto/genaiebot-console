@@ -2,10 +2,10 @@
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ save: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn() }));
+const mocks = vi.hoisted(() => ({ save: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn(), accounts: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }) }));
 vi.mock("@/app/campaigns/actions", () => ({ saveCaptionsAction: mocks.save }));
-vi.mock("@/app/campaigns/caption-ai-actions", () => ({ suggestCaptionAction: mocks.reply }));
+vi.mock("@/app/campaigns/caption-ai-actions", () => ({ suggestCaptionAction: mocks.reply, captionLinkAccountsAction: mocks.accounts }));
 import { CaptionEditor, CaptionEditorScreen } from "@/app/campaigns/_components/caption-editor";
 import { captionDraftKey } from "@/src/lib/caption-editor";
 import { healthy, failure, preview, success } from "./fixtures/campaign-detail";
@@ -18,6 +18,7 @@ async function save() { await act(async () => { fireEvent.click(screen.getByRole
 async function chat() { await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Make it shorter" })); }); }
 beforeEach(() => {
   sessionStorage.clear(); vi.clearAllMocks();
+  mocks.accounts.mockResolvedValue([{ id: "default", number: "+26370000001", isContact: true }]);
   mocks.save.mockResolvedValue({ ok: true });
   mocks.reply.mockResolvedValue({ ok: true, reply: { message: "A shorter suggestion", suggestion: "Water $25\nCall {bot_number} {ref_link}" } });
 });
@@ -381,5 +382,68 @@ describe("a suggestion that drops part of the caption", () => {
     mount();
     await chat();
     expect(screen.queryByText(/shorter than your caption/)).toBeNull();
+  });
+});
+
+
+describe("tracked links in saved campaign captions", () => {
+  it("collects a fixed bot number, replaces the chosen link and saves both fields", async () => {
+    const original = ["Offer https://wa.me/26370000009", "Other caption"];
+    mount({ captions: original, tracking: { prefix: "KEEP", prefill: "Hello {ref}" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add tracked WhatsApp link" })));
+    fireEvent.change(screen.getByLabelText("Choose a bot number"), { target: { value: "+26370000001" } });
+    fireEvent.change(screen.getByLabelText("Existing WhatsApp links"), { target: { value: "https://wa.me/26370000009" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+    expect(text().value).toBe(original[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+    expect(text().value).toBe("Offer {ref_link}");
+    await save();
+    expect(mocks.save).toHaveBeenCalledWith(props.slug, ["Offer {ref_link}", "Other caption"], original, {
+      tracking: { prefix: "KEEP", prefill: "Hello {ref}", label: props.name, number: "+26370000001" },
+      expectedTracking: { prefix: "KEEP", prefill: "Hello {ref}" },
+    });
+  });
+
+  it("handles AI requests with a missing number, validates it and undoes tracking with the text", async () => {
+    mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Which number should the tracked link open?", trackedLink: {} } });
+    mount({ captions: ["Offer"], tracking: {} });
+    const composer = screen.getByRole("textbox", { name: "Message the caption assistant" });
+    fireEvent.change(composer, { target: { value: "Add a tracked WhatsApp link" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+    expect(screen.getByRole("alert").textContent).toContain("international");
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+263 700 000 03" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+    expect(text().value).toContain("{ref_link}");
+    fireEvent.click(screen.getByRole("button", { name: "Undo AI edit" }));
+    expect(text().value).toBe("Offer");
+    expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("blocks a tracked-link proposal after typing and keeps the draft through remounts", async () => {
+    const view = mount({ captions: ["Offer"], tracking: {} });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add tracked WhatsApp link" })));
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+26370000003" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+    edit("New typing");
+    expect(screen.queryByRole("button", { name: "Apply suggestion" })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add tracked WhatsApp link" })));
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+26370000003" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+    view.unmount();
+    mount({ captions: ["Offer"], tracking: {} });
+    expect(text().value).toContain("New typing");
+    await save();
+    expect(mocks.save.mock.calls[0][3].tracking.number).toBe("+26370000003");
+  });
+
+  it("requires refreshed settings after external tracking changes", () => {
+    const view = mount({ tracking: { prefix: "A", number: "+26370000001" } });
+    view.rerender(createElement(CaptionEditor, { ...props, tracking: { prefix: "A", number: "+26370000002" } }));
+    expect(screen.getByRole("alert").textContent).toContain("changed");
+    expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

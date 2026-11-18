@@ -14,7 +14,8 @@ The final user message contains the CURRENT caption and the operator's request a
 Return JSON with message (a brief conversational explanation), suggestion (the complete revised caption or null), and append (only new text to add at the end or null).
 For requests to ADD a call to action, link, closing line, or other content, use append and set suggestion to null. The app appends this to the unchanged caption, preserving all original text and placeholders. Do not copy the original caption into append.
 For requests to REWRITE existing content, use suggestion and set append to null. For questions, clarification, or no change, set both to null. Never supply both suggestion and append.
-For a WhatsApp link to an explicitly supplied number, use https://wa.me/ followed by the international number's digits only (no plus sign, spaces, or punctuation). Add that literal link without replacing existing contact details or template placeholders. {bot_number} is a dynamic posting-line number, not a substitute for a specific number supplied by the operator.
+For requests to add or change a WhatsApp link, use campaign tracking by default, including requests about click counting, campaign tracking, or the Add tracked WhatsApp link starter. Unless the operator explicitly asks for an untracked direct link, return trackedLink with number set to the explicitly supplied international destination, or null if it is missing or ambiguous. Set suggestion and append to null. The app collects a fixed destination, offers bot numbers, asks which existing link to replace, and builds {ref_link} safely. Never invent a number or generate a tracking URL. If the operator asks to use the bot’s own number, leave number null so they can choose a bot line. For all other replies set trackedLink to null.
+For an explicitly requested direct, untracked WhatsApp link to a supplied number, use https://wa.me/ followed by the international number's digits only (no plus sign, spaces, or punctuation). Add that literal link without replacing existing contact details or template placeholders. {bot_number} is a dynamic posting-line number, not a substitute for a specific number supplied by the operator.
 An earlier assistant error means the requested edit was not applied. If the operator follows up with a correction such as "keep all placeholders", complete the earlier request with that correction; do not drop the earlier intent.
 Keep all existing factual details, prices, quantities, contacts, and links unless the operator explicitly requests a change. Never invent missing facts; ask a question instead.
 Preserve EVERY template placeholder, such as {bot_number}, {ref}, and {ref_link}, exactly as written, including the number of occurrences. Never resolve placeholders into real values.
@@ -113,8 +114,9 @@ export async function generateCaptionReply(input: CaptionAIRequest): Promise<Cap
             message: { type: "string", minLength: 1, maxLength: 4000 },
             suggestion: { type: ["string", "null"], minLength: 1 },
             append: { type: ["string", "null"], minLength: 1 },
+            trackedLink: { anyOf: [{ type: "null" }, { type: "object", properties: { number: { type: ["string", "null"], maxLength: 80 } }, required: ["number"], additionalProperties: false }] },
           },
-          required: ["message", "suggestion", "append"], additionalProperties: false,
+          required: ["message", "suggestion", "append", "trackedLink"], additionalProperties: false,
         } } },
       }),
     });
@@ -143,6 +145,13 @@ export async function generateCaptionReply(input: CaptionAIRequest): Promise<Cap
     const validText = (value: unknown) => value === null || (typeof value === "string" && Boolean(value.trim()) && Buffer.byteLength(value) <= MAX_CAPTION_BYTES);
     if (typeof result.message !== "string" || !result.message.trim() || result.message.length > 4000 ||
       !validText(result.suggestion) || !validText(result.append) || (result.suggestion !== null && result.append !== null)) throw new Error("Invalid reply");
+    if (result.trackedLink !== undefined && result.trackedLink !== null) {
+      const link = result.trackedLink as Record<string, unknown>;
+      if (typeof link !== "object" || Array.isArray(link) ||
+          (link.number !== null && (typeof link.number !== "string" || link.number.length > 80)) ||
+          result.suggestion !== null || result.append !== null) throw new Error("Invalid tracked link reply");
+      return { message: result.message, trackedLink: { ...(typeof link.number === "string" ? { number: link.number } : {}) } };
+    }
     const addition = typeof result.append === "string" ? result.append : undefined;
     const separator = !input.caption || input.caption.endsWith("\n\n") ? "" : input.caption.endsWith("\n") ? "\n" : "\n\n";
     const suggestion = addition !== undefined ? `${input.caption}${separator}${addition}`

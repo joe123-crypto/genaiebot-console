@@ -1,7 +1,7 @@
 import { getLiveView } from "@/src/lib/live-client";
 import { BotUnavailableError, getCampaignPreview, getCampaignPayload, getCapabilities, getGroups } from "@/src/lib/bot-client";
 import type { ReadResource } from "@/src/lib/read-resource";
-import type { AdAssets, Campaign, CampaignPreview, GroupsPayload, WriteCapabilities } from "@/src/lib/types";
+import type { AdAssets, Campaign, CampaignPreview, GroupsPayload, Tracking, WriteCapabilities } from "@/src/lib/types";
 
 export type CampaignDetail = {
   campaign: ReadResource<Campaign | null>;
@@ -44,7 +44,7 @@ export async function loadCampaignDetail(slug: string): Promise<CampaignDetail> 
  *  picture URLs ride along so the assistant can be shown the advert itself. */
 export type CaptionEditorDetail = {
   campaign: ReadResource<Pick<Campaign, "slug" | "name" | "source"> | null>;
-  preview: ReadResource<Pick<CampaignPreview, "captions">>;
+  preview: ReadResource<Pick<CampaignPreview, "captions"> & { tracking?: Tracking }>;
   writes: ReadResource<WriteCapabilities | null>;
   /** Public asset URLs for the campaign's pictures; empty when that read failed
    *  or the bot reports none. Never a reason to fail the editor. */
@@ -54,30 +54,30 @@ export type CaptionEditorDetail = {
 
 /** The pictures the assistant may be shown, in the order the campaign posts
  *  them. A picture the index does not know has no URL and is skipped. */
-async function campaignPictures(slug: string): Promise<string[]> {
+async function campaignCaptionContext(slug: string): Promise<{ pictures: string[]; tracking?: Tracking }> {
   try {
     const { campaign } = await getCampaignPayload(slug);
-    return (campaign?.assets ?? []).flatMap((asset) => asset.url ? [asset.url] : []);
+    return { pictures: (campaign?.assets ?? []).flatMap((asset) => asset.url ? [asset.url] : []), ...(campaign ? { tracking: campaign.tracking } : {}) };
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
-    return [];
+    return { pictures: [] };
   }
 }
 export async function loadCaptionEditorDetail(slug: string): Promise<CaptionEditorDetail> {
-  const [captions, pictures] = await Promise.all([
-    getLiveView<{ campaign: Pick<Campaign, "slug" | "name" | "source"> | null; captions: string[]; writes?: WriteCapabilities; sync: import("@/src/lib/live-types").SyncStatus }>("captions", new URLSearchParams({ slug }))
+  const [captions, context] = await Promise.all([
+    getLiveView<{ campaign: Pick<Campaign, "slug" | "name" | "source"> | null; captions: string[]; tracking?: Tracking; writes?: WriteCapabilities; sync: import("@/src/lib/live-types").SyncStatus }>("captions", new URLSearchParams({ slug }))
       .then((data) => ({ ok: true as const, data }), (error: unknown) => {
         if (!(error instanceof BotUnavailableError)) throw error;
         return { ok: false as const, error };
       }),
-    campaignPictures(slug),
+    campaignCaptionContext(slug),
   ]);
   if (!captions.ok) {
     const failed = { ok: false as const, error: { detail: captions.error.detail, ...(captions.error.status === undefined ? {} : { status: captions.error.status }) } };
-    return { campaign: failed, preview: failed, writes: failed, pictures };
+    return { campaign: failed, preview: failed, writes: failed, pictures: context.pictures };
   }
   const data = captions.data;
   const receivedAt = new Date().toISOString();
-  return { campaign: { ok: true, data: data.campaign, receivedAt }, preview: { ok: true, data: { captions: data.captions }, receivedAt },
-    writes: { ok: true, data: data.writes ?? null, receivedAt }, pictures, sync: data.sync };
+  return { campaign: { ok: true, data: data.campaign, receivedAt }, preview: { ok: true, data: { captions: data.captions, ...((data.tracking ?? context.tracking) !== undefined ? { tracking: data.tracking ?? context.tracking } : {}) }, receivedAt },
+    writes: { ok: true, data: data.writes ?? null, receivedAt }, pictures: context.pictures, sync: data.sync };
 }

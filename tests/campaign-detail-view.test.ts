@@ -55,7 +55,7 @@ describe("campaign read resilience", () => {
     const caption = screen.getByLabelText("Variant 1");
     view.rerender(page({ ...healthy, [key]: failure }));
     expect(screen.getByLabelText("Variant 1")).toBe(caption);
-    expect(caption.textContent).toContain("Water for {ref}");
+    expect(caption.textContent).toContain("Water for BH-ONE");
     expect(screen.getByText("New Market")).toBeTruthy();
     expect(screen.getByText("Market One")).toBeTruthy();
     expect(screen.getByText("borehole.jpg")).toBeTruthy();
@@ -68,7 +68,7 @@ describe("campaign read resilience", () => {
     expect((screen.getByRole("button", { name: "Apply 1 change" }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
     expect(stored()).toEqual(before);
-    expect(caption.textContent).toContain("Water for {ref}");
+    expect(caption.textContent).toContain("Water for BH-ONE");
   });
 
   it("does not prune stored additions when membership has never loaded", () => {
@@ -113,9 +113,9 @@ describe("campaign read resilience", () => {
     view.rerender(page()); assertReadOnly(); addGroup();
     view.rerender(page(down));
     expect(screen.getByText("New Market")).toBeTruthy();
-    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for {ref}");
+    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for BH-ONE");
     view.rerender(page());
-    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for {ref}");
+    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for BH-ONE");
   });
 
   it("manual retry refreshes the page without clearing drafts", async () => {
@@ -123,7 +123,7 @@ describe("campaign read resilience", () => {
     view.rerender(page({ ...healthy, preview: failure }));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry campaign preview" })); });
     expect(mocks.refresh).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for {ref}");
+    expect(screen.getByLabelText("Variant 1").textContent).toContain("Water for BH-ONE");
     expect(stored().added).toEqual(["2@g.us"]);
   });
 

@@ -17,10 +17,10 @@ beforeEach(() => { save.mockReset(); save.mockResolvedValue({ ok: true }); });
 afterEach(cleanup);
 
 describe("read-only caption cards", () => {
-  it("shows template text and group previews with adjacent edit and delete controls", () => {
+  it("shows posting previews and labeled templates with adjacent edit and delete controls", () => {
     mount();
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByLabelText("Variant 1").textContent).toBe(props.captions[0]);
+    expect(screen.getByLabelText("Variant 1").textContent).toBe(props.samples[0]!.caption);
     expect(screen.getByText("First +263123")).toBeDefined();
     const edit = screen.getByRole("link", { name: "Edit variant 1" });
     expect(edit.getAttribute("href")).toBe("/campaigns/borehole-drilling/captions/1/edit");
@@ -42,7 +42,7 @@ describe("read-only caption cards", () => {
 
   it("reset restores deleted variants and editor navigation", () => {
     mount(); remove(); fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-    expect(screen.getByLabelText("Variant 1").textContent).toBe(props.captions[0]);
+    expect(screen.getByLabelText("Variant 1").textContent).toBe(props.samples[0]!.caption);
     expect(screen.getByRole("link", { name: "Edit variant 1" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Add variant" })).toBeDefined();
   });
@@ -51,7 +51,7 @@ describe("read-only caption cards", () => {
     const view = mount(); remove();
     view.rerender(createElement(CaptionVariants, { ...props, captions: [...props.captions] }));
     expect(screen.getByLabelText("Variant 1").textContent).toBe(props.captions[1]);
-    view.rerender(createElement(CaptionVariants, { ...props, captions: ["Changed elsewhere"] }));
+    view.rerender(createElement(CaptionVariants, { ...props, captions: ["Changed elsewhere"], samples: [null] }));
     expect(screen.getByRole("alert").textContent).toContain("changed while");
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
@@ -87,7 +87,7 @@ describe("read-only caption cards", () => {
 
   it("shows fresh captions when there is no draft", () => {
     const view = mount();
-    view.rerender(createElement(CaptionVariants, { ...props, captions: ["Latest"] }));
+    view.rerender(createElement(CaptionVariants, { ...props, captions: ["Latest"], samples: [null] }));
     expect(screen.getByLabelText("Variant 1").textContent).toBe("Latest");
   });
 
@@ -107,4 +107,11 @@ describe("read-only caption cards", () => {
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
     expect(save).not.toHaveBeenCalled();
   });
+});
+
+
+it("shows the tracked URL in the caption card while preserving the editable source template", () => {
+  mount({ captions: ["Chat {ref_link}"], samples: [{ label: "Market", ref: "A-1", caption: "Chat https://click.example/go/abc" }] });
+  expect(screen.getByLabelText("Variant 1").textContent).toBe("Chat https://click.example/go/abc");
+  expect(screen.getByText("Chat {ref_link}")).toBeDefined();
 });

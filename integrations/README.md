@@ -586,3 +586,48 @@ sending again on the bot deploy alone, with no edit in the console.
 
 Deploying the bot restarts the gateway, so pick a window with no send run in
 flight rather than one that merely avoids a cron minute.
+
+## Tracked links in caption creation, editing, and previews
+
+Deploy the paired bot update before deploying this console feature. For a bot
+checkout at `687ee37`, apply
+[genaebot-tracked-caption-links.patch](genaebot-tracked-caption-links.patch):
+
+```bash
+git apply --check /path/to/genaiebot_console/integrations/genaebot-tracked-caption-links.patch
+git apply /path/to/genaiebot_console/integrations/genaebot-tracked-caption-links.patch
+python3 deploy/test_tracked_caption_links.py
+python3 deploy/test_promo_captions_tracking.py
+python3 deploy/test_console_read.py
+python3 workspace/lib/test_operator_writer.py
+python3 workspace/lib/test_console_live.py
+```
+
+The last test requires `deploy/railway/requirements-console.txt`. This patch adds
+`tracking` to the validated campaign writer and returns current tracking settings
+from the lightweight caption reads. Caption and tracking changes use one audited
+campaign update; the console checks both original values before submitting it.
+An older bot leaves tracked-link editing disabled while ordinary caption editing
+remains available.
+
+The assistant offers **Add tracked WhatsApp link** and recognizes the same request
+in chat. It collects a fixed international number, including any configured bot
+number, and asks which existing WhatsApp link to replace or whether to append.
+The proposal uses `{ref_link}` and the campaign's existing tracking settings;
+new tracking defaults to the campaign slug as its prefix and campaign name as its
+label. The destination applies to all variants. Applying, undoing, restoring a
+draft, and saving keep the caption and its tracking settings together.
+
+Campaign cards show the per-group posting preview by default, with the editable
+source under **Caption template**. The bot preview now shares the posting path's
+redirect wrapper, so it shows the same registered `/go/…` URL instead of a direct
+`wa.me` destination. Registering a preview reuses the existing durable link and
+never increments its click count. Only following the public redirect does that.
+The editor's writing preview remains explicitly labeled as a template because
+group references and links are resolved for each target when posted.
+
+`GENAIE_CAMPAIGN_CLICK_BASE_URL` must be configured on the bot for redirects and
+click counts, as with the existing posting implementation. Unconfigured or
+unavailable tracking retains the engine's existing direct-link fallback in both
+posting and previews. Existing sent links and their click history are preserved;
+this update does not rewrite stored campaign copy or send any adverts.

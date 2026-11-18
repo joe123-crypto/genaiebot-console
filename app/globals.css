@@ -1608,3 +1608,9 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   }
   .groups-results .filter-actions { margin: 0; }
 }
+
+/* Destination collection in the caption assistant. */
+.tracked-link-form { display: grid; gap: 10px; padding: 16px; margin: 12px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.tracked-link-form p { margin: 0; }
+.tracked-link-form .modal-input { width: 100%; min-width: 0; box-sizing: border-box; }
+.tracked-link-form .modal-label { display: block; margin-bottom: 6px; }

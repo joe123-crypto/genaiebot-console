@@ -2,14 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const update = vi.fn();
 const preview = vi.fn();
+const updateFields = vi.fn();
+const capabilities = vi.fn();
 const revalidate = vi.fn();
 async function load(writes = true) {
-  vi.resetModules(); update.mockReset(); preview.mockReset(); revalidate.mockReset();
+  vi.resetModules(); update.mockReset(); updateFields.mockReset(); capabilities.mockReset(); preview.mockReset(); revalidate.mockReset();
+  capabilities.mockResolvedValue({ enabled: true, affectsProduction: true, fields: { campaigns: ["captions", "tracking"] }, delete: [] });
   preview.mockResolvedValue({ captions: ["Original"] });
   vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => ({
-    updateCampaignCaptions: update, getCampaignPreview: preview,
+    updateCampaignCaptions: update, getCampaignPreview: preview, updateCampaign: updateFields, getCapabilities: capabilities,
     BotUnavailableError: class extends Error { detail = "write unavailable"; },
     WritesDisabledError: class extends Error { detail = "writes off"; },
   }));
@@ -62,4 +65,25 @@ describe("saveCaptionsAction", () => {
     expect(await save("borehole", ["Edited"], ["Original"])).toEqual({ ok: false, detail: "write unavailable" });
     expect(revalidate).not.toHaveBeenCalled();
   });
+});
+
+
+it("writes captions and tracking together after checking the tracking baseline", async () => {
+  const save = await load();
+  const tracking = { prefix: "sale", number: "+26370000001" };
+  preview.mockResolvedValue({ captions: ["Original"], tracking: {} });
+  expect(await save("sale", ["Original {ref_link}"], ["Original"], { tracking, expectedTracking: {} })).toEqual({ ok: true });
+  expect(updateFields).toHaveBeenCalledWith("sale", { captions: ["Original {ref_link}"], tracking }, { by: "Joseph" });
+  expect(update).not.toHaveBeenCalled();
+});
+
+it("rejects concurrent tracking changes, invalid settings and unsupported bots without writing", async () => {
+  const save = await load();
+  const tracking = { prefix: "sale", number: "+26370000001" };
+  preview.mockResolvedValue({ captions: ["Original"], tracking });
+  expect(await save("sale", ["Edited"], ["Original"], { tracking, expectedTracking: {} })).toMatchObject({ ok: false, latestTracking: tracking });
+  expect(await save("sale", ["Edited"], ["Original"], { tracking: { ...tracking, number: "123" }, expectedTracking: {} })).toMatchObject({ ok: false, detail: expect.stringContaining("international") });
+  capabilities.mockResolvedValue({ enabled: true, affectsProduction: true, fields: { campaigns: ["captions"] }, delete: [] });
+  expect(await save("sale", ["Edited"], ["Original"], { tracking, expectedTracking: tracking })).toMatchObject({ ok: false, detail: expect.stringContaining("does not accept") });
+  expect(updateFields).not.toHaveBeenCalled();
 });
