@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ create: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn(), files: vi.fn(), forget: vi.fn(), shrink: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn(), files: vi.fn(), forget: vi.fn(), shrink: vi.fn(), accounts: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }) }));
 vi.mock("@/app/campaigns/new/actions", () => ({ createCampaignAction: mocks.create }));
-vi.mock("@/app/campaigns/caption-ai-actions", () => ({ suggestCaptionAction: mocks.reply }));
+vi.mock("@/app/campaigns/caption-ai-actions", () => ({ suggestCaptionAction: mocks.reply, captionLinkAccountsAction: mocks.accounts }));
 vi.mock("@/src/lib/campaign-files", () => ({ draftFiles: mocks.files, forgetDraftFiles: mocks.forget, keepDraftFiles: vi.fn() }));
 vi.mock("@/src/lib/caption-pictures", () => ({ picturesForAI: mocks.shrink }));
 import { CampaignCaptionStep } from "@/app/campaigns/_components/campaign-caption-step";
@@ -27,6 +27,7 @@ async function create() { await act(async () => { fireEvent.click(createButton()
 
 beforeEach(() => {
   sessionStorage.clear(); vi.clearAllMocks();
+  mocks.accounts.mockResolvedValue([]);
   mocks.create.mockResolvedValue({ ok: true, slug: "sale", scheduling: "ready" });
   mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Shorter", suggestion: "Shorter caption" } });
   mocks.shrink.mockResolvedValue([]);
@@ -207,4 +208,41 @@ describe("campaign pictures in the create-flow assistant", () => {
     expect(screen.queryByRole("checkbox", { name: /picture/ })).toBeNull();
     expect(createButton().disabled).toBe(false);
   });
+});
+
+
+it("keeps assistant tracking settings with creation details and submits the tracked template", async () => {
+  stash(); render(<CampaignCaptionStep {...props} />); write("Sale offer");
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add tracked WhatsApp link" })));
+  fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+26370000003" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+  await keep();
+  expect(JSON.parse(sessionStorage.getItem(CAMPAIGN_DRAFT_KEY)!).draft.tracking).toEqual({ prefix: "sale", label: "Sale", number: "+26370000003" });
+  await create();
+  expect(mocks.create.mock.calls[0][0]).toMatchObject({ tracking: { number: "+26370000003" }, captions: ["Sale offer\n\n👉 Tap to chat on WhatsApp: {ref_link}"] });
+});
+
+
+it.each(["ordinary AI edit", "tracked-link edit"])("creates an untracked campaign after undoing an %s", async (kind) => {
+  stash();
+  const view = render(<CampaignCaptionStep {...props} />);
+  write("Original offer");
+  if (kind === "ordinary AI edit") {
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Make it shorter" })));
+  } else {
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add tracked WhatsApp link" })));
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+26370000003" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview tracked link" }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+  fireEvent.click(screen.getByRole("button", { name: "Undo AI edit" }));
+  expect(text().value).toBe("Original offer");
+  await keep();
+  expect(JSON.parse(sessionStorage.getItem(CAMPAIGN_DRAFT_KEY)!).draft.tracking).toBeUndefined();
+  view.unmount();
+  render(<CampaignCaptionStep {...props} />);
+  expect(screen.queryByText(/could not be restored/)).toBeNull();
+  await create();
+  expect(mocks.create).toHaveBeenCalledWith({ ...draft, captions: ["Original offer"] });
 });

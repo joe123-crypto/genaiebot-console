@@ -67,7 +67,7 @@ export function CaptionVariants({
           <h2 className="card-title" id="caption-variants-title">Caption variants</h2>
           <p className="card-note caption-help">
             {writable
-              ? "Open a variant to edit manually or with AI. Group references and WhatsApp links are filled in when sent."
+              ? "Posting previews include each group’s reference and tracked link. Open a variant to edit its template manually or with AI."
               : "Captions as sent, with each group’s reference and link filled in. Editing is off in read-only mode."}
           </p>
         </div>
@@ -121,12 +121,13 @@ export function CaptionVariants({
                 ) : sample ? <span className="card-note">as sent to {sample.label} · {sample.ref}</span> : null}
               </div>
               <pre className="caption-box caption-card-text" aria-labelledby={`caption-${item.id}-label`}>
-                {writable ? item.text : sample?.caption ?? item.text}
+                {!dirty && !stale ? sample?.caption ?? item.text : item.text}
               </pre>
+              {!dirty && !stale ? <p className="card-note">{sample ? `Posting preview for ${sample.label}` : "Caption template · No group preview available"}</p> : null}
               {writable && !dirty && !stale && sample ? (
                 <details className="caption-preview">
-                  <summary>Preview for {sample.label} · {sample.ref}</summary>
-                  <pre className="caption-box">{sample.caption ?? item.text}</pre>
+                  <summary>Caption template · Posting preview for {sample.label} · {sample.ref}</summary>
+                  <pre className="caption-box">{item.text}</pre>
                 </details>
               ) : null}
             </div>

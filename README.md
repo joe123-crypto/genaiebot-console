@@ -602,3 +602,11 @@ Schedule writes require the companion bot update described in
 `CONSOLE_WRITES=1` on the console. Older bots retain a disabled Save button with
 a specific explanation. Deploy the bot support first; installation alone does
 not change any campaign times.
+
+The caption assistant can add a tracked WhatsApp link during creation or editing:
+choose **Add tracked WhatsApp link**, or ask in chat, then select a bot number or
+enter a fixed international destination. Review and apply the proposal before
+saving. The number is shared by the campaign's variants. Campaign caption cards
+show the group-specific posting preview, including its tracked redirect, with the
+editable template available separately. This requires the companion bot update
+in [Tracked caption links](integrations/README.md#tracked-links-in-caption-creation-editing-and-previews).

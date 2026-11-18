@@ -9,6 +9,7 @@ import {
   getCampaignPreview,
   getCampaignState,
   getOverview,
+  getCapabilities,
   deleteCampaign,
   getGroups,
   updateCampaign,
@@ -22,6 +23,9 @@ import {
   planAssignmentWrites,
   type CampaignGroupDraft,
 } from "@/src/lib/campaign-group-draft";
+import { trackingError, sameTracking } from "@/src/lib/tracked-caption-link";
+import { canWrite } from "@/src/lib/write-capabilities";
+import type { Tracking } from "@/src/lib/types";
 import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
 import { canDeleteCampaign, READ_ONLY_REASON } from "@/src/lib/write-capabilities";
 
@@ -58,12 +62,13 @@ function refreshCampaign(slug: string) {
   revalidatePath("/");
 }
 
-export type SaveCaptionsOutcome = { ok: true } | { ok: false; detail: string; latestCaptions?: string[] };
+export type SaveCaptionsOutcome = { ok: true } | { ok: false; detail: string; latestCaptions?: string[]; latestTracking?: Tracking };
 
 export async function saveCaptionsAction(
   slug: string,
   captions: string[],
   expectedCaptions: string[],
+  trackingChange?: { tracking: Tracking; expectedTracking: Tracking },
 ): Promise<SaveCaptionsOutcome> {
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode." };
   if (typeof slug !== "string" || !SLUG.test(slug)) {
@@ -83,11 +88,21 @@ export async function saveCaptionsAction(
   }
 
   try {
-    const current = await getCampaignPreview(slug, undefined, { fresh: true, captionsOnly: true });
-    if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
-      return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving.", latestCaptions: current.captions };
+    if (trackingChange) {
+      const invalid = trackingError(trackingChange.tracking) || trackingError(trackingChange.expectedTracking);
+      if (invalid) return { ok: false, detail: invalid };
+      const gate = canWrite(WRITES_ENABLED, await getCapabilities(), "campaigns", "captions", "tracking");
+      if (!gate.allowed) return { ok: false, detail: gate.reason };
     }
-    await updateCampaignCaptions(slug, captions, { by: OPERATOR_NAME });
+    const current = await getCampaignPreview(slug, undefined, { fresh: true, captionsOnly: true });
+    if (trackingChange && (current.tracking === undefined || !sameTracking(current.tracking, trackingChange.expectedTracking))) {
+      return { ok: false, detail: "Campaign tracking changed since you started editing. Reset to the latest settings before saving.", latestCaptions: current.captions, latestTracking: current.tracking };
+    }
+    if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
+      return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving.", latestCaptions: current.captions, ...(trackingChange ? { latestTracking: current.tracking } : {}) };
+    }
+    if (trackingChange) await updateCampaign(slug, { captions, tracking: trackingChange.tracking }, { by: OPERATOR_NAME });
+    else await updateCampaignCaptions(slug, captions, { by: OPERATOR_NAME });
   } catch (error) {
     if (error instanceof BotUnavailableError || error instanceof WritesDisabledError) {
       return { ok: false, detail: error.detail };

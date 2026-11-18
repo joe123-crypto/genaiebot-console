@@ -12,6 +12,7 @@ import { CAMPAIGN_CAPTIONS_KEY, CAMPAIGN_DRAFT_KEY, parseCampaignCaptions, parse
 import { draftFiles, forgetDraftFiles } from "@/src/lib/campaign-files";
 import { picturesForAI } from "@/src/lib/caption-pictures";
 import { MAX_CAPTION_IMAGES } from "@/src/lib/caption-ai-limits";
+import type { Tracking } from "@/src/lib/types";
 import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type Variant = { id: number; text: string };
@@ -25,7 +26,7 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
   const [draft, setDraft] = useState<CampaignDraft | null>(null);
   const [variants, setVariants] = useState<Variant[]>([]);
   // The page opens in the editor: writing the first caption is the point of it.
-  const [editing, setEditing] = useState<{ id: number | "new"; text: string } | null>({ id: "new", text: "" });
+  const [editing, setEditing] = useState<{ id: number | "new"; text: string; tracking?: Tracking } | null>({ id: "new", text: "" });
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
   // The pictures are not uploaded yet, so the assistant sees downscaled copies.
   const [pictures, setPictures] = useState<string[]>([]);
@@ -83,6 +84,18 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
     setVariants((current) => editing.id === "new"
       ? [...current, { id: nextId.current++, text }]
       : current.map((item) => item.id === editing.id ? { ...item, text } : item));
+    if (editing.tracking) {
+      // Undo may restore an untracked caption. Creation omits empty tracking,
+      // because a defined tracking object must carry a reference prefix.
+      const next = { ...draft! };
+      if (Object.keys(editing.tracking).length) next.tracking = editing.tracking;
+      else delete next.tracking;
+      setDraft(next);
+      try {
+        const kept = JSON.parse(sessionStorage.getItem(CAMPAIGN_DRAFT_KEY) ?? "{}");
+        sessionStorage.setItem(CAMPAIGN_DRAFT_KEY, JSON.stringify({ ...kept, version: 1, draft: next }));
+      } catch { setStorageNotice("Tracking settings are kept only while this page is open."); }
+    }
     setEditing(null);
     setError("");
   }
@@ -169,7 +182,8 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
         : "No captions yet. The campaign is created once at least one is saved."}</span>
     </div>
     {editing ? <>
-      <CaptionWorkspace key={editing.id} name={draft.name}
+      <CaptionWorkspace key={editing.id} name={draft.name} slug={draft.slug} tracking={editing.tracking ?? draft.tracking}
+        onTracking={(tracking) => setEditing((current) => current && { ...current, tracking })}
         variantLabel={String(editing.id === "new" ? variants.length + 1 : variants.findIndex((item) => item.id === editing.id) + 1)}
         text={editing.text} disabled={locked} autoFocus aiUnavailableReason={aiUnavailableReason} images={pictures}
         onText={(text) => setEditing((current) => current && { ...current, text })} />

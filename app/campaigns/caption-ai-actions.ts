@@ -18,3 +18,12 @@ export async function suggestCaptionAction(value: unknown): Promise<CaptionAIOut
     return { ok: false, detail: error instanceof CaptionAIError ? error.message : "AI editing could not be completed. Your caption is unchanged; try again." };
   } finally { activeRequests--; }
 }
+
+/** Read-only account lookup, independent of paid caption generation. */
+export async function captionLinkAccountsAction(): Promise<import("@/src/lib/types").LineAccount[]> {
+  try {
+    const { getOverview } = await import("@/src/lib/bot-client");
+    const accounts = (await getOverview()).accounts;
+    return Array.isArray(accounts) ? accounts : [];
+  } catch { return []; }
+}

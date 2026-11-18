@@ -177,3 +177,22 @@ describe("campaign pictures as caption context", () => {
     expect(() => parseCaptionAIRequest({ ...input, images: [heavy, heavy, heavy] })).toThrow(CaptionAIError);
   });
 });
+
+
+describe("structured tracked-link requests", () => {
+  it.each([null, "+26370000001"])("collects destinations without proposing an untracked URL: %s", async (number) => {
+    fetchMock.mockResolvedValue(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+      message: "Choose the destination", suggestion: null, append: null, trackedLink: { number },
+    }) } }] }));
+    expect(await generateCaptionReply({ ...input, prompt: "Add a tracked WhatsApp link" })).toEqual({ message: "Choose the destination", trackedLink: number ? { number } : {} });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.response_format.json_schema.schema.properties.trackedLink).toBeDefined();
+  });
+
+  it("rejects a tracked action mixed with caption edits", async () => {
+    fetchMock.mockResolvedValue(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+      message: "Done", suggestion: input.caption, append: null, trackedLink: { number: "+26370000001" },
+    }) } }] }));
+    await expect(generateCaptionReply(input)).rejects.toThrow("invalid suggestion");
+  });
+});

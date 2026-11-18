@@ -11,6 +11,9 @@ import { CaptionAssistant } from "@/app/campaigns/_components/caption-assistant"
 import { saveCaptionsAction } from "@/app/campaigns/actions";
 import { captionDraftKey, editedCaptions, parseCaptionDraft, type CaptionDraft } from "@/src/lib/caption-editor";
 import { campaignTitle } from "@/src/lib/format";
+import { sameTracking } from "@/src/lib/tracked-caption-link";
+import { canWrite } from "@/src/lib/write-capabilities";
+import type { Tracking } from "@/src/lib/types";
 import type { CaptionEditorDetail } from "@/src/domains/campaign-detail";
 
 const UNAVAILABLE = "Saving is unavailable until the required campaign data refreshes successfully. Your draft is kept here.";
@@ -30,6 +33,9 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
   const reason = !writable ? "Editing is off because the console is in read-only mode."
     : !fresh ? UNAVAILABLE : saveUnavailableReason;
   const router = useRouter();
+  const trackingGate = canWrite(writable, detail.writes.ok ? detail.writes.data ?? undefined : undefined, "campaigns", "captions", "tracking");
+  const trackingReason = !fresh || preview?.data.tracking === undefined ? "Refresh campaign tracking settings before adding a tracked link."
+    : !trackingGate.allowed ? trackingGate.reason : undefined;
 
   return <><SyncNotice sync={detail.sync} />
     {!detail.preview.ok || !detail.campaign.ok || !detail.writes.ok ? <div className="campaign-read-notice" role="status">
@@ -38,7 +44,7 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
       <button type="button" className="btn" onClick={() => router.refresh()}>Retry</button>
     </div> : null}
     {preview && campaign?.data ? <CaptionEditor key={`${slug}:${variant}`} slug={slug} variant={variant}
-      name={campaign.data.source === "console" ? campaign.data.name : campaignTitle(slug)} captions={preview.data.captions}
+      name={campaign.data.source === "console" ? campaign.data.name : campaignTitle(slug)} captions={preview.data.captions} tracking={preview.data.tracking} trackingUnavailableReason={trackingReason}
       writable={writable} saveUnavailableReason={reason} aiUnavailableReason={aiUnavailableReason} images={images} />
       : <><PageHead title="Caption editor" subtitle="Load the campaign to edit its caption." />
         <section className="card card-pad"><p>Caption data is unavailable. Retry to load the editor.</p>
@@ -48,12 +54,12 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
 
 /** The writing surface itself: text, its live preview, and the AI assistant.
  *  Undo and the assistant's revision guard are its own; remount it to reset. */
-export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus, aiUnavailableReason, images, onText }: {
+export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus, aiUnavailableReason, images, slug, tracking = {}, trackingUnavailableReason, onTracking, onText }: {
   name: string; variantLabel: string; text: string; disabled: boolean; autoFocus?: boolean;
-  aiUnavailableReason?: string; images?: string[]; onText: (text: string) => void;
+  aiUnavailableReason?: string; images?: string[]; slug?: string; tracking?: Tracking; trackingUnavailableReason?: string; onTracking?: (tracking: Tracking) => void; onText: (text: string) => void;
 }) {
   const [revision, setRevision] = useState(0);
-  const [undo, setUndo] = useState<string | null>(null);
+  const [undo, setUndo] = useState<{ text: string; tracking: Tracking } | null>(null);
 
   function change(next: string) {
     onText(next);
@@ -72,7 +78,7 @@ export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus
             placeholder="Write your caption here…" aria-describedby="caption-template-help" onChange={(event) => change(event.target.value)} />
           <div className="caption-template-help" id="caption-template-help">Keep template placeholders such as <code>{"{bot_number}"}</code> and <code>{"{ref_link}"}</code>.
             Group references and WhatsApp links are filled in when sent.</div>
-          {undo !== null ? <button type="button" className="btn caption-undo" disabled={disabled} onClick={() => change(undo)}><RotateCcw size={14} aria-hidden /> Undo AI edit</button> : null}
+          {undo !== null ? <button type="button" className="btn caption-undo" disabled={disabled} onClick={() => { onTracking?.(undo.tracking); change(undo.text); }}><RotateCcw size={14} aria-hidden /> Undo AI edit</button> : null}
         </div>
       </section>
       <section className="card caption-live-preview" aria-labelledby="caption-preview-title">
@@ -85,22 +91,24 @@ export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus
       </section>
     </div>
     <CaptionAssistant text={text} revision={revision} disabled={disabled} unavailableReason={aiUnavailableReason} images={images}
-      onApply={(suggestion, sourceRevision) => {
-        if (disabled || sourceRevision !== revision) return;
-        const previous = text;
+      linkContext={slug && onTracking ? { slug, name, tracking, unavailableReason: trackingUnavailableReason } : undefined}
+      onApply={(suggestion, sourceRevision, nextTracking) => {
+        if (disabled || sourceRevision !== revision || (nextTracking && trackingUnavailableReason)) return;
+        const previous = { text, tracking };
+        if (nextTracking) onTracking?.(nextTracking);
         change(suggestion);
         setUndo(previous);
       }} />
   </>;
 }
 
-export function CaptionEditor({ slug, variant, name, captions, writable, saveUnavailableReason, aiUnavailableReason, images }: {
+export function CaptionEditor({ slug, variant, name, captions, writable, saveUnavailableReason, aiUnavailableReason, images, tracking = {}, trackingUnavailableReason }: {
   slug: string; variant: string; name: string; captions: string[]; writable: boolean;
-  saveUnavailableReason?: string; aiUnavailableReason?: string; images?: string[];
+  saveUnavailableReason?: string; aiUnavailableReason?: string; images?: string[]; tracking?: Tracking; trackingUnavailableReason?: string;
 }) {
   const router = useRouter();
   const index = variant === "new" ? captions.length : Number(variant) - 1;
-  const [draft, setDraft] = useState<CaptionDraft>(() => ({ version: 1, base: captions, text: variant === "new" ? "" : captions[index] ?? "" }));
+  const [draft, setDraft] = useState<CaptionDraft>(() => ({ version: 1, base: captions, text: variant === "new" ? "" : captions[index] ?? "", baseTracking: tracking, tracking }));
   const [ready, setReady] = useState(false);
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
   // A draft kept from an earlier visit looks exactly like the saved caption,
@@ -110,16 +118,20 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
   const [pending, startTransition] = useTransition();
   const [resetCount, setResetCount] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [conflict, setConflict] = useState<{ received: string[]; latest: string[] } | null>(null);
+  const [conflict, setConflict] = useState<{ received: string[]; receivedTracking: Tracking; latest: string[]; tracking?: Tracking } | null>(null);
   const finished = useRef(false);
   const submitting = useRef(false);
   const initialCaptions = useRef(captions);
   const key = captionDraftKey(slug, variant);
   const back = `/campaigns/${encodeURIComponent(slug)}`;
-  const latestCaptions = conflict && JSON.stringify(conflict.received) === JSON.stringify(captions) ? conflict.latest : captions;
-  const stale = JSON.stringify(draft.base) !== JSON.stringify(latestCaptions);
+  const currentConflict = conflict && JSON.stringify(conflict.received) === JSON.stringify(captions) && sameTracking(conflict.receivedTracking, tracking) ? conflict : null;
+  const latestCaptions = currentConflict?.latest ?? captions;
+  const latestTracking = currentConflict?.tracking ?? tracking;
+  const trackingDirty = !sameTracking(draft.tracking, draft.baseTracking);
+  const trackingStale = !sameTracking(draft.baseTracking, latestTracking);
+  const stale = JSON.stringify(draft.base) !== JSON.stringify(latestCaptions) || trackingStale;
   const validVariant = variant === "new" || (index >= 0 && index < draft.base.length);
-  const dirty = draft.text !== (variant === "new" ? "" : draft.base[index] ?? "");
+  const dirty = draft.text !== (variant === "new" ? "" : draft.base[index] ?? "") || trackingDirty;
   const locked = !ready || !writable || pending;
   const nextCaptions = editedCaptions(draft.base, variant, draft.text);
   const tooLarge = new TextEncoder().encode(JSON.stringify(nextCaptions)).byteLength > 60 * 1024;
@@ -130,8 +142,8 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
       if (raw) {
         const restored = parseCaptionDraft(raw);
         // A confirmed save may already be visible after interrupted navigation.
-        if (JSON.stringify(editedCaptions(restored.base, variant, restored.text)) !== JSON.stringify(initialCaptions.current)) {
-          setDraft(restored);
+        if (JSON.stringify(editedCaptions(restored.base, variant, restored.text)) !== JSON.stringify(initialCaptions.current) || !sameTracking(restored.tracking ?? tracking, tracking)) {
+          setDraft({ ...restored, baseTracking: restored.baseTracking ?? tracking, tracking: restored.tracking ?? tracking });
           setFromEarlierVisit(true);
         }
         else sessionStorage.removeItem(key);
@@ -157,7 +169,7 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
   }
 
   function reset() {
-    setDraft({ version: 1, base: latestCaptions, text: variant === "new" ? "" : latestCaptions[index] ?? "" });
+    setDraft({ version: 1, base: latestCaptions, text: variant === "new" ? "" : latestCaptions[index] ?? "", baseTracking: latestTracking, tracking: latestTracking });
     setFromEarlierVisit(false);
     setError(null);
     setResetCount((previous) => previous + 1);
@@ -171,13 +183,13 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
   }
 
   function save() {
-    if (locked || submitting.current || !dirty || !draft.text.trim() || stale || tooLarge || !validVariant || saveUnavailableReason) return;
+    if (locked || submitting.current || !dirty || !draft.text.trim() || stale || tooLarge || !validVariant || saveUnavailableReason || (trackingDirty && trackingUnavailableReason)) return;
     submitting.current = true;
     startTransition(async () => {
       try {
-        const outcome = await saveCaptionsAction(slug, nextCaptions, draft.base);
+        const outcome = await saveCaptionsAction(slug, nextCaptions, draft.base, ...(trackingDirty ? [{ tracking: draft.tracking ?? {}, expectedTracking: draft.baseTracking ?? {} }] : []));
         if (!outcome.ok) {
-          if (outcome.latestCaptions) setConflict({ received: captions, latest: outcome.latestCaptions });
+          if (outcome.latestCaptions) setConflict({ received: captions, receivedTracking: tracking, latest: outcome.latestCaptions, tracking: outcome.latestTracking });
           setError(outcome.detail);
           return;
         }
@@ -199,12 +211,12 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
       actions={<div className="caption-actions">
         <button type="button" className="btn" disabled={pending} onClick={() => dirty ? setCancelOpen(true) : clearAndLeave()}>Cancel</button>
         <button type="button" className="btn btn-primary caption-save" onClick={save}
-          disabled={locked || !dirty || !draft.text.trim() || stale || tooLarge || Boolean(saveUnavailableReason)}>
+          disabled={locked || !dirty || !draft.text.trim() || stale || tooLarge || Boolean(saveUnavailableReason) || (trackingDirty && Boolean(trackingUnavailableReason))}>
           <Save size={16} aria-hidden />{pending ? "Saving…" : "Save caption"}
         </button></div>} />
     <div className="caption-editor-feedback">
       {saveUnavailableReason ? <p className="card-note">{saveUnavailableReason}</p> : null}
-      {error || stale ? <p className="caption-error" role="alert">{error ?? "Captions changed since this draft was started. Your draft is kept. Reset to latest before saving."}</p> : null}
+      {error || stale ? <p className="caption-error" role="alert">{error ?? (trackingStale ? "Campaign tracking changed since this draft was started. Your draft is kept. Reset to latest before saving." : "Captions changed since this draft was started. Your draft is kept. Reset to latest before saving.")}</p> : null}
       {storageNotice ? <p className="card-note" role="status">{storageNotice}</p> : null}
       {fromEarlierVisit ? <p className="caption-restored" role="status">
         This is an unsaved draft kept from an earlier visit, not the caption that is saved now. The assistant works from what is shown here.{" "}
@@ -215,6 +227,8 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
       {dirty || stale ? <button type="button" className="caption-reset link" disabled={locked} onClick={reset}><RotateCcw size={14} aria-hidden /> Reset to latest</button> : null}
     </div>
     <CaptionWorkspace key={resetCount} name={name} variantLabel={variant === "new" ? String(draft.base.length + 1) : variant}
+      slug={slug} tracking={draft.tracking} trackingUnavailableReason={trackingUnavailableReason}
+      onTracking={(next) => setDraft((previous) => ({ ...previous, tracking: next }))}
       text={draft.text} disabled={locked} autoFocus={variant === "new"} aiUnavailableReason={aiUnavailableReason} images={images} onText={updateText} />
     {cancelOpen ? <ConfirmDialog title="Discard this caption draft?" confirmLabel="Discard draft" danger
       onClose={() => setCancelOpen(false)} onConfirm={clearAndLeave}>
