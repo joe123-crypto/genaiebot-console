@@ -12,9 +12,9 @@ export default async function CustomerBotPage() {
   const target = createHash("sha256").update(BOT_API_BASE_URL.replace(/\/+$/, "")).digest("hex").slice(0, 16);
   return (
     <Shell live>
-      <PageHead title="Customer Bot" subtitle="Manage how Genaie replies to customers on WhatsApp and what it knows about your business." />
+      <PageHead title="Customer Bot" subtitle="Manage how Genaie replies on WhatsApp and review the data sources it uses for current answers." />
       {result.kind === "live" ? (
-        <CustomerBotEditor key={target} initial={result.live} writable={ACCOUNT_WRITES_ENABLED} draftKey={`genaie:customer-bot:v1:${target}`} />
+        <CustomerBotEditor key={target} initial={result.live} writable={ACCOUNT_WRITES_ENABLED} draftKey={`genaie:customer-bot:v2:${target}`} />
       ) : (
         <section className="card card-pad">
           <h2 className="card-title">Customer Bot unavailable</h2>

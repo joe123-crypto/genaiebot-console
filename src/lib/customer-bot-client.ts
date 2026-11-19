@@ -31,11 +31,12 @@ export async function customerBotRequest(publish?: CustomerBotText & { expectedR
     if (response.ok || response.status === 409 || response.status === 400) {
       const body: unknown = await response.json();
       if (response.ok && isCustomerBotVersion(body)) return { kind: "live", live: body };
+      if (response.ok) return publish ? { kind: "unknown" } : { kind: "error", detail: "Update the bot to support live lookups and the instructions-only Customer Bot editor." };
       if (response.status === 409 && body && typeof body === "object" && "current" in body && isCustomerBotVersion(body.current)) {
         return { kind: "conflict", live: body.current };
       }
       if (response.status === 400) {
-        return { kind: "error", detail: "The bot rejected this draft. Check that both editors contain text and are within the size limit." };
+        return { kind: "error", detail: "The bot rejected this draft. Check that reply instructions contain text and are within the size limit." };
       }
     }
   } catch { /* A dropped connection or unreadable response cannot confirm a publish. */ }

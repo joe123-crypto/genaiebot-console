@@ -533,24 +533,31 @@ installed. Confirm `/internal/console/live/campaigns` returns preview summaries,
 check the table after loading another page, and check that unchanged polls retain
 pictures. Deployment does not send any adverts.
 
-## Customer Bot instructions and knowledge
+## Customer Bot instructions and live lookups
 
-Deploy the paired `genaebot` Customer Bot update before deploying the console.
-The change is tracked in [genaebot PR #211](https://github.com/joe123-crypto/project_genaebot/pull/211).
-For a checkout based on genaebot `2105de8` that does not contain the update, the
-same changes are in [genaebot-customer-bot.patch](genaebot-customer-bot.patch).
-Check that `GET /internal/console/customer-bot` returns the current instructions,
-knowledge, and revision with the existing full console bearer token. The
-release-gate read token does not have access. There is no Firestore requirement
-for this feature, and production publishes always target the same gateway as
-the read (`BOT_API_BASE_URL` and `BOT_API_TOKEN`). The console's existing
-`CONSOLE_WRITES=1` enables the publish button.
+Deploy the paired live-lookup `genaebot` support before this console. The
+historical `genaebot-customer-bot.patch` implements the retired knowledge-editor
+contract and must not be applied for this feature.
 
-`POST /internal/console/customer-bot` accepts `instructions`, `knowledge`,
-`expectedRevision`, and `actor`. A stale revision returns `409` with the current
-copy. The bot uses one file on its volume for both texts, independent of
-the workspace overlay. Older bot builds ignore the file; deploying compatible
-code again resumes using it. Neither deploy publishes a draft or sends anything.
+`GET /internal/console/customer-bot` returns `instructions`, `revision`,
+`publishedAt`, `publishedBy` and a read-only `sources` array containing source
+`id`, `label` and `description`. It uses the full console bearer token; the
+release-gate token has no access. This source list describes integrations, not
+current network health. Actual factual lookups require live Firestore reads.
+
+`POST` accepts only `instructions`, `expectedRevision` and `actor`. A stale
+revision returns 409 and the current version. The bot rejects old `knowledge`
+requests with a 400 upgrade message. The console rejects older bot responses
+and explains that the bot must be upgraded. The existing `CONSOLE_WRITES=1`
+switch enables publishing; read and publish target the same live gateway.
+
+The bot preserves instructions from v1 publications and ignores their knowledge.
+A replacement writes v2 and archives the previous publication privately in
+`runtime/customer-bot/history/<revision>.json`. The workspace overlay cannot
+replace those publications. Roll back the console before the bot, and restore
+an archived v1 file only when deliberately returning to the old briefing model.
+Neither deployment publishes a draft or sends customer messages. Campaign
+ownership links and private advert status are deferred.
 
 ## Picture names the bot can cache
 

@@ -8,10 +8,11 @@ vi.mock("@/src/config", () => ({
 import { publishCustomerBotAction } from "@/app/customer-bot/actions";
 import { customerBotRequest } from "@/src/lib/customer-bot-client";
 
-const draft = { instructions: "Start with the answer.", knowledge: "Bricks: US$107" };
+const draft = { instructions: "Start with the answer." };
 const revision = "a".repeat(32);
-const live = { ...draft, revision: "b".repeat(32), publishedAt: "2026-11-15T00:00:00Z", publishedBy: "Operator" };
-const prior = { ...live, revision, knowledge: "Bricks: US$95" };
+const sources = [{ id: "campaigns", label: "Live campaigns", description: "Current advertised offers." }];
+const live = { ...draft, sources, revision: "b".repeat(32), publishedAt: "2026-11-15T00:00:00Z", publishedBy: "Operator" };
+const prior = { ...live, revision, instructions: "Old instructions." };
 const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
@@ -26,14 +27,14 @@ describe("customer bot actions", () => {
     config.writable = false;
     expect((await publishCustomerBotAction(draft, revision)).kind).toBe("error");
     config.writable = true;
-    expect((await publishCustomerBotAction({ ...draft, knowledge: "é".repeat(8193) }, revision)).kind).toBe("error");
+    expect((await publishCustomerBotAction({ ...draft, instructions: "é".repeat(8193) }, revision)).kind).toBe("error");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([
     [live, "published"],
     [prior, "unchanged"],
-    [{ ...live, knowledge: "Someone else's text." }, "conflict"],
+    [{ ...live, instructions: "Someone else's text." }, "conflict"],
   ] as const)("checks live state once after a timeout and classifies it as %s %s", async (checked, outcome) => {
     fetchMock.mockRejectedValueOnce(new DOMException("Timed out", "TimeoutError"))
       .mockResolvedValueOnce(Response.json(checked));
@@ -41,6 +42,20 @@ describe("customer bot actions", () => {
     expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["POST", "GET"]);
     expect(fetchMock.mock.calls[0][0]).toBe("https://bot.example/internal/console/customer-bot");
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ ...draft, expectedRevision: revision, actor: "Operator" });
+  });
+
+  it("checks the live version after a malformed successful publish response", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ unexpected: "acknowledgement" }))
+      .mockResolvedValueOnce(Response.json(live));
+    expect(await publishCustomerBotAction(draft, revision)).toEqual({ kind: "published", live });
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["POST", "GET"]);
+  });
+
+  it("rejects retired knowledge fields and explains an old bot response", async () => {
+    expect((await publishCustomerBotAction({ ...draft, knowledge: "Old prices" } as typeof draft, revision)).kind).toBe("error");
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(Response.json({ ...live, knowledge: "Old prices" }));
+    expect(await customerBotRequest()).toMatchObject({ kind: "error", detail: expect.stringContaining("Update the bot") });
   });
 
   it("reports an older bot as unavailable and surfaces a revision conflict without retrying", async () => {
