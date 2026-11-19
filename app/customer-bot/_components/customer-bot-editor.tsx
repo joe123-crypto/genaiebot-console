@@ -15,8 +15,7 @@ function freshDraft(base: CustomerBotVersion): Draft {
 }
 
 const descriptions = {
-  instructions: "Guide the bot’s tone, wording, and how it responds. Include examples if helpful.",
-  knowledge: "Keep products, prices, services, and FAQs in one Markdown document. Borehole quotes and CV payments are managed separately.",
+  instructions: "Guide tone, wording and stable business policies. The bot looks up current facts when customers ask; maintain offers in Campaigns.",
 };
 
 export function CustomerBotEditor({ initial, writable, draftKey }: {
@@ -132,7 +131,6 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
     // field they edited (or manually merged) and require a new review.
     setDraft({ base: live, text: {
       instructions: text.instructions === draft.base.instructions ? live.instructions : draft.text.instructions,
-      knowledge: text.knowledge === draft.base.knowledge ? live.knowledge : draft.text.knowledge,
     } });
     setFeedback(null);
     setRestored(false);
@@ -150,6 +148,13 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
           </div>}
         </div>
         {dirty && <span className="pill pill-warning">Unpublished draft</span>}
+      </section>
+      <section className="card card-pad" aria-labelledby="customer-sources-title">
+        <h2 className="card-title" id="customer-sources-title">Connected data sources</h2>
+        <p className="card-note">The bot looks up relevant information for each factual question. Update offers in Campaigns; no separate briefing is needed.</p>
+        <dl>{live.sources.map((source) => <div key={source.id}>
+          <dt>{source.label}</dt><dd className="card-note">{source.description}</dd>
+        </div>)}</dl>
       </section>
       {!writable && <p className="card-note">The console is in read-only mode.</p>}
       {restored && <p className="card-note" role="status">Your draft was restored from this tab.</p>}

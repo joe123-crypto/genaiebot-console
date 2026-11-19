@@ -8,21 +8,21 @@ vi.mock("@/app/customer-bot/actions", () => ({
 }));
 import { CustomerBotEditor } from "@/app/customer-bot/_components/customer-bot-editor";
 
-const initial = { instructions: "Reply directly.", knowledge: "# Bricks\n\n$95 per 1000",
+const initial = { instructions: "Reply directly.", sources: [{ id: "campaigns", label: "Live campaigns", description: "Current advertised offers." }],
   revision: "a".repeat(32), publishedAt: "2026-11-15T00:00:00Z", publishedBy: "Operator" };
-const changed = { ...initial, knowledge: "# Bricks\n\n$107 per 1000", revision: "b".repeat(32) };
+const changed = { ...initial, instructions: "Start with the price.", revision: "b".repeat(32) };
 const draftKey = "customer-bot-test";
 function open(writable = true, live = initial) {
   return render(<CustomerBotEditor initial={live} writable={writable} draftKey={draftKey} />);
 }
-function field(name = "Business knowledge") {
+function field(name = "Reply instructions") {
   return screen.getByRole("textbox", { name }) as HTMLTextAreaElement;
 }
 function button(name: string) {
   return screen.getByRole("button", { name }) as HTMLButtonElement;
 }
 function edit() {
-  fireEvent.change(field(), { target: { value: changed.knowledge } });
+  fireEvent.change(field(), { target: { value: changed.instructions } });
 }
 async function click(name: string) {
   await act(async () => { fireEvent.click(button(name)); });
@@ -37,39 +37,39 @@ afterEach(cleanup);
 describe("customer bot editor", () => {
   it("restores the tab draft, reviews only changed sections, and publishes explicitly", async () => {
     const screenVisit = open();
-    expect(field().value).toBe(initial.knowledge);
-    expect(field("Reply instructions").value).toBe(initial.instructions);
+    expect(field().value).toBe(initial.instructions);
+    expect(screen.queryByRole("textbox", { name: "Business knowledge" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Connected data sources" })).toBeDefined();
+    expect(screen.getByText("Live campaigns")).toBeDefined();
     edit();
     screenVisit.unmount();
     open();
-    expect(field().value).toBe(changed.knowledge);
+    expect(field().value).toBe(changed.instructions);
     await click("Review changes");
-    expect(screen.getByRole("heading", { name: "Business knowledge" })).toBeDefined();
-    expect(screen.queryByRole("heading", { name: "Reply instructions" })).toBeNull();
-    expect(screen.getByText("$95 per 1000")).toBeDefined();
-    expect(screen.getByText("$107 per 1000")).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Reply instructions" })).toBeDefined();
+    expect(screen.getByText("Reply directly.")).toBeDefined();
+    expect(screen.getByText("Start with the price.")).toBeDefined();
     expect(mocks.publish).not.toHaveBeenCalled();
     mocks.publish.mockResolvedValue({ kind: "published", live: changed });
     await click("Publish to WhatsApp bot");
-    expect(mocks.publish).toHaveBeenCalledWith({ instructions: initial.instructions, knowledge: changed.knowledge }, initial.revision);
-    expect(field().value).toBe(changed.knowledge);
+    expect(mocks.publish).toHaveBeenCalledWith({ instructions: changed.instructions }, initial.revision);
+    expect(field().value).toBe(changed.instructions);
     expect(sessionStorage.getItem(draftKey)).toBeNull();
   });
 
-  it("preserves the draft on a conflict and carries an untouched field forward", async () => {
+  it("preserves edited instructions on a conflict and requires a fresh review", async () => {
     open(); edit();
     await click("Review changes");
-    const other = { ...initial, instructions: "Start with the price.", revision: "c".repeat(32) };
+    const other = { ...initial, instructions: "Use a friendly greeting.", revision: "c".repeat(32) };
     mocks.publish.mockResolvedValue({ kind: "conflict", live: other });
     await click("Publish to WhatsApp bot");
     expect(screen.getByText(other.instructions)).toBeDefined();
-    expect(field().value).toBe(changed.knowledge);
+    expect(field().value).toBe(changed.instructions);
     expect(screen.queryByRole("button", { name: "Publish to WhatsApp bot" })).toBeNull();
     await click("Use latest as base");
-    expect(field("Reply instructions").value).toBe(other.instructions);
-    expect(field().value).toBe(changed.knowledge);
+    expect(field("Reply instructions").value).toBe(changed.instructions);
+    expect(field().value).toBe(changed.instructions);
     await click("Review changes");
-    expect(screen.queryByRole("heading", { name: "Reply instructions" })).toBeNull();
   });
 
   it("requires a live check after an unconfirmed publish and clears an already applied draft", async () => {
@@ -78,11 +78,11 @@ describe("customer bot editor", () => {
     mocks.publish.mockRejectedValue(new Error("Connection lost"));
     await click("Publish to WhatsApp bot");
     expect(screen.queryByRole("button", { name: "Publish to WhatsApp bot" })).toBeNull();
-    expect(sessionStorage.getItem(draftKey)).toContain("$107");
+    expect(sessionStorage.getItem(draftKey)).toContain("Start with the price");
     mocks.check.mockResolvedValue({ kind: "live", live: changed });
     await click("Check live version");
     expect(mocks.publish).toHaveBeenCalledOnce();
-    expect(field().value).toBe(changed.knowledge);
+    expect(field().value).toBe(changed.instructions);
     expect(sessionStorage.getItem(draftKey)).toBeNull();
   });
 
