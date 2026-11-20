@@ -7,6 +7,7 @@ import type { Attention } from "@/src/domains/console";
 import { ConsoleNav, type NavCounts } from "@/app/_components/console-nav";
 import { AutoRefresh } from "@/app/_components/auto-refresh";
 import { HomeDisclosure } from "@/app/_components/home-disclosure";
+import { SignOut } from "./sign-out";
 
 /**
  * The console frame: a fixed sidebar carrying the brand, an attention card that
@@ -42,6 +43,7 @@ export function ConsoleShell({
         <AutoRefresh />
       </span>
     </div>
+    <SignOut />
   </>;
 
   return (

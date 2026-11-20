@@ -1,6 +1,11 @@
 node_modules/
 .next/
+.next-auth-e2e/
 .env
 .env*.local
 *.tsbuildinfo
 next-env.d.ts
+firebase-debug.log*
+ui-debug.log
+test-results/
+playwright-report/

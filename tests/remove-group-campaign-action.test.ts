@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Group, WriteCapabilities } from "@/src/lib/types";
 
@@ -28,7 +29,7 @@ async function loadAction(writes = true) {
   vi.resetModules();
   updateGroupBatch.mockReset().mockResolvedValue({ done: [jid], changed: 1 });
   for (const fn of [getGroups, getOverview, updateGroup, revalidate]) fn.mockReset();
-  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
+  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => {
     class BotUnavailableError extends Error {
@@ -102,7 +103,7 @@ describe("removeGroupCampaignAction", () => {
       id: jid,
       fields: { promos: ["fruit-trees"], paused_promos: [], weekly: {} },
       expected: { promos: [slug, "fruit-trees"], paused_promos: [slug], weekly: { [slug]: ["mon"] } },
-    }], { by: "Joseph" });
+    }], { by: TEST_ACTOR });
     expect(updateGroup).not.toHaveBeenCalled();
     expect(revalidate.mock.calls).toEqual([["/groups"], ["/"], [`/campaigns/${slug}`], ["/campaigns"]]);
   });
@@ -113,7 +114,7 @@ describe("removeGroupCampaignAction", () => {
     expect(await remove(jid, slug)).toEqual({ ok: true });
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
       id: jid, fields: { promos: ["fruit-trees"] }, expected: { promos: [slug, "fruit-trees"] },
-    }], { by: "Joseph" });
+    }], { by: TEST_ACTOR });
   });
 
   it.each(["on-hold", "admin-only", "not-a-member"] as const)("still removes from an %s group", async (status) => {
@@ -138,8 +139,8 @@ describe("removeGroupCampaignAction", () => {
     expect(await remove(jid, slug)).toEqual({ ok: true });
     const fields = { promos: ["fruit-trees"], paused_promos: [], weekly: {} };
     expect(updateGroup.mock.calls).toEqual([
-      [jid, fields, { by: "Joseph", dryRun: true }],
-      [jid, fields, { by: "Joseph" }],
+      [jid, fields, { by: TEST_ACTOR, dryRun: true }],
+      [jid, fields, { by: TEST_ACTOR }],
     ]);
   });
 

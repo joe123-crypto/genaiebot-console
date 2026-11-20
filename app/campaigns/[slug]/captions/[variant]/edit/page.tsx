@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import { notFound } from "next/navigation";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { CaptionEditorScreen } from "@/app/campaigns/_components/caption-editor";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export default async function CaptionEditorPage({ params }: { params: Promise<{ slug: string; variant: string }> }) {
+  await requireOperator();
   const { slug, variant } = await params;
   if (!isCaptionVariant(variant)) notFound();
   const detail = await loadCaptionEditorDetail(slug);

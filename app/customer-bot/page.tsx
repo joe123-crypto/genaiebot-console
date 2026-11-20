@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import { createHash } from "node:crypto";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
@@ -8,6 +9,7 @@ import { CustomerBotEditor } from "./_components/customer-bot-editor";
 export const dynamic = "force-dynamic";
 
 export default async function CustomerBotPage() {
+  await requireOperator();
   const result = await customerBotRequest();
   const target = createHash("sha256").update(BOT_API_BASE_URL.replace(/\/+$/, "")).digest("hex").slice(0, 16);
   return (

@@ -5,7 +5,8 @@ import { ConsoleShell } from "@/app/_components/console-shell";
 import { attentionItems, needsDecisionCount, type Attention } from "@/src/domains/console";
 import { BotUnavailableError, getNavigation, type NavigationPayload } from "@/src/lib/bot-client";
 import type { Overview } from "@/src/lib/types";
-import { OPERATOR_NAME } from "@/src/config";
+import { requireOperator } from "@/src/lib/auth";
+import { SessionBoundary } from "./session-boundary";
 import { displayTimezone } from "@/src/lib/display-timezone";
 
 /**
@@ -16,8 +17,10 @@ import { displayTimezone } from "@/src/lib/display-timezone";
 export async function Shell({ children, overview, summary, live, homeLayout, campaignsLayout, groupsLayout }: {
   children: ReactNode; overview?: Overview; summary?: NavigationPayload; live?: boolean; homeLayout?: boolean; campaignsLayout?: boolean; groupsLayout?: boolean;
 }) {
+  const user = await requireOperator();
+  const operator = { name: user.name, meta: user.email };
   const zone = await displayTimezone();
-  if (live) return <TimezoneProvider zone={zone}><LiveShell operator={{ name: OPERATOR_NAME, meta: "Operator" }} homeLayout={homeLayout} campaignsLayout={campaignsLayout} groupsLayout={groupsLayout}>{children}</LiveShell></TimezoneProvider>;
+  if (live) return <SessionBoundary uid={user.uid}><TimezoneProvider zone={zone}><LiveShell operator={operator} homeLayout={homeLayout} campaignsLayout={campaignsLayout} groupsLayout={groupsLayout}>{children}</LiveShell></TimezoneProvider></SessionBoundary>;
   let counts: { campaigns?: number; groupsNeedingReview?: number } = {};
   let attention: Attention[] = [];
   if (overview) {
@@ -38,15 +41,15 @@ export async function Shell({ children, overview, summary, live, homeLayout, cam
   }
 
   return (
-    <TimezoneProvider zone={zone}>
+    <SessionBoundary uid={user.uid}><TimezoneProvider zone={zone}>
       <ConsoleShell
         counts={counts}
         attention={attention}
-        operator={{ name: OPERATOR_NAME, meta: "Operator" }}
+        operator={operator}
         homeLayout={homeLayout} campaignsLayout={campaignsLayout} groupsLayout={groupsLayout}
       >
         {children}
       </ConsoleShell>
-    </TimezoneProvider>
+    </TimezoneProvider></SessionBoundary>
   );
 }

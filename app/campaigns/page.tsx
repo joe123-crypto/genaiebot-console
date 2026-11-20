@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
@@ -9,6 +10,7 @@ import { WRITES_ENABLED } from "@/src/config";
 import type { CampaignRow, LivePage } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
 export default async function CampaignsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  await requireOperator();
   const filter = parseCampaignFilter(await searchParams);
   let initial: LivePage<CampaignRow> | null = null;
   let initialError: string | undefined;

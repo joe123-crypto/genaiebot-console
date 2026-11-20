@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 // @vitest-environment jsdom
 import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -131,7 +132,7 @@ describe('line actions', () => {
     ] });
     getAccounts.mockResolvedValue({ observedAt: '', accounts: [live('ads', '263790000000')] });
     vi.doUnmock('@/app/lines/actions');
-    vi.doMock('@/src/config', () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: 'Joseph' }));
+    vi.doMock('@/src/config', () => ({ WRITES_ENABLED: writes }));
     vi.doMock('next/cache', () => ({ revalidatePath: vi.fn() }));
     vi.doMock('@/src/lib/account-client', () => ({
       getAccounts, AccountApiError: class extends Error {},
@@ -164,7 +165,7 @@ describe('line actions', () => {
   it('copy the number WhatsApp reports, read on the server, as the bot stores it', async () => {
     const { syncLineNumberAction } = await load();
     expect(await syncLineNumberAction('ads')).toEqual({ ok: true });
-    expect(updateLine).toHaveBeenCalledWith('ads', { number: '+263790000000' }, { by: 'Joseph' });
+    expect(updateLine).toHaveBeenCalledWith('ads', { number: '+263790000000' }, { by: TEST_ACTOR });
   });
 
   it('refuse a line WhatsApp reports no number for', async () => {
@@ -177,9 +178,9 @@ describe('line actions', () => {
   it('set and clear the contact line, refusing an unknown one', async () => {
     const { setContactLineAction } = await load();
     expect(await setContactLineAction('ads')).toEqual({ ok: true });
-    expect(updateSettings).toHaveBeenCalledWith({ contact_account: 'ads' }, { by: 'Joseph' });
+    expect(updateSettings).toHaveBeenCalledWith({ contact_account: 'ads' }, { by: TEST_ACTOR });
     expect(await setContactLineAction(null)).toEqual({ ok: true });
-    expect(updateSettings).toHaveBeenLastCalledWith({ contact_account: null }, { by: 'Joseph' });
+    expect(updateSettings).toHaveBeenLastCalledWith({ contact_account: null }, { by: TEST_ACTOR });
     expect((await setContactLineAction('sales')).ok).toBe(false);
     expect((await setContactLineAction('../x')).ok).toBe(false);
     // Already the contact line: nothing to write.

@@ -1,6 +1,7 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({ enabled: true, capabilities: vi.fn(), save: vi.fn(), revalidate: vi.fn() }));
-vi.mock("@/src/config", async (original) => ({ ...await original<object>(), get WRITES_ENABLED() { return mock.enabled; }, OPERATOR_NAME: "Operator" }));
+vi.mock("@/src/config", async (original) => ({ ...await original<object>(), get WRITES_ENABLED() { return mock.enabled; } }));
 vi.mock("next/cache", () => ({ revalidatePath: mock.revalidate }));
 vi.mock("@/src/lib/bot-client", async (original) => ({ ...await original<object>(), getCapabilities: mock.capabilities, saveScheduleEntries: mock.save }));
 import { saveScheduleEntriesAction } from "@/app/schedule/actions";
@@ -14,7 +15,7 @@ describe("entry server action", () => {
   it("checks capabilities, forwards the operation ID and invalidates live views", async () => {
     mock.save.mockResolvedValue({ operationId: input.operationId, entries: [] });
     expect(await saveScheduleEntriesAction(input)).toMatchObject({ ok: true, operationId: input.operationId });
-    expect(mock.save).toHaveBeenCalledWith(input, { by: "Operator" });
+    expect(mock.save).toHaveBeenCalledWith(input, { by: TEST_ACTOR });
     expect(mock.revalidate.mock.calls.map(([route]) => route)).toEqual(expect.arrayContaining(["/", "/schedule", "/campaigns/alpha"]));
   });
   it("refuses read-only and older bots before submitting", async () => {

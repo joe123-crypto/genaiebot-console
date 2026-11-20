@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 // @vitest-environment jsdom
 
 import { createElement } from "react";
@@ -188,7 +189,7 @@ describe("saveCapSettingsAction", () => {
     vi.resetModules();
     updateSettings.mockReset(); getOverview.mockReset();
     getOverview.mockResolvedValue({ capSettings: current });
-    vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
+    vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
     vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
     vi.doMock("@/src/lib/bot-client", () => {
       class BotUnavailableError extends Error {
@@ -219,7 +220,7 @@ describe("saveCapSettingsAction", () => {
     const action = await load();
     const draft = { ...draftFromSettings(SETTINGS), defaultActivity: "quiet" };
     expect(await action(draft, storedSettings(SETTINGS))).toEqual({ ok: true });
-    expect(updateSettings).toHaveBeenCalledWith({ activity: "quiet" }, { by: "Joseph" });
+    expect(updateSettings).toHaveBeenCalledWith({ activity: "quiet" }, { by: TEST_ACTOR });
   });
 
   it("refuses a change over a newer value in the same field", async () => {
@@ -235,7 +236,7 @@ describe("saveCapSettingsAction", () => {
     const action = await load(true, { ...SETTINGS, bands: { ...SETTINGS.bands, busy: [7, 10] } });
     const draft = { ...draftFromSettings(SETTINGS), enabled: false };
     expect(await action(draft, storedSettings(SETTINGS))).toEqual({ ok: true });
-    expect(updateSettings).toHaveBeenCalledWith({ caps_enabled: false }, { by: "Joseph" });
+    expect(updateSettings).toHaveBeenCalledWith({ caps_enabled: false }, { by: TEST_ACTOR });
   });
 
   it("names what is wrong before reaching the bot", async () => {

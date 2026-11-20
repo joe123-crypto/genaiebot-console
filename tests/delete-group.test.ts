@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -22,7 +23,6 @@ async function loadAction(writesEnabled: boolean) {
   });
   vi.doMock("@/src/config", () => ({
     WRITES_ENABLED: writesEnabled,
-    OPERATOR_NAME: "Joseph Munemo",
   }));
   vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
   vi.doMock("@/src/lib/bot-client", () => {
@@ -77,7 +77,7 @@ describe("deleteGroupAction", () => {
 
     expect(await deleteGroupAction("1203@g.us", "bot was removed")).toEqual({ ok: true });
     expect(deleteGroup).toHaveBeenCalledWith("1203@g.us", {
-      by: "Joseph Munemo",
+      by: TEST_ACTOR,
       reason: "bot was removed",
     });
   });
@@ -97,10 +97,10 @@ describe("deleteGroupAction", () => {
     const { deleteGroupAction } = await loadAction(true);
     deleteGroup.mockResolvedValue({});
     await deleteGroupAction("1203@g.us", "   ");
-    expect(deleteGroup).toHaveBeenLastCalledWith("1203@g.us", { by: "Joseph Munemo" });
+    expect(deleteGroup).toHaveBeenLastCalledWith("1203@g.us", { by: TEST_ACTOR });
     await deleteGroupAction("1203@g.us", "  bot was removed  ");
     expect(deleteGroup).toHaveBeenLastCalledWith("1203@g.us",
-      { by: "Joseph Munemo", reason: "bot was removed" });
+      { by: TEST_ACTOR, reason: "bot was removed" });
   });
 
   it("refuses an oversized reason before reaching the bot", async () => {
@@ -172,7 +172,7 @@ describe("deleteGroupAction, leaving and clearing", () => {
 
     expect(await deleteGroupAction("1203@g.us", "bot was removed")).toEqual({ ok: true });
     expect(deleteGroup).toHaveBeenCalledWith("1203@g.us",
-      { by: "Joseph Munemo", reason: "bot was removed" });
+      { by: TEST_ACTOR, reason: "bot was removed" });
     expect(groupAction).not.toHaveBeenCalled();
   });
 
@@ -198,7 +198,7 @@ describe("deleteGroupAction, leaving and clearing", () => {
     await deleteGroupAction("1203@g.us", { leave: true, clearRecords: true, account: "ads" });
 
     expect(groupAction).toHaveBeenCalledWith("1203@g.us", {
-      leave: true, clearRecords: true, account: "ads", by: "Joseph Munemo",
+      leave: true, clearRecords: true, account: "ads", by: TEST_ACTOR,
     });
   });
 

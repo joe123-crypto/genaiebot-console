@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { CampaignCaptionStep } from "@/app/campaigns/_components/campaign-caption-step";
 import { WRITES_ENABLED } from "@/src/config";
@@ -7,6 +8,7 @@ import { captionAIUnavailableReason } from "@/src/lib/caption-ai";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 export default async function NewCampaignCaptionPage() {
+  await requireOperator();
   try {
     const writes = await getCapabilities();
     const gate = canCreateCampaign(WRITES_ENABLED, writes);

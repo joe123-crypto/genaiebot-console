@@ -1,4 +1,4 @@
-import { BOT_API_BASE_URL, BOT_API_TOKEN, OPERATOR_NAME } from "@/src/config";
+import { BOT_API_BASE_URL, BOT_API_TOKEN } from "@/src/config";
 import { isCustomerBotVersion, type CustomerBotText, type CustomerBotVersion } from "./customer-bot-types";
 
 type Result =
@@ -7,7 +7,7 @@ type Result =
   | { kind: "error"; detail: string }
   | { kind: "unknown" };
 
-export async function customerBotRequest(publish?: CustomerBotText & { expectedRevision: string }): Promise<Result> {
+export async function customerBotRequest(publish?: CustomerBotText & { expectedRevision: string; actor: string }): Promise<Result> {
   if (!BOT_API_BASE_URL || !BOT_API_TOKEN) {
     return { kind: "error", detail: "Connect the console to the live bot API to load its customer instructions." };
   }
@@ -18,7 +18,7 @@ export async function customerBotRequest(publish?: CustomerBotText & { expectedR
       method: publish ? "POST" : "GET",
       headers: { accept: "application/json", authorization: `Bearer ${BOT_API_TOKEN}`,
         ...(publish ? { "content-type": "application/json" } : {}) },
-      ...(publish ? { body: JSON.stringify({ ...publish, actor: OPERATOR_NAME }) } : {}),
+      ...(publish ? { body: JSON.stringify(publish) } : {}),
       cache: "no-store",
       signal: AbortSignal.timeout(8_000),
     });

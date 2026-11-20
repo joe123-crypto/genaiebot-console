@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/src/lib/auth-browser";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -116,7 +117,7 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
           const file = files.get(image.key);
           if (!file) throw new Error("The chosen pictures are no longer held. Go back to the campaign details and add them again.");
           setProgress(`Uploading picture ${index + 1} of ${request.images.length}…`);
-          const signed = await fetch("/api/campaigns/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: request.slug, image }) });
+          const signed = await authFetch("/api/campaigns/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: request.slug, image }) });
           const upload = await signed.json();
           if (!signed.ok) throw new Error(upload.error || "The upload could not be prepared.");
           const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: file });

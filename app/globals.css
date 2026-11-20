@@ -1614,3 +1614,16 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .tracked-link-form p { margin: 0; }
 .tracked-link-form .modal-input { width: 100%; min-width: 0; box-sizing: border-box; }
 .tracked-link-form .modal-label { display: block; margin-bottom: 6px; }
+/* Authentication shares the console's existing light theme and controls. */
+.login-page, .session-loading { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
+.login-card { width: 100%; max-width: 440px; text-align: center; padding: 40px 28px; background: white; border: 1px solid #e5e7eb; border-radius: 20px; box-shadow: 0 12px 48px #00000008; }
+.login-card img { display: block; margin: 0 auto 8px; object-fit: contain; }
+.login-brand { display: block; font-size: 24px; font-weight: 700; margin-bottom: 28px; }
+.login-card h1 { font-size: 24px; line-height: 1.25; margin-bottom: 12px; }
+.login-card p { line-height: 1.5; color: #637083; }
+.login-google { width: 100%; justify-content: center; gap: 12px; margin-top: 20px; min-height: 46px; }
+.login-card .login-error { color: #ad2626; font-size: 14px; min-height: 21px; }
+.console-sign-out { padding: 0 16px 16px; }
+.console-sign-out .btn { width: 100%; }
+.console-sign-out p { color: #ad2626; font-size: 12px; overflow-wrap: anywhere; }
+.console-account-name, .console-account-meta { overflow-wrap: anywhere; }

@@ -1,6 +1,7 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 const mocked = vi.hoisted(() => ({ overview: vi.fn(), remove: vi.fn(), revalidate: vi.fn(), writable: true }));
-vi.mock("@/src/config", async (original) => ({ ...await original<object>(), get WRITES_ENABLED() { return mocked.writable; }, OPERATOR_NAME: "Operator" }));
+vi.mock("@/src/config", async (original) => ({ ...await original<object>(), get WRITES_ENABLED() { return mocked.writable; } }));
 vi.mock("next/cache", () => ({ revalidatePath: mocked.revalidate }));
 vi.mock("@/src/lib/bot-client", async (original) => ({ ...await original<object>(), getOverview: mocked.overview, deleteCampaign: mocked.remove }));
 import { deleteCampaignAction } from "@/app/campaigns/actions";
@@ -13,7 +14,7 @@ describe("deleteCampaignAction", () => {
     mocked.overview.mockResolvedValue({ writes }); mocked.remove.mockResolvedValue({ slug: "cv", cleanup: "pending" });
     expect(await deleteCampaignAction("cv")).toEqual({ ok: true });
     expect(mocked.overview).toHaveBeenCalledWith(undefined, { fresh: true });
-    expect(mocked.remove).toHaveBeenCalledWith("cv", { by: "Operator" });
+    expect(mocked.remove).toHaveBeenCalledWith("cv", { by: TEST_ACTOR });
     expect(mocked.revalidate.mock.calls.map(([path]) => path)).toEqual(expect.arrayContaining(["/", "/campaigns", "/campaigns/cv", "/groups", "/schedule"]));
   });
   it("refuses writes in read-only mode before making any bot call", async () => {

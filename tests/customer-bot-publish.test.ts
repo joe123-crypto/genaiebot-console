@@ -1,9 +1,10 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const config = vi.hoisted(() => ({ writable: true }));
 vi.mock("@/src/config", () => ({
   get ACCOUNT_WRITES_ENABLED() { return config.writable; },
-  BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "fixture-token", OPERATOR_NAME: "Operator",
+  BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "fixture-token",
 }));
 import { publishCustomerBotAction } from "@/app/customer-bot/actions";
 import { customerBotRequest } from "@/src/lib/customer-bot-client";
@@ -41,7 +42,7 @@ describe("customer bot actions", () => {
     expect((await publishCustomerBotAction(draft, revision)).kind).toBe(outcome);
     expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["POST", "GET"]);
     expect(fetchMock.mock.calls[0][0]).toBe("https://bot.example/internal/console/customer-bot");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ ...draft, expectedRevision: revision, actor: "Operator" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ ...draft, expectedRevision: revision, actor: TEST_ACTOR });
   });
 
   it("checks the live version after a malformed successful publish response", async () => {

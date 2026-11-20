@@ -1,5 +1,7 @@
 "use server";
 
+import { requireOperator } from "@/src/lib/auth";
+
 import { WRITES_ENABLED } from "@/src/config";
 import { CaptionAIError, generateCaptionReply, parseCaptionAIRequest } from "@/src/lib/caption-ai";
 import type { CaptionAIOutcome } from "@/src/lib/caption-ai-types";
@@ -8,6 +10,7 @@ import type { CaptionAIOutcome } from "@/src/lib/caption-ai-types";
 // that bypass the UI's pending button. There are no automatic paid retries.
 let activeRequests = 0;
 export async function suggestCaptionAction(value: unknown): Promise<CaptionAIOutcome> {
+  await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode." };
   if (activeRequests >= 4) return { ok: false, detail: "The caption assistant is busy. Try again in a moment." };
   activeRequests++;
@@ -21,6 +24,7 @@ export async function suggestCaptionAction(value: unknown): Promise<CaptionAIOut
 
 /** Read-only account lookup, independent of paid caption generation. */
 export async function captionLinkAccountsAction(): Promise<import("@/src/lib/types").LineAccount[]> {
+  await requireOperator();
   try {
     const { getOverview } = await import("@/src/lib/bot-client");
     const accounts = (await getOverview()).accounts;

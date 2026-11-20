@@ -434,8 +434,8 @@ export async function getCampaignPreview(slug: string, date?: string, { fresh = 
  *
  * The console's first mutation. Three things are deliberate:
  *
- *   * it is gated on WRITES_ENABLED rather than on a session, because there is
- *     no session yet — see the note in `src/config`;
+ *   * authenticated entrypoints enforce sessions; the adapter independently
+ *     enforces WRITES_ENABLED before contacting the bot;
  *   * the remote call is bounded, unlike the reads above. A read that hangs
  *     costs a page; a delete that hangs leaves the operator unable to tell
  *     whether it happened;
@@ -681,10 +681,10 @@ export async function updateCampaignCaptions(
 }
 
 /** Dedicated create operation: the bot commits assignments and audit atomically. */
-export async function createCampaign(input: import("@/src/domains/campaign-create").NewCampaign): Promise<import("@/src/domains/campaign-create").CreateCampaignResult> {
+export async function createCampaign(input: import("@/src/domains/campaign-create").NewCampaign, { by }: { by: string }): Promise<import("@/src/domains/campaign-create").CreateCampaignResult> {
   if (!WRITES_ENABLED) throw new WritesDisabledError();
-  if (WRITE_SOURCE === "remote") return writeRemote("campaigns/create", { ...input, actor: (await import("@/src/config")).OPERATOR_NAME });
-  return runBridge(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-campaign-create"), [], { ...input, actor: (await import("@/src/config")).OPERATOR_NAME });
+  if (WRITE_SOURCE === "remote") return writeRemote("campaigns/create", { ...input, actor: by });
+  return runBridge(path.join(GENAEBOT_CHECKOUT, "workspace/bin/console-campaign-create"), [], { ...input, actor: by });
 }
 
 export async function saveSchedule(input: import("@/src/lib/types").ScheduleRequest, { by }: { by: string }): Promise<import("@/src/lib/types").ScheduleSaveResult> {
