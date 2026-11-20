@@ -72,9 +72,9 @@ By default it reads `/home/joseph/projects/genaebot`. Point it elsewhere with
 | `CONSOLE_WRITES` | `1` arms editing controls; anything else keeps every screen read-only |
 | `BOT_WRITE_API_BASE_URL`, `BOT_WRITE_TOKEN` | Normally unset: writes then go to the same bot as the reads |
 
-`npm run dev` binds to `127.0.0.1`. The console has no login, so with writes on,
-anyone who can reach the port can edit the bot's config; keeping it to this
-machine is what makes that acceptable until there is authentication.
+`npm run dev` binds to `127.0.0.1`. Open `http://localhost:3000` and sign in
+with Google. Every console page, API and server action requires a verified
+Firebase session, including when writes are disabled. See [authentication setup](docs/authentication.md).
 
 ```bash
 npm run typecheck
@@ -525,7 +525,7 @@ the checkout-only `console-read` adapter cannot operate WhatsApp accounts. The
 backend uses its pinned OpenClaw 2026.9.9 SDK and existing gateway credentials.
 Browser requests go through same-origin Next.js routes; tokens remain server-side.
 Account mutations also respect `CONSOLE_WRITES=1`; live status remains available
-when writes are disabled. Permanent removal and console sign-in are deferred.
+when writes are disabled. Permanent removal is deferred. Console access requires Google sign-in.
 
 - **Link** adds a new account or pairs an existing unlinked one by QR. For a
   disconnected line with a saved or unknown login, confirm **Replace login and
@@ -586,8 +586,7 @@ Creation requires the companion bot patch, live Firestore/R2 modes, console
 writes enabled and server-side R2 upload configuration. Older bots show a clear
 unavailable reason while the form remains usable as an in-memory draft. See
 [integrations/README.md](integrations/README.md#campaign-creation) for installation,
-CORS, API contracts and verification. No new authentication or deployment is
-introduced by this feature.
+CORS, API contracts and verification. Campaign creation uses the console's Google authentication and existing deployment.
 
 ## Saving timeline changes
 

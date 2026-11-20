@@ -7,13 +7,6 @@
 
 export const PRODUCT_NAME = "Genaie";
 
-/**
- * Who the console says is acting. There is no session to read a name from yet,
- * so it is a constant — but it lives here rather than in the sidebar, so the
- * name on screen and the name recorded against a delete cannot drift apart.
- */
-export const OPERATOR_NAME = "Joseph Munemo";
-
 /** Where the bot's own tooling lives when we read it locally. */
 export const GENAEBOT_CHECKOUT =
   process.env.GENAEBOT_CHECKOUT?.trim() || "/home/joseph/projects/genaebot";
@@ -59,12 +52,8 @@ export const WRITE_SOURCE: BotSource = BOT_WRITE_API_BASE_URL ? "remote" : "loca
 /**
  * Writes are opt-in and off by default.
  *
- * The console still has no login: anyone who can load the page can use
- * anything it offers. That is survivable while every screen is read-only, and
- * it is not survivable for a delete, so this flag — not a session — is what
- * keeps a deployed console harmless. Leave CONSOLE_WRITES unset in production
- * and the console stays exactly the viewer it has always been. Turning it on
- * there is a decision that waits for authentication.
+ * Every request requires a verified Google session. Authentication does not
+ * arm editing: the console and bot write gates must still agree.
  *
  * A target still has to be configured, so setting the flag alone cannot arm a
  * button that has nothing to call. And this is only the console's half: the

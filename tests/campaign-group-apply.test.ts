@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   emptyGroupDraft, isPausedInDraft, parseGroupDraft, planAssignmentWrites, reconcileGroupDraft,
@@ -136,7 +137,7 @@ async function loadActions(writes = true) {
   vi.resetModules();
   for (const fn of [updateGroup, updateCampaign, getGroups, getCampaigns, revalidate]) fn.mockReset();
   updateGroupBatch.mockReset().mockResolvedValue(null);
-  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
+  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => {
     class BotUnavailableError extends Error {
@@ -189,7 +190,7 @@ describe("applyCampaignGroupsAction", () => {
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
       { id: "1@g.us", fields: { promos: [SLUG] }, expected: { promos: [] } },
       { id: "2@g.us", fields: { promos: [] }, expected: { promos: [SLUG] } },
-    ], { by: "Joseph" });
+    ], { by: TEST_ACTOR });
     expect(updateGroup).not.toHaveBeenCalled();
   });
 
@@ -229,7 +230,7 @@ describe("applyCampaignGroupsAction", () => {
       ["1@g.us", { promos: [SLUG] }, false],
       ["2@g.us", { promos: [] }, false],
     ]);
-    expect(updateGroup.mock.calls[2][2]).toEqual({ by: "Joseph" });
+    expect(updateGroup.mock.calls[2][2]).toEqual({ by: TEST_ACTOR });
     expect(revalidate).toHaveBeenCalledWith(`/campaigns/${SLUG}`);
   });
 
@@ -302,7 +303,7 @@ describe("setCampaignEnabledAction", () => {
     getCampaigns.mockResolvedValue([campaign(true)]);
     updateCampaign.mockResolvedValue({});
     expect(await setCampaignEnabledAction(SLUG, false)).toEqual({ ok: true });
-    expect(updateCampaign).toHaveBeenCalledWith(SLUG, { enabled: false }, { by: "Joseph" });
+    expect(updateCampaign).toHaveBeenCalledWith(SLUG, { enabled: false }, { by: TEST_ACTOR });
     expect(revalidate).toHaveBeenCalledWith("/campaigns");
   });
 

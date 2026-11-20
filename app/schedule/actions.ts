@@ -1,7 +1,9 @@
 "use server";
 
+import { requireOperator, auditActor } from "@/src/lib/auth";
+
 import { revalidatePath } from "next/cache";
-import { BOT_TIMEZONE, OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
+import { BOT_TIMEZONE, WRITES_ENABLED } from "@/src/config";
 import { BotUnavailableError, WriteRefusedError, getCapabilities, getCampaigns, saveSchedule, saveScheduleEntries } from "@/src/lib/bot-client";
 import { canEditSchedule, canEditScheduleEntries } from "@/src/lib/write-capabilities";
 import { failedWrite, type WriteOutcome } from "@/src/lib/write-outcome";
@@ -12,6 +14,7 @@ import { isScheduleSaveResult } from "@/src/domains/schedule";
 export type SaveScheduleOutcome = ({ ok: true } & ScheduleSaveResult) | Extract<WriteOutcome, { ok: false }>;
 
 export async function saveScheduleEntriesAction(input: ScheduleEntriesRequest): Promise<({ ok: true } & ScheduleEntriesResult) | { ok: false; detail: string; uncertain?: boolean }> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode." };
   if (!validScheduleEntriesRequest(input) || input.timezone !== BOT_TIMEZONE) return { ok: false, detail: "Invalid schedule change. Reload and try again." };
   let attempted = false;
@@ -19,7 +22,7 @@ export async function saveScheduleEntriesAction(input: ScheduleEntriesRequest): 
     const gate = canEditScheduleEntries(WRITES_ENABLED, await getCapabilities());
     if (!gate.allowed) return { ok: false, detail: gate.reason };
     attempted = true;
-    return { ok: true, ...await saveScheduleEntries(input, { by: OPERATOR_NAME }) };
+    return { ok: true, ...await saveScheduleEntries(input, { by: auditActor(operator) }) };
   } catch (error) {
     const uncertain = attempted && !(error instanceof WriteRefusedError && error.status < 500);
     const failure = failedWrite(error) as Extract<WriteOutcome, { ok: false }>;
@@ -30,6 +33,7 @@ export async function saveScheduleEntriesAction(input: ScheduleEntriesRequest): 
 }
 
 export async function saveScheduleAction(input: ScheduleRequest): Promise<SaveScheduleOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode." };
   if (!input || typeof input !== "object" || typeof input.date !== "string" ||
       !/^\d{4}-\d{2}-\d{2}$/.test(input.date) || input.timezone !== BOT_TIMEZONE ||
@@ -46,7 +50,7 @@ export async function saveScheduleAction(input: ScheduleRequest): Promise<SaveSc
     const gate = canEditSchedule(WRITES_ENABLED, await getCapabilities());
     if (!gate.allowed) return { ok: false, detail: gate.reason };
     attempted = true;
-    const result = await saveSchedule(input, { by: OPERATOR_NAME });
+    const result = await saveSchedule(input, { by: auditActor(operator) });
     return { ok: true, ...result };
   } catch (error) {
     // A lost reply can follow a committed change. Confirm it from live config

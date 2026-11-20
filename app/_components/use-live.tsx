@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/src/lib/auth-browser";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 export const LIVE_INTERVAL = 30_000;
@@ -53,7 +54,7 @@ export class LiveError extends Error {
   constructor(message: string, readonly status: number) { super(message); this.name = "LiveError"; }
 }
 export async function liveFetch<T>(view: string, query: URLSearchParams, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`/api/live/${view}?${query}`, { cache: "no-store", signal });
+  const response = await authFetch(`/api/live/${view}?${query}`, { cache: "no-store", signal });
   if (!response.ok) { const data = await response.json(); throw new LiveError(data.error || "Live updates unavailable.", response.status); }
   return response.json();
 }

@@ -34,7 +34,7 @@ describe("indexed page budgets", () => {
   });
   it("loads only schedule data at home and redirects the old schedule route", async () => {
     await HomePage(); expect(mocks.live).toHaveBeenCalledExactlyOnceWith("schedule");
-    SchedulePage(); expect(mocks.redirect).toHaveBeenCalledWith("/");
+    await SchedulePage(); expect(mocks.redirect).toHaveBeenCalledWith("/");
     expect(mocks.legacy).not.toHaveBeenCalled();
   });
 });

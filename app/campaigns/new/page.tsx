@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
@@ -8,6 +9,7 @@ import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { imageUploadConfigured } from "@/src/lib/campaign-upload";
 export const dynamic = "force-dynamic";
 export default async function NewCampaignPage() {
+  await requireOperator();
   try {
     const writes = await getCapabilities();
     let gate = canCreateCampaign(WRITES_ENABLED, writes);

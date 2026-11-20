@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { validCampaign } from "./fixtures/new-campaign";
 const mock = vi.hoisted(() => ({ writable: true, overview: vi.fn(), groups: vi.fn(), create: vi.fn(), revalidate: vi.fn() }));
@@ -15,7 +16,7 @@ beforeEach(() => {
 describe("create campaign action", () => {
   it("saves through the bot and refreshes affected pages", async () => {
     expect(await createCampaignAction(validCampaign())).toEqual({ ok: true, slug: "demo", scheduling: "ready" });
-    expect(mock.create).toHaveBeenCalledWith(validCampaign()); expect(mock.revalidate).toHaveBeenCalledWith("/schedule");
+    expect(mock.create).toHaveBeenCalledWith(validCampaign(), { by: TEST_ACTOR }); expect(mock.revalidate).toHaveBeenCalledWith("/schedule");
   });
   it("refuses read-only mode before reads", async () => { mock.writable = false; expect((await createCampaignAction(validCampaign())).ok).toBe(false); expect(mock.overview).not.toHaveBeenCalled(); });
   it("shows the bot's transactional membership refusal", async () => { mock.create.mockRejectedValue(new WriteRefusedError("Group is no longer active", [], 409)); expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, detail: "Group is no longer active", outcome: "not-created" }); });

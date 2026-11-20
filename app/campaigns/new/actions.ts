@@ -1,4 +1,6 @@
 "use server";
+
+import { requireOperator, auditActor } from "@/src/lib/auth";
 import { revalidatePath } from "next/cache";
 import { WRITES_ENABLED } from "@/src/config";
 import { campaignCreateError, type NewCampaign, type CreateCampaignOutcome } from "@/src/domains/campaign-create";
@@ -7,6 +9,7 @@ import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { failedWrite } from "@/src/lib/write-outcome";
 
 export async function createCampaignAction(input: NewCampaign): Promise<CreateCampaignOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode.", outcome: "not-created" };
   const error = campaignCreateError(input);
   if (error) return { ok: false, detail: error, outcome: "not-created" };
@@ -18,7 +21,7 @@ export async function createCampaignAction(input: NewCampaign): Promise<CreateCa
     // The bot validates active membership inside its creation transaction.
     // Replays must reach its receipt even if a group changed after the save.
     submitted = true;
-    const result = await createCampaign(input);
+    const result = await createCampaign(input, { by: auditActor(operator) });
     for (const route of ["/campaigns", `/campaigns/${result.slug}`, "/groups", "/schedule", "/"]) revalidatePath(route);
     return { ok: true, ...result };
   } catch (error) {

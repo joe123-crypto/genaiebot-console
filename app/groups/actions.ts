@@ -1,7 +1,9 @@
 "use server";
 
+import { requireOperator, auditActor } from "@/src/lib/auth";
+
 import { revalidatePath } from "next/cache";
-import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
+import { WRITES_ENABLED } from "@/src/config";
 import { deleteGroup, getGroups, getCapabilities, getCampaignState, getConfiguration, groupAction, removeGroupDiscovery, updateGroup, updateGroupBatch, WriteRefusedError, type GroupBatchChange } from "@/src/lib/bot-client";
 import { canAct, canWrite } from "@/src/lib/write-capabilities";
 import {
@@ -22,8 +24,8 @@ import type { Group } from "@/src/lib/types";
 /**
  * Every action here is guarded twice: in the UI, and again here. A hidden
  * control is not an absent endpoint -- a server action is a reachable POST
- * whether or not anything renders a button for it, and with no login in front
- * of the console this check is the only one there is.
+ * whether or not anything renders a button for it. Every entrypoint first
+ * verifies the session, then applies these independent write gates.
  *
  * Failures come back as a value rather than a thrown error. The row or dialog
  * that raised it is the right place to say so; throwing would replace the whole
@@ -60,7 +62,8 @@ async function vocabulary(): Promise<{ lines: string[]; tiers: string[] }> {
 export async function addGroupCampaignAction(
   jid: string, selection: string | string[], days?: CampaignDays,
 ): Promise<WriteOutcome> {
-  return assignGroupCampaigns([jid], Array.isArray(selection) ? selection : [selection], false, days);
+  const operator = await requireOperator();
+  return assignGroupCampaigns([jid], Array.isArray(selection) ? selection : [selection], false, auditActor(operator), days);
 }
 
 type GroupAssignmentOutcome = WriteOutcome & { refreshLive?: boolean };
@@ -69,7 +72,8 @@ type GroupAssignmentOutcome = WriteOutcome & { refreshLive?: boolean };
 export async function addGroupCampaignsAction(
   jids: string[], slugs: string[], days?: CampaignDays,
 ): Promise<GroupAssignmentOutcome> {
-  return assignGroupCampaigns(jids, slugs, true, days);
+  const operator = await requireOperator();
+  return assignGroupCampaigns(jids, slugs, true, auditActor(operator), days);
 }
 
 /**
@@ -84,7 +88,7 @@ export async function addGroupCampaignsAction(
  * on the campaigns screen -- so it clears the entry instead of writing it.
  */
 async function assignGroupCampaigns(
-  groupIds: string[], campaignIds: string[], bulk: boolean, days?: CampaignDays,
+  groupIds: string[], campaignIds: string[], bulk: boolean, by: string, days?: CampaignDays,
 ): Promise<GroupAssignmentOutcome> {
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (!Array.isArray(groupIds) || groupIds.length === 0 ||
@@ -103,7 +107,6 @@ async function assignGroupCampaigns(
   const badDays = campaignDaysProblem(days, slugs);
   if (badDays) return { ok: false, detail: badDays };
   const schedules = Object.entries(days ?? {});
-  const by = OPERATOR_NAME;
   const refreshAssignments = () => refreshAssignment(slugs);
 
   let attemptedWrite = false;
@@ -210,6 +213,7 @@ async function assignGroupCampaigns(
  * would want to fix.
  */
 export async function removeGroupCampaignAction(jid: string, slug: string): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof jid !== "string" || !/^\d+(?:-\d+)?@g\.us$/.test(jid)) {
     return { ok: false, detail: "No valid group was named." };
@@ -241,9 +245,9 @@ export async function removeGroupCampaignAction(jid: string, slug: string): Prom
         fields: write.fields,
         expected: Object.fromEntries(Object.keys(write.fields).map((field) => [field, values[field]])),
       };
-      if (!await updateGroupBatch([change], { by: OPERATOR_NAME })) {
-        await updateGroup(jid, write.fields, { by: OPERATOR_NAME, dryRun: true });
-        await updateGroup(jid, write.fields, { by: OPERATOR_NAME });
+      if (!await updateGroupBatch([change], { by: auditActor(operator) })) {
+        await updateGroup(jid, write.fields, { by: auditActor(operator), dryRun: true });
+        await updateGroup(jid, write.fields, { by: auditActor(operator) });
       }
     }
   } catch (error) {
@@ -268,6 +272,7 @@ export async function updateGroupAction(
   form: GroupEdit,
   expected: GroupEdit,
 ): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof jid !== "string" || !jid.endsWith("@g.us")) {
     return { ok: false, detail: "No valid group was named." };
@@ -297,7 +302,7 @@ export async function updateGroupAction(
         detail: "This group changed since you started editing. Close the dialog and reopen it to load the latest.",
       };
     }
-    await updateGroup(jid, change, { by: OPERATOR_NAME });
+    await updateGroup(jid, change, { by: auditActor(operator) });
   } catch (error) {
     return failedWrite(error);
   }
@@ -341,6 +346,7 @@ export async function deleteGroupAction(
   jid: string,
   options: DeleteGroupOptions | string = {},
 ): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (!jid) return { ok: false, detail: "No group was named." };
   // A bare reason is the shape this took before there was anything else to ask
@@ -351,7 +357,7 @@ export async function deleteGroupAction(
   if (why.length > 500) return { ok: false, detail: "The reason must be 500 characters or fewer." };
 
   try {
-    await deleteGroup(jid, { by: OPERATOR_NAME, ...(why ? { reason: why } : {}) });
+    await deleteGroup(jid, { by: auditActor(operator), ...(why ? { reason: why } : {}) });
   } catch (error) {
     return failedWrite(error);
   }
@@ -360,7 +366,7 @@ export async function deleteGroupAction(
   if (leave || clearRecords) {
     try {
       const result = await groupAction(jid, {
-        leave, clearRecords, account, by: OPERATOR_NAME,
+        leave, clearRecords, account, by: auditActor(operator),
       });
       warnings.push(...groupActionWarnings(result, { leave, clearRecords }));
     } catch (error) {
@@ -412,6 +418,7 @@ function groupActionWarnings(
  * the browser, so the console can only add a group the bot has actually seen.
  */
 export async function addDiscoveredGroupAction(jid: string): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof jid !== "string" || !jid.endsWith("@g.us")) {
     return { ok: false, detail: "No valid group was named." };
@@ -425,7 +432,7 @@ export async function addDiscoveredGroupAction(jid: string): Promise<WriteOutcom
     if (!found) {
       return { ok: false, detail: "The bot no longer lists this group as discovered." };
     }
-    await updateGroup(jid, newGroupFromDiscovered(found), { by: OPERATOR_NAME });
+    await updateGroup(jid, newGroupFromDiscovered(found), { by: auditActor(operator) });
   } catch (error) {
     return failedWrite(error);
   }
@@ -437,6 +444,8 @@ export async function removeDiscoveredGroupAction(
   jid: string,
   observedThrough: string,
 ): Promise<WriteOutcome & { refreshLive?: boolean }> {
+  // The bot's discovery-removal API takes no actor, so nothing is recorded.
+  await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof jid !== "string" || jid.length > 128 || !/^\d+(?:-\d+)?@g\.us$/.test(jid)) {
     return { ok: false, detail: "No valid group was named." };

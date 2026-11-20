@@ -1,7 +1,9 @@
 "use server";
 
+import { requireOperator, auditActor } from "@/src/lib/auth";
+
 import { revalidatePath } from "next/cache";
-import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
+import { WRITES_ENABLED } from "@/src/config";
 import { AccountApiError, getAccounts } from "@/src/lib/account-client";
 import { ACCOUNT_ID } from "@/src/lib/account-types";
 import { getConfiguration, updateLine, updateSettings } from "@/src/lib/bot-client";
@@ -10,7 +12,7 @@ import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/wri
 
 /**
  * Guarded here as well as in the UI: a server action is a reachable POST
- * whether or not a button for it is rendered, and the console has no login.
+ * whether or not a button is rendered. Both session and write checks apply.
  */
 
 function refresh() {
@@ -32,6 +34,7 @@ function failed(error: unknown): WriteOutcome {
  * browser -- so this can only ever copy what WhatsApp itself says.
  */
 export async function syncLineNumberAction(id: string): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof id !== "string" || !ACCOUNT_ID.test(id)) return { ok: false, detail: "No valid line was named." };
   try {
@@ -44,7 +47,7 @@ export async function syncLineNumberAction(id: string): Promise<WriteOutcome> {
     if (!number) {
       return live ? { ok: true } : { ok: false, detail: "WhatsApp reports no number for this line. Link it first." };
     }
-    await updateLine(id, { number }, { by: OPERATOR_NAME });
+    await updateLine(id, { number }, { by: auditActor(operator) });
   } catch (error) {
     return failed(error);
   }
@@ -57,6 +60,7 @@ export async function syncLineNumberAction(id: string): Promise<WriteOutcome> {
  * whichever line posts it -- or `null` for each advert to give its own line's.
  */
 export async function setContactLineAction(id: string | null): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (id !== null && (typeof id !== "string" || !ACCOUNT_ID.test(id))) {
     return { ok: false, detail: "No valid line was named." };
@@ -68,7 +72,7 @@ export async function setContactLineAction(id: string | null): Promise<WriteOutc
     if (id !== null && !overview.accounts.some((entry) => entry.id === id && entry.number)) {
       return { ok: false, detail: "Only a line with a number can be the contact line." };
     }
-    await updateSettings({ contact_account: id }, { by: OPERATOR_NAME });
+    await updateSettings({ contact_account: id }, { by: auditActor(operator) });
   } catch (error) {
     return failed(error);
   }

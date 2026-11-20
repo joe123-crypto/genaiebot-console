@@ -1,5 +1,7 @@
 "use server";
 
+import { requireOperator, auditActor } from "@/src/lib/auth";
+
 import { ACCOUNT_WRITES_ENABLED } from "@/src/config";
 import { customerBotRequest } from "@/src/lib/customer-bot-client";
 import {
@@ -13,10 +15,12 @@ type PublishResult =
   | { kind: "unknown" };
 
 export async function checkCustomerBotAction() {
+  await requireOperator();
   return customerBotRequest();
 }
 
 export async function publishCustomerBotAction(draft: CustomerBotText, expectedRevision: string): Promise<PublishResult> {
+  const operator = await requireOperator();
   if (!ACCOUNT_WRITES_ENABLED) return { kind: "error", detail: "The console is in read-only mode." };
   if (!isCustomerBotText(draft) || !isCustomerBotRevision(expectedRevision)) {
     return { kind: "error", detail: "The draft or its live revision could not be read." };
@@ -26,7 +30,7 @@ export async function publishCustomerBotAction(draft: CustomerBotText, expectedR
     if (detail) return { kind: "error", detail };
   }
   const text = customerBotText(draft);
-  const result = await customerBotRequest({ ...text, expectedRevision });
+  const result = await customerBotRequest({ ...text, expectedRevision, actor: auditActor(operator) });
   if (result.kind === "error" || result.kind === "conflict") return result;
   if (result.kind === "live" && sameCustomerBotText(text, result.live)) return { kind: "published", live: result.live };
 

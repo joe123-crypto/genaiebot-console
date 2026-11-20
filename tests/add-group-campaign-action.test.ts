@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Group, WriteCapabilities } from "@/src/lib/types";
 
@@ -26,7 +27,7 @@ async function loadActions(writes = true) {
   vi.resetModules();
   updateGroupBatch.mockReset().mockResolvedValue(null);
   for (const fn of [getGroups, getOverview, updateGroup, revalidate]) fn.mockReset();
-  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
+  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => {
     class BotUnavailableError extends Error {
@@ -73,7 +74,7 @@ describe("addGroupCampaignsAction", () => {
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
       { id: jid, fields: { promos: [slug, secondSlug] }, expected: { promos: [slug] } },
       { id: secondJid, fields: { promos: [secondSlug, slug] }, expected: { promos: [secondSlug] } },
-    ], { by: "Joseph" });
+    ], { by: TEST_ACTOR });
     expect(updateGroup).not.toHaveBeenCalled();
     expect(revalidate.mock.calls).toEqual([["/groups"], ["/"], [`/campaigns/${slug}`], [`/campaigns/${secondSlug}`], ["/campaigns"]]);
   });
@@ -211,7 +212,7 @@ describe("addGroupCampaignAction", () => {
     expect(await add(jid, slug)).toEqual({ ok: true });
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
       id: jid, fields: { promos: ["borehole-drilling", slug] }, expected: { promos: ["borehole-drilling"] },
-    }], { by: "Joseph" });
+    }], { by: TEST_ACTOR });
     expect(updateGroup).not.toHaveBeenCalled();
     expect(getGroups).toHaveBeenCalledExactlyOnceWith(undefined, { fresh: true, jid });
   });
@@ -229,7 +230,7 @@ describe("addGroupCampaignAction", () => {
       id: jid,
       fields: { promos: ["borehole-drilling", slug, secondSlug] },
       expected: { promos: ["borehole-drilling"] },
-    }], { by: "Joseph" });
+    }], { by: TEST_ACTOR });
     expect(updateGroup).not.toHaveBeenCalled();
     expect(revalidate).toHaveBeenCalledWith(`/campaigns/${slug}`);
     expect(revalidate).toHaveBeenCalledWith(`/campaigns/${secondSlug}`);
@@ -255,8 +256,8 @@ describe("addGroupCampaignAction", () => {
     getGroups.mockResolvedValue({ groups: [group({ promos: ["borehole-drilling", "cv"] })] });
     expect(await add(jid, slug)).toEqual({ ok: true });
     expect(updateGroup.mock.calls).toEqual([
-      [jid, { promos: ["borehole-drilling", "cv", slug] }, { by: "Joseph", dryRun: true }],
-      [jid, { promos: ["borehole-drilling", "cv", slug] }, { by: "Joseph" }],
+      [jid, { promos: ["borehole-drilling", "cv", slug] }, { by: TEST_ACTOR, dryRun: true }],
+      [jid, { promos: ["borehole-drilling", "cv", slug] }, { by: TEST_ACTOR }],
     ]);
     expect(revalidate.mock.calls).toEqual([["/groups"], ["/"], [`/campaigns/${slug}`], ["/campaigns"]]);
   });
@@ -265,7 +266,7 @@ describe("addGroupCampaignAction", () => {
     const add = await loadAction();
     getOverview.mockResolvedValue({ writes: capabilities, campaigns: [{ slug, enabled: false }] });
     expect(await add(jid, slug)).toEqual({ ok: true });
-    expect(updateGroup).toHaveBeenLastCalledWith(jid, { promos: ["borehole-drilling", slug] }, { by: "Joseph" });
+    expect(updateGroup).toHaveBeenLastCalledWith(jid, { promos: ["borehole-drilling", slug] }, { by: TEST_ACTOR });
   });
 
   it("refreshes an existing assignment without writing or resuming it", async () => {
@@ -310,7 +311,7 @@ describe("posting days", () => {
       id: jid,
       fields: { promos: ["borehole-drilling", slug], weekly: { "borehole-drilling": ["mon"], [slug]: ["Tue", "Thu"] } },
       expected: { promos: ["borehole-drilling"], weekly: { "borehole-drilling": ["mon"] } },
-    }], { by: "Joseph" });
+    }], { by: TEST_ACTOR });
   });
 
   it("clears the restriction when every day is chosen, without touching the membership", async () => {
@@ -320,7 +321,7 @@ describe("posting days", () => {
     expect(await add(jid, ["borehole-drilling"], { "borehole-drilling": [0, 1, 2, 3, 4, 5, 6] })).toEqual({ ok: true });
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([{
       id: jid, fields: { weekly: {} }, expected: { weekly: { "borehole-drilling": ["mon"] } },
-    }], { by: "Joseph" });
+    }], { by: TEST_ACTOR });
   });
 
   it("writes nothing when the days a campaign already has are chosen again", async () => {
@@ -340,7 +341,7 @@ describe("posting days", () => {
     expect(updateGroup).not.toHaveBeenCalled();
     // The same bot still takes a plain add, which writes no days.
     expect(await add(jid, [slug])).toEqual({ ok: true });
-    expect(updateGroup).toHaveBeenCalledWith(jid, { promos: ["borehole-drilling", slug] }, { by: "Joseph" });
+    expect(updateGroup).toHaveBeenCalledWith(jid, { promos: ["borehole-drilling", slug] }, { by: TEST_ACTOR });
   });
 
   it("rejects malformed days before reading the bot", async () => {
@@ -366,7 +367,7 @@ describe("posting days", () => {
     expect(await add(jid, [slug])).toEqual({ ok: true });
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
       { id: jid, fields: { promos: [slug] }, expected: { promos: [] } },
-    ], { by: "Joseph" });
+    ], { by: TEST_ACTOR });
   });
 
   it("carries the days through a bulk assignment", async () => {
@@ -379,6 +380,6 @@ describe("posting days", () => {
     expect(updateGroupBatch).toHaveBeenCalledExactlyOnceWith([
       { id: jid, fields: { promos: [slug], weekly: { [slug]: ["Fri"] } }, expected: { promos: [], weekly: {} } },
       { id: secondJid, fields: { promos: [slug], weekly: { [slug]: ["Fri"] } }, expected: { promos: [], weekly: {} } },
-    ], { by: "Joseph" });
+    ], { by: TEST_ACTOR });
   });
 });

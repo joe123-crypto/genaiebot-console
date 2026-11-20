@@ -4,6 +4,6 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  test: { environment: "node", include: ["tests/**/*.test.{ts,tsx}"] },
+  test: { environment: "node", include: ["tests/**/*.test.{ts,tsx}"], setupFiles: ["./tests/auth-fixture.ts"] },
   resolve: { alias: { "@": path.resolve(__dirname) } },
 });

@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   changedGroupFields,
@@ -97,7 +98,7 @@ async function loadActions(writes = true) {
     capSettings: { enabled: true, defaultActivity: "normal",
                    bands: { busy: [6, 10], normal: [4, 6], quiet: [1, 3] } },
   });
-  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
+  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => {
     class BotUnavailableError extends Error {
@@ -191,7 +192,7 @@ describe("updateGroupAction", () => {
     updateGroup.mockResolvedValue({});
     expect(await updateGroupAction(JID, { status: "on-hold", daily_cap: "2" },
                                    { status: "active", daily_cap: null })).toEqual({ ok: true });
-    expect(updateGroup).toHaveBeenCalledWith(JID, { status: "on-hold", daily_cap: 2 }, { by: "Joseph" });
+    expect(updateGroup).toHaveBeenCalledWith(JID, { status: "on-hold", daily_cap: 2 }, { by: TEST_ACTOR });
     expect(getGroups).toHaveBeenCalledWith(undefined, { fresh: true, jid: group().jid });
     expect(revalidate.mock.calls).toEqual([["/groups"], ["/"]]);
   });
@@ -272,7 +273,7 @@ describe("addDiscoveredGroupAction", () => {
     expect(updateGroup).toHaveBeenCalledWith(FOUND.jid, {
       name: "Fresh Group", source: "whatsapp", status: "active", promos: [],
       daily_cap: null, account: "ads",
-    }, { by: "Joseph" });
+    }, { by: TEST_ACTOR });
   });
 
   it("only adds a group the bot itself lists as discovered", async () => {

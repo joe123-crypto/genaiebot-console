@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
 import { LiveScheduleView } from "@/app/schedule/_components/live-schedule";
@@ -8,6 +9,7 @@ import { displayTimezone } from "@/src/lib/display-timezone";
 import type { LiveSchedule } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
 export default async function ScheduleHomePage() {
+  await requireOperator();
   let initial: LiveSchedule | null = null;
   let initialError: string | undefined;
   try { initial = await getLiveView("schedule"); }

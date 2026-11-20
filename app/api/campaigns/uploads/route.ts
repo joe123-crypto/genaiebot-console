@@ -1,3 +1,4 @@
+import { apiOperator } from "@/src/lib/auth";
 import { NextResponse } from "next/server";
 import { WRITES_ENABLED } from "@/src/config";
 import { CAMPAIGN_SLUG, uploadError } from "@/src/domains/campaign-create";
@@ -6,6 +7,8 @@ import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { imageUploadConfigured, signCampaignUpload } from "@/src/lib/campaign-upload";
 
 export async function POST(request: Request) {
+  const operator = await apiOperator();
+  if (operator instanceof Response) return operator;
   const refuse = (error: string, status = 400) => NextResponse.json({ error }, { status });
   if (!WRITES_ENABLED) return refuse("The console is in read-only mode.", 403);
   const url = new URL(request.url);

@@ -1,3 +1,4 @@
+import { requireOperator } from "@/src/lib/auth";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { CapSettingsForm } from "@/app/settings/_components/cap-settings-form";
@@ -14,6 +15,7 @@ export const dynamic = "force-dynamic";
 const SUBTITLE = "The clock the console is read on, and how many adverts each group gets a day.";
 
 export default async function SettingsPage() {
+  await requireOperator();
   const zone = await displayTimezone();
   const loaded = await getLiveView<ConfigurationPayload>("settings").then((overview) => ({ ok: true as const, overview }), (error: unknown) => {
     if (!(error instanceof BotUnavailableError)) throw error;

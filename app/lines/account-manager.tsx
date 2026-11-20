@@ -1,4 +1,5 @@
 'use client';
+import { authFetch } from "@/src/lib/auth-browser";
 
 import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react';
 import { Link2, Pause, Play, Plus, RefreshCw, Unplug, X } from 'lucide-react';
@@ -25,7 +26,7 @@ class AccountRequestError extends Error {
 }
 
 async function request<T>(url: string, body?: Record<string, unknown>): Promise<T> {
-  const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(65_000),
+  const response = await authFetch(url, { cache: 'no-store', signal: AbortSignal.timeout(65_000),
     ...(body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
   const value = await response.json();
   if (!response.ok) throw new AccountRequestError(response.status, value.error || 'Account operation failed. Refresh status before retrying.');

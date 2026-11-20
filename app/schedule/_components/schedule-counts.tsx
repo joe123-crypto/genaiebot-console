@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/src/lib/auth-browser";
 
 import { useEffect, useState } from "react";
 import { LiveError, liveFetch, useLivePoll } from "@/app/_components/use-live";
@@ -13,7 +14,7 @@ type ClickTotals = { totalClicks: number; todayClicks: number; todayPartial: boo
 const formatCount = new Intl.NumberFormat();
 
 async function read<T>(path: string, signal?: AbortSignal) {
-  const response = await fetch(path, { cache: "no-store", signal });
+  const response = await authFetch(path, { cache: "no-store", signal });
   if (!response.ok) throw new Error("Unavailable.");
   return await response.json() as T;
 }

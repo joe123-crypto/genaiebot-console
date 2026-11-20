@@ -1,9 +1,11 @@
+import { requireOperator } from "@/src/lib/auth";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function ActivityPage() {
+export default async function ActivityPage() {
+  await requireOperator();
   return (
     <Shell>
       <PageHead

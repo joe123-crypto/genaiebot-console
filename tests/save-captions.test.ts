@@ -1,3 +1,4 @@
+import { TEST_ACTOR } from "./auth-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const update = vi.fn();
@@ -9,7 +10,7 @@ async function load(writes = true) {
   vi.resetModules(); update.mockReset(); updateFields.mockReset(); capabilities.mockReset(); preview.mockReset(); revalidate.mockReset();
   capabilities.mockResolvedValue({ enabled: true, affectsProduction: true, fields: { campaigns: ["captions", "tracking"] }, delete: [] });
   preview.mockResolvedValue({ captions: ["Original"] });
-  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes, OPERATOR_NAME: "Joseph" }));
+  vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => ({
     updateCampaignCaptions: update, getCampaignPreview: preview, updateCampaign: updateFields, getCapabilities: capabilities,
@@ -55,7 +56,7 @@ describe("saveCaptionsAction", () => {
     const save = await load();
     const captions = ["💧 New\n\n{ref_link} {bot_number}", "Second"];
     expect(await save("borehole", captions, ["Original"])).toEqual({ ok: true });
-    expect(update).toHaveBeenCalledWith("borehole", captions, { by: "Joseph" });
+    expect(update).toHaveBeenCalledWith("borehole", captions, { by: TEST_ACTOR });
     expect(revalidate.mock.calls).toEqual([["/campaigns/borehole"], ["/campaigns"], ["/"]]);
   });
   it("returns write errors so the operator keeps the draft", async () => {
@@ -73,7 +74,7 @@ it("writes captions and tracking together after checking the tracking baseline",
   const tracking = { prefix: "sale", number: "+26370000001" };
   preview.mockResolvedValue({ captions: ["Original"], tracking: {} });
   expect(await save("sale", ["Original {ref_link}"], ["Original"], { tracking, expectedTracking: {} })).toEqual({ ok: true });
-  expect(updateFields).toHaveBeenCalledWith("sale", { captions: ["Original {ref_link}"], tracking }, { by: "Joseph" });
+  expect(updateFields).toHaveBeenCalledWith("sale", { captions: ["Original {ref_link}"], tracking }, { by: TEST_ACTOR });
   expect(update).not.toHaveBeenCalled();
 });
 

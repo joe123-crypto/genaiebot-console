@@ -1,3 +1,4 @@
+import { apiOperator } from "@/src/lib/auth";
 import { AccountApiError, accountRequest, checkAccounts, checkLinkSession } from '@/src/lib/account-client';
 import { ACCOUNT_WRITES_ENABLED } from '@/src/config';
 import { ACCOUNT_ID } from '@/src/lib/account-types';
@@ -10,6 +11,8 @@ function failure(error: unknown) {
   return error instanceof AccountApiError ? json({ error: error.message }, error.status) : json({ error: 'Account controls are unavailable. Refresh status before retrying.' }, 502);
 }
 export async function GET(_request: Request, context: Context) {
+  const operator = await apiOperator();
+  if (operator instanceof Response) return operator;
   const parts = (await context.params).path ?? [];
   if (!(parts.length === 0 || parts.length === 2 && parts[0] === 'link-sessions' && /^[a-f0-9-]{36}$/.test(parts[1]))) {
     return json({ error: 'Not found.' }, 404);
@@ -20,9 +23,10 @@ export async function GET(_request: Request, context: Context) {
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request, context: Context) {
+  const operator = await apiOperator();
+  if (operator instanceof Response) return operator;
   if (!ACCOUNT_WRITES_ENABLED) return json({ error: 'Account controls are read-only. Set CONSOLE_WRITES=1 and configure the live gateway API to enable account actions.' }, 403);
-  // No login for the local-only console yet. Still refuse cross-site form/fetch
-  // submissions so another website cannot trigger local account controls.
+  // A session does not authorize cross-site submissions.
   const url = new URL(request.url);
   // Next can construct request.url with its internal bind hostname. Host is
   // the browser-facing authority, so localhost and 127.0.0.1 both work.

@@ -1,9 +1,11 @@
 "use server";
 
+import { requireOperator, auditActor } from "@/src/lib/auth";
+
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import {
-  OPERATOR_NAME, TIMEZONE_COOKIE_MAX_AGE_SECONDS, TIMEZONE_COOKIE_NAME, WRITES_ENABLED,
+  TIMEZONE_COOKIE_MAX_AGE_SECONDS, TIMEZONE_COOKIE_NAME, WRITES_ENABLED,
 } from "@/src/config";
 import { isDisplayTimezone } from "@/src/lib/timezone";
 import { getConfiguration, updateSettings } from "@/src/lib/bot-client";
@@ -19,9 +21,10 @@ import { READ_ONLY_OUTCOME, failedWrite, type WriteOutcome } from "@/src/lib/wri
  * Only the fields this save changes are compared, so someone else's edit to an
  * unrelated setting does not block it, and a newer value in one it does change
  * is never written over unseen. Guarded here as well as in the UI: a server
- * action is a reachable POST, and the console has no login.
+ * action is a reachable POST, protected by both a session and write gates.
  */
 export async function saveCapSettingsAction(draft: CapDraft, expected: Required<CapChange>): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (!draft || typeof draft !== "object" || typeof draft.enabled !== "boolean" ||
       typeof draft.rotation !== "boolean" ||
@@ -60,7 +63,7 @@ export async function saveCapSettingsAction(draft: CapDraft, expected: Required<
     if (fields.some((field) => JSON.stringify(expected[field]) !== JSON.stringify(current[field]))) {
       return { ok: false, detail: "The settings changed since this page loaded. Reload it to see the latest." };
     }
-    await updateSettings(change, { by: OPERATOR_NAME });
+    await updateSettings(change, { by: auditActor(operator) });
   } catch (error) {
     return failedWrite(error);
   }
@@ -78,6 +81,7 @@ export async function saveCapSettingsAction(draft: CapDraft, expected: Required<
  * and two operators can watch the same bot on different clocks.
  */
 export async function setDisplayTimezoneAction(zone: string): Promise<WriteOutcome> {
+  await requireOperator();
   if (!isDisplayTimezone(zone)) return { ok: false, detail: "That is not one of the zones the console shows." };
   (await cookies()).set(TIMEZONE_COOKIE_NAME, zone, {
     maxAge: TIMEZONE_COOKIE_MAX_AGE_SECONDS,

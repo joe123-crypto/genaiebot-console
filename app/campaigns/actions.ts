@@ -1,7 +1,9 @@
 "use server";
 
+import { requireOperator, auditActor } from "@/src/lib/auth";
+
 import { revalidatePath } from "next/cache";
-import { OPERATOR_NAME, WRITES_ENABLED } from "@/src/config";
+import { WRITES_ENABLED } from "@/src/config";
 import {
   BotUnavailableError,
   WriteRefusedError,
@@ -31,13 +33,14 @@ import { canDeleteCampaign, READ_ONLY_REASON } from "@/src/lib/write-capabilitie
 
 /**
  * Every action here is guarded twice: in the UI, and again here. A server
- * action is a reachable POST whether or not a button for it is rendered, and
- * with no login in front of the console this check is the only one there is.
+ * action is a reachable POST whether or not a button is rendered. Session
+ * verification runs before the independent write gates and bot validation.
  */
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
 export async function deleteCampaignAction(slug: string): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof slug !== "string" || !SLUG.test(slug) || slug.length > 64 || slug === "new") {
     return { ok: false, detail: "No valid campaign was named." };
@@ -46,7 +49,7 @@ export async function deleteCampaignAction(slug: string): Promise<WriteOutcome> 
     const overview = await getOverview(undefined, { fresh: true });
     const gate = canDeleteCampaign(WRITES_ENABLED, overview.writes);
     if (!gate.allowed) return { ok: false, detail: gate.reason };
-    await deleteCampaign(slug, { by: OPERATOR_NAME });
+    await deleteCampaign(slug, { by: auditActor(operator) });
   } catch (error) {
     return failedWrite(error);
   }
@@ -70,6 +73,7 @@ export async function saveCaptionsAction(
   expectedCaptions: string[],
   trackingChange?: { tracking: Tracking; expectedTracking: Tracking },
 ): Promise<SaveCaptionsOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode." };
   if (typeof slug !== "string" || !SLUG.test(slug)) {
     return { ok: false, detail: "No valid campaign was named." };
@@ -101,8 +105,8 @@ export async function saveCaptionsAction(
     if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
       return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving.", latestCaptions: current.captions, ...(trackingChange ? { latestTracking: current.tracking } : {}) };
     }
-    if (trackingChange) await updateCampaign(slug, { captions, tracking: trackingChange.tracking }, { by: OPERATOR_NAME });
-    else await updateCampaignCaptions(slug, captions, { by: OPERATOR_NAME });
+    if (trackingChange) await updateCampaign(slug, { captions, tracking: trackingChange.tracking }, { by: auditActor(operator) });
+    else await updateCampaignCaptions(slug, captions, { by: auditActor(operator) });
   } catch (error) {
     if (error instanceof BotUnavailableError || error instanceof WritesDisabledError) {
       return { ok: false, detail: error.detail };
@@ -156,6 +160,7 @@ export async function applyCampaignGroupsAction(
   slug: string,
   draft: CampaignGroupDraft,
 ): Promise<ApplyGroupsOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, done: [], detail: READ_ONLY_REASON };
   if (typeof slug !== "string" || !SLUG.test(slug)) {
     return { ok: false, done: [], detail: "No valid campaign was named." };
@@ -196,7 +201,7 @@ export async function applyCampaignGroupsAction(
         const group = expectedGroups.get(jid)!;
         const values: Record<string, unknown> = { promos: group.promos, weekly: group.weekly, paused_promos: group.pausedPromos ?? [] };
         return { id: jid, fields, expected: Object.fromEntries(Object.keys(fields).map((key) => [key, values[key]])) };
-      }), { by: OPERATOR_NAME });
+      }), { by: auditActor(operator) });
       if (result) {
         refreshCampaign(slug);
         return { ok: true, done: [...done, ...result.done] };
@@ -210,7 +215,7 @@ export async function applyCampaignGroupsAction(
   const refused: GroupFailure[] = [];
   for (const write of plan.writes) {
     try {
-      await updateGroup(write.jid, write.fields, { by: OPERATOR_NAME, dryRun: true });
+      await updateGroup(write.jid, write.fields, { by: auditActor(operator), dryRun: true });
     } catch (error) {
       if (!(error instanceof WriteRefusedError)) return stopped(error, write.jid, done, "Nothing was changed.");
       refused.push({ jid: write.jid, detail: error.detail, problems: error.problems });
@@ -223,7 +228,7 @@ export async function applyCampaignGroupsAction(
   const before = done.length;
   for (const [index, write] of plan.writes.entries()) {
     try {
-      await updateGroup(write.jid, write.fields, { by: OPERATOR_NAME });
+      await updateGroup(write.jid, write.fields, { by: auditActor(operator) });
       done.push(write.jid);
     } catch (error) {
       if (done.length > before) refreshCampaign(slug);
@@ -244,6 +249,7 @@ export async function applyCampaignGroupsAction(
  * success that writes nothing.
  */
 export async function setCampaignEnabledAction(slug: string, enabled: boolean): Promise<WriteOutcome> {
+  const operator = await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof slug !== "string" || !SLUG.test(slug)) {
     return { ok: false, detail: "No valid campaign was named." };
@@ -253,7 +259,7 @@ export async function setCampaignEnabledAction(slug: string, enabled: boolean): 
     const campaign = await getCampaignState(slug, { fresh: true });
     if (!campaign) return { ok: false, detail: "This campaign is no longer on record." };
     if ((campaign.storeEnabled ?? campaign.enabled) === enabled) return { ok: true };
-    await updateCampaign(slug, { enabled }, { by: OPERATOR_NAME });
+    await updateCampaign(slug, { enabled }, { by: auditActor(operator) });
   } catch (error) {
     return failedWrite(error);
   }
