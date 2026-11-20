@@ -93,7 +93,6 @@ npm run build
 | Customer Bot | Publish reply instructions and review the live data sources used for customer answers. Requires the companion bot API update. |
 | Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
-| Activity | Not wired up. Send history and ad replies live on the Railway volume. |
 
 Overview's total and a campaign's own total are not the same measure and will not
 add up: the bot filters Overview to group links so rollout smoke-test links stay
