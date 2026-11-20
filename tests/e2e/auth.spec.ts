@@ -32,10 +32,10 @@ async function signIn(page: Page, email = `console-${Date.now()}@example.com`) {
 }
 
 test("Google popup signs in, returns to a deep link, and survives reload", async ({ page, context }) => {
-  await page.goto("/activity?source=auth-test");
+  await page.goto("/settings?source=auth-test");
   await expect(page).toHaveURL(/\/login\?returnTo=/);
   const email = await signIn(page);
-  await expect(page).toHaveURL(/\/activity\?source=auth-test$/);
+  await expect(page).toHaveURL(/\/settings\?source=auth-test$/);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
   const cookie = (await context.cookies()).find(cookie => cookie.name === "genaie_console_session")!;
   expect(cookie.httpOnly).toBe(true); expect(cookie.sameSite).toBe("Lax");
@@ -45,7 +45,7 @@ test("Google popup signs in, returns to a deep link, and survives reload", async
 
 test("logout clears drafts and signs out other open tabs", async ({ page, context }) => {
   await page.goto("/login"); await signIn(page);
-  const other = await context.newPage(); await other.goto("/activity");
+  const other = await context.newPage(); await other.goto("/settings");
   await expect(other.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await page.evaluate(() => { sessionStorage.setItem("genaie:caption-editor:v1:test:0", "private draft"); localStorage.setItem("genaie:campaign-groups:v1:test", "private groups"); });
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -56,7 +56,7 @@ test("logout clears drafts and signs out other open tabs", async ({ page, contex
 });
 
 test("an expired session preserves same-user drafts and a changed user clears them", async ({ page, context }) => {
-  await page.goto("/activity"); const email = await signIn(page);
+  await page.goto("/settings"); const email = await signIn(page);
   await page.evaluate(() => sessionStorage.setItem("genaie:caption-editor:v1:test:0", "saved draft"));
   await context.clearCookies({ name: "genaie_console_session" });
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
@@ -79,7 +79,7 @@ test("direct APIs refuse anonymous requests and external return paths stay local
 
 for (const invalidation of ["disabled", "revoked"] as const) {
   test(`Firebase ${invalidation} users lose access to existing sessions`, async ({ page }) => {
-    await page.goto("/activity"); await signIn(page);
+    await page.goto("/settings"); await signIn(page);
     const { operator } = await (await page.request.get("/api/auth/session")).json();
     const admin = emulatorAdmin();
     if (invalidation === "disabled") await admin.updateUser(operator.uid, { disabled: true });
@@ -97,5 +97,5 @@ for (const invalidation of ["disabled", "revoked"] as const) {
 test("a forged session cookie never authenticates an API request", async ({ page, context }) => {
   await context.addCookies([{ name: "genaie_console_session", value: "forged-token", url: "http://127.0.0.1:3100/" }]);
   expect((await page.request.get("/api/auth/session")).status()).toBe(401);
-  await page.goto("/activity"); await expect(page).toHaveURL(/\/login\?returnTo=/);
+  await page.goto("/settings"); await expect(page).toHaveURL(/\/login\?returnTo=/);
 });

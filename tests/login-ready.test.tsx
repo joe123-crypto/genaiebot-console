@@ -8,7 +8,7 @@ import { LoginForm } from "@/app/login/sign-in";
 afterEach(cleanup);
 it("enables Google sign-in only after the client and SDK are ready", async () => {
   mocks.auth.mockImplementation(() => new Promise(resolve => { mocks.release = resolve; }));
-  render(<LoginForm returnTo="/activity" unavailable={false} />);
+  render(<LoginForm returnTo="/settings" unavailable={false} />);
   expect((screen.getByRole("button", { name: "Preparing sign-in…" }) as HTMLButtonElement).disabled).toBe(true);
   await waitFor(() => expect(mocks.auth).toHaveBeenCalledOnce());
   await act(async () => { mocks.release!({}); });
