@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const config = vi.hoisted(() => ({ writable: true }));
 vi.mock("@/src/config", () => ({
   get ACCOUNT_WRITES_ENABLED() { return config.writable; },
-  BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "fixture-token",
 }));
 import { publishCustomerBotAction } from "@/app/customer-bot/actions";
 import { customerBotRequest } from "@/src/lib/customer-bot-client";

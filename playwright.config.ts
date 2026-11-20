@@ -22,9 +22,12 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_APP_ID: "demo-console-app",
       FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
       NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL: "http://127.0.0.1:9099",
-      // A closed loopback port keeps authenticated shell reads off the live bot
-      // and prevents the local checkout adapter from touching Firestore.
-      BOT_API_BASE_URL: "http://127.0.0.1:1", BOT_API_TOKEN: "", CONSOLE_WRITES: "",
+      // The workspace registry lives in the Firestore emulator. Every test user
+      // is a new sign-up, so their workspace has no bot and no bot is ever
+      // called: there is no console-wide bot address to fall back to.
+      FIRESTORE_EMULATOR_HOST: "127.0.0.1:8085",
+      BOT_TOKEN_SECRET: "e2e-only-token-secret-not-used-for-any-real-bot",
+      CONSOLE_WRITES: "",
     },
   },
 });

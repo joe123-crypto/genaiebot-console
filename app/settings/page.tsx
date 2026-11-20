@@ -1,4 +1,5 @@
 import { requireOperator } from "@/src/lib/auth";
+import { requireBot } from "@/src/lib/workspace";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { CapSettingsForm } from "@/app/settings/_components/cap-settings-form";
@@ -16,6 +17,7 @@ const SUBTITLE = "The clock the console is read on, and how many adverts each gr
 
 export default async function SettingsPage() {
   await requireOperator();
+  await requireBot();
   const zone = await displayTimezone();
   const loaded = await getLiveView<ConfigurationPayload>("settings").then((overview) => ({ ok: true as const, overview }), (error: unknown) => {
     if (!(error instanceof BotUnavailableError)) throw error;

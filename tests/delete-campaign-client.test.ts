@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 vi.mock("@/src/config", () => ({
-  BOT_SOURCE: "remote", BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read-token", GENAEBOT_CHECKOUT: "/unused",
-  WRITE_SOURCE: "remote", WRITES_ENABLED: true, BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "write-token",
+  BOT_SOURCE: "remote", GENAEBOT_CHECKOUT: "/unused",
+  WRITE_SOURCE: "remote", WRITES_ENABLED: true,
 }));
 import { deleteCampaign, WriteRefusedError } from "@/src/lib/bot-client";
 afterEach(() => vi.unstubAllGlobals());

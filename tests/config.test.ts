@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Where writes go. With only the read URL set, writes used to fall back to a
- * local checkout -- validated by whatever branch it had checked out, needing a
- * write key on the laptop -- while the screens showed production. These pin the
- * fix: writes follow the reads unless told otherwise, and a token is never sent
- * to a host other than the one it belongs to.
+ * Where reads and writes go. No environment variable names a bot any more:
+ * each workspace's bot comes from its registry entry (src/lib/workspace), so a
+ * request can never fall back to a bot configured for the whole console. These
+ * pin what the environment still decides: whether writes are armed, and the
+ * development-only local adapter that production can never use.
  */
 async function configWith(env: Record<string, string>) {
   vi.resetModules();
-  for (const name of ["BOT_API_BASE_URL", "BOT_API_TOKEN", "BOT_WRITE_API_BASE_URL",
-                      "BOT_WRITE_TOKEN", "CONSOLE_WRITES"]) {
+  for (const name of ["BOT_SOURCE", "CONSOLE_WRITES", "NODE_ENV",
+                      "BOT_API_BASE_URL", "BOT_API_TOKEN", "BOT_WRITE_API_BASE_URL", "BOT_WRITE_TOKEN"]) {
     vi.stubEnv(name, env[name] ?? "");
   }
   return import("@/src/config");
@@ -21,47 +21,43 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("write target", () => {
-  it("follows the read API when no write URL is given", async () => {
-    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example",
-                                      BOT_API_TOKEN: "read-token" });
-    expect(config.BOT_WRITE_API_BASE_URL).toBe("https://bot.example");
-    expect(config.BOT_WRITE_TOKEN).toBe("read-token");
-    expect(config.WRITE_SOURCE).toBe(config.BOT_SOURCE);
-    expect(config.WRITE_SOURCE).toBe("remote");
-  });
-
-  it("stays local when the reads are local", async () => {
+describe("bot source", () => {
+  it("is remote by default, and reads and writes always agree", async () => {
     const config = await configWith({});
-    expect(config.WRITE_SOURCE).toBe("local");
-    expect(config.BOT_SOURCE).toBe("local");
+    expect(config.BOT_SOURCE).toBe("remote");
+    expect(config.WRITE_SOURCE).toBe(config.BOT_SOURCE);
   });
 
-  it("honours an explicit write URL and token", async () => {
-    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example",
-                                      BOT_API_TOKEN: "read-token",
-                                      BOT_WRITE_API_BASE_URL: "https://other.example",
-                                      BOT_WRITE_TOKEN: "write-token" });
-    expect(config.BOT_WRITE_API_BASE_URL).toBe("https://other.example");
-    expect(config.BOT_WRITE_TOKEN).toBe("write-token");
+  it("is local only when asked for outside production", async () => {
+    expect((await configWith({ BOT_SOURCE: "local", NODE_ENV: "development" })).BOT_SOURCE).toBe("local");
+    expect((await configWith({ BOT_SOURCE: "local", NODE_ENV: "production" })).BOT_SOURCE).toBe("remote");
   });
 
-  it("never sends the read token to a different write host", async () => {
-    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example",
-                                      BOT_API_TOKEN: "read-token",
-                                      BOT_WRITE_API_BASE_URL: "https://other.example" });
-    expect(config.BOT_WRITE_TOKEN).toBe("");
+  it("no longer exposes a console-wide bot address or token", async () => {
+    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read-token",
+                                      BOT_WRITE_API_BASE_URL: "https://other.example", BOT_WRITE_TOKEN: "write-token" });
+    for (const name of ["BOT_API_BASE_URL", "BOT_API_TOKEN", "BOT_WRITE_API_BASE_URL", "BOT_WRITE_TOKEN"]) {
+      expect(config).not.toHaveProperty(name);
+    }
   });
+});
 
-  it("arms writes from the read settings alone once CONSOLE_WRITES is on", async () => {
-    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example",
-                                      BOT_API_TOKEN: "read-token", CONSOLE_WRITES: "1" });
+describe("write switch", () => {
+  it("arms writes once CONSOLE_WRITES is on", async () => {
+    const config = await configWith({ CONSOLE_WRITES: "1" });
     expect(config.WRITES_ENABLED).toBe(true);
+    expect(config.ACCOUNT_WRITES_ENABLED).toBe(true);
   });
 
   it("stays read-only without CONSOLE_WRITES whatever else is set", async () => {
-    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example",
-                                      BOT_API_TOKEN: "read-token" });
+    const config = await configWith({ BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read-token" });
     expect(config.WRITES_ENABLED).toBe(false);
+    expect(config.ACCOUNT_WRITES_ENABLED).toBe(false);
+  });
+
+  it("keeps account controls off with the local adapter, which has no gateway", async () => {
+    const config = await configWith({ CONSOLE_WRITES: "1", BOT_SOURCE: "local", NODE_ENV: "development" });
+    expect(config.WRITES_ENABLED).toBe(true);
+    expect(config.ACCOUNT_WRITES_ENABLED).toBe(false);
   });
 });

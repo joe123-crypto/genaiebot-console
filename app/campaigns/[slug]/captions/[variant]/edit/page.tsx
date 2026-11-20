@@ -1,4 +1,5 @@
 import { requireOperator } from "@/src/lib/auth";
+import { requireBot } from "@/src/lib/workspace";
 import { notFound } from "next/navigation";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { CaptionEditorScreen } from "@/app/campaigns/_components/caption-editor";
@@ -13,6 +14,7 @@ export const maxDuration = 60;
 
 export default async function CaptionEditorPage({ params }: { params: Promise<{ slug: string; variant: string }> }) {
   await requireOperator();
+  await requireBot();
   const { slug, variant } = await params;
   if (!isCaptionVariant(variant)) notFound();
   const detail = await loadCaptionEditorDetail(slug);

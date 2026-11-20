@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { WRITES_ENABLED } from "@/src/config";
 import { campaignCreateError, type NewCampaign, type CreateCampaignOutcome } from "@/src/domains/campaign-create";
 import { createCampaign, getCapabilities, WriteRefusedError, WritesDisabledError } from "@/src/lib/bot-client";
-import { canCreateCampaign } from "@/src/lib/write-capabilities";
+import { canCreateInWorkspace } from "@/src/lib/write-capabilities";
+import { keyPrefixOf } from "@/src/domains/campaign-create";
+import { getWorkspace } from "@/src/lib/workspace";
 import { failedWrite } from "@/src/lib/write-outcome";
 
 export async function createCampaignAction(input: NewCampaign): Promise<CreateCampaignOutcome> {
@@ -15,9 +17,14 @@ export async function createCampaignAction(input: NewCampaign): Promise<CreateCa
   if (error) return { ok: false, detail: error, outcome: "not-created" };
   let submitted = false;
   try {
+    const workspace = await getWorkspace();
+    if (!workspace) return { ok: false, detail: "Sign in to continue.", outcome: "not-created" };
     const writes = await getCapabilities();
-    const gate = canCreateCampaign(WRITES_ENABLED, writes);
+    const gate = canCreateInWorkspace(WRITES_ENABLED, writes, workspace.id);
     if (!gate.allowed) return { ok: false, detail: gate.reason, outcome: "not-created" };
+    // The exact prefix this bot accepts; the shape check above allowed either.
+    const prefixed = campaignCreateError(input, keyPrefixOf(writes));
+    if (prefixed) return { ok: false, detail: prefixed, outcome: "not-created" };
     // The bot validates active membership inside its creation transaction.
     // Replays must reach its receipt even if a group changed after the save.
     submitted = true;

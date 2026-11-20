@@ -1,4 +1,5 @@
 import { requireOperator } from "@/src/lib/auth";
+import { requireBot } from "@/src/lib/workspace";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
 import { LiveGroups } from "./_components/live-groups";
@@ -10,6 +11,7 @@ import type { LivePage, Group } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
 export default async function GroupsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireOperator();
+  await requireBot();
   const filter = parseGroupFilter(await searchParams);
   let initial: LivePage<Group> | null = null;
   let initialError: string | undefined;

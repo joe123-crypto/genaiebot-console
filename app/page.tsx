@@ -1,4 +1,5 @@
 import { requireOperator } from "@/src/lib/auth";
+import { requireBot } from "@/src/lib/workspace";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
 import { LiveScheduleView } from "@/app/schedule/_components/live-schedule";
@@ -10,6 +11,7 @@ import type { LiveSchedule } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
 export default async function ScheduleHomePage() {
   await requireOperator();
+  await requireBot();
   let initial: LiveSchedule | null = null;
   let initialError: string | undefined;
   try { initial = await getLiveView("schedule"); }

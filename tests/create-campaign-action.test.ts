@@ -9,7 +9,7 @@ import { BotUnavailableError, WriteRefusedError } from "@/src/lib/bot-client";
 import { createCampaignAction } from "@/app/campaigns/new/actions";
 beforeEach(() => {
   vi.clearAllMocks(); mock.writable = true;
-  mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true } } });
+  mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "ads/" } } });
   mock.groups.mockResolvedValue({ groups: [{ jid: "1@g.us", status: "active" }] });
   mock.create.mockResolvedValue({ slug: "demo", scheduling: "ready" });
 });

@@ -1,3 +1,4 @@
+import { keyPrefixOf } from "@/src/domains/campaign-create";
 import type { ActionCapabilities, WriteCapabilities } from "@/src/lib/types";
 
 /**
@@ -130,4 +131,19 @@ export function canCreateCampaign(consoleWrites: boolean, writes: WriteCapabilit
   if (!support?.create || !support.scheduling) return { allowed: false, reason: "Deploy the companion bot update for campaign creation, pictures and scheduling." };
   if (!support.images) return { allowed: false, reason: "Campaign creation requires R2 images on the bot. Set GENAIE_AD_ASSETS_SOURCE=r2 and GENAIE_AD_ASSETS_BASE_URL to the bucket's public HTTPS URL." };
   return { allowed: true };
+}
+
+/**
+ * Creation on a workspace's bot: everything `canCreateCampaign` needs, plus the
+ * bot saying it serves this very workspace and naming where its pictures go.
+ * A bot started with another GENAIE_WORKSPACE_ID, or none, creates nothing.
+ */
+export function canCreateInWorkspace(consoleWrites: boolean, writes: WriteCapabilities | undefined, workspaceId: string): WriteGate {
+  const gate = canCreateCampaign(consoleWrites, writes);
+  if (!gate.allowed) return gate;
+  if (writes?.workspace !== workspaceId) {
+    return { allowed: false, reason: "This bot is not set up for your workspace. Check its GENAIE_WORKSPACE_ID before creating campaigns." };
+  }
+  if (!keyPrefixOf(writes)) return { allowed: false, reason: "The bot reports no usable picture location. Check its GENAIE_ASSET_KEY_PREFIX." };
+  return gate;
 }
