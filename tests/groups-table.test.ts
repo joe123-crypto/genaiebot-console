@@ -99,6 +99,51 @@ describe("rendering", () => {
   });
 });
 
+// Phones hide the facets, the table key and an empty selection bar with CSS
+// keyed on the state below; jsdom applies no media queries, so these pin the
+// hooks that CSS relies on.
+describe("the phone layout", () => {
+  const toggle = () => screen.getByRole("button", { name: /^Filters/ });
+
+  it("keeps the facets behind a Filters button that starts closed", () => {
+    const { container } = mount();
+    const root = container.querySelector(".groups-results")!;
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(root.classList.contains("options-open")).toBe(false);
+
+    const panel = document.getElementById(toggle().getAttribute("aria-controls")!)!;
+    for (const label of ["Status", "Line", "Campaign", "Tier"]) {
+      expect(panel.contains(screen.getByLabelText(label))).toBe(true);
+    }
+    expect(panel.contains(screen.getByRole("button", { name: "Clear filters" }))).toBe(true);
+    expect(panel.contains(searchBox())).toBe(false);
+
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(root.classList.contains("options-open")).toBe(true);
+    fireEvent.click(toggle());
+    expect(root.classList.contains("options-open")).toBe(false);
+  });
+
+  it("counts the facets still narrowing the table, but not the visible search", () => {
+    mount({ initialFilter: { ...DEFAULT_GROUP_FILTER, q: "held", status: "on-hold", tier: "busy" } });
+    expect(toggle().textContent).toBe("Filters2 active");
+    cleanup();
+    mount({ initialFilter: { ...DEFAULT_GROUP_FILTER, q: "held" } });
+    expect(toggle().textContent).toBe("Filters");
+  });
+
+  it("marks the selection bar empty until a group is ticked", () => {
+    const { container } = render(createElement(GroupsTable, {
+      ...props, writesEnabled: true, campaignGate: { allowed: true },
+    }));
+    const bar = () => container.querySelector(".group-assignment-controls")!;
+    expect(bar().classList.contains("is-empty")).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Select Harare Market/ }));
+    expect(bar().classList.contains("is-empty")).toBe(false);
+  });
+});
+
 describe("group observations and More", () => {
   it("shows DMC and members, distinguishing zero from unavailable and partial from complete", () => {
     mount({ groups: [group({ jid: "1@g.us", name: "Busy", metrics }),

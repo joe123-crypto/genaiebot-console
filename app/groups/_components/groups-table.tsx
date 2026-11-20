@@ -4,6 +4,7 @@ import { PaginatedPicker, type PickerChoice } from "@/app/_components/paginated-
 import { addGroupCampaignAction, addGroupCampaignsAction, removeGroupCampaignAction } from "@/app/groups/actions";
 import { liveFetch, notifyLiveChange, useLivePoll } from "@/app/_components/use-live";
 import { Fragment, type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import {
   Facet, FilterActions, FilterBar, FilterField, FilterSearch, FilterSummary, useUrlFilter,
 } from "@/app/_components/filter-bar";
@@ -120,6 +121,9 @@ export function GroupsTable({
   const [filter, setFilter] = useUrlFilter(initialFilter, groupFilterQuery, GROUP_FILTER_KEYS);
   const search = useRef<HTMLInputElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  /** Phones only: the facets and the table key sit behind a Filters button.
+   *  Wider screens ignore this and always show both. */
+  const [optionsOpen, setOptionsOpen] = useState(false);
   /** A delete that landed but could not finish everything asked of it. Held
    *  here rather than in the row, which the delete itself removes. */
   const [incomplete, setIncomplete] =
@@ -161,6 +165,11 @@ export function GroupsTable({
   const selectionFull = selectedGroups.size >= MAX_GROUPS_PER_ASSIGNMENT;
   const columns = 9 + Number(writesEnabled) + Number(canAssign);
   const unfiltered = isDefaultGroupFilter(filter);
+  // Counted on the button so a collapsed panel never hides a filter that is
+  // still narrowing the table. The search box stays visible, so it is not one.
+  const activeFacets = [
+    filter.status !== DEFAULT_GROUP_FILTER.status, filter.line, filter.campaign, filter.tier,
+  ].filter(Boolean).length;
 
   function selectGroup(group: Group, checked: boolean) {
     setSelectedGroups((current) => {
@@ -203,7 +212,7 @@ export function GroupsTable({
   }
 
   return (
-    <div className="card groups-results">
+    <div className={`card groups-results${optionsOpen ? " options-open" : ""}`}>
       {editorDeleted && editingGroup ? <p role="alert">This group no longer exists. Your open draft is retained.</p> : null}
       {assignmentError ? <p role="alert">{assignmentError}</p> : null}
       {campaignGroup ? <PaginatedPicker kind="campaigns" exclude={campaignGroup.promos} schedule={{ gate: scheduleGate }}
@@ -241,58 +250,69 @@ export function GroupsTable({
           onChange={(value) => set("q", value)}
         />
 
-        <FilterField id={`${id}-status`} label="Status">
-          <select
-            id={`${id}-status`}
-            value={filter.status}
-            onChange={(event) => set("status", event.target.value)}
-          >
-            {/* Each option reads on its own: an optgroup's label is announced
-                inconsistently, so "Advertising" cannot rely on "Views". */}
-            <optgroup label="Views">
-              {VIEWS.map((view) => (
-                <option key={view} value={view}>
-                  {GROUP_VIEW_LABEL[view]}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Status">
-              {STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {STATUS_LABEL[status]}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </FilterField>
+        <button type="button" className="btn groups-filter-toggle" aria-expanded={optionsOpen}
+          aria-controls={`${id}-options`} onClick={() => setOptionsOpen((open) => !open)}>
+          Filters
+          {activeFacets > 0 ? (
+            <span className="pill">{activeFacets}<span className="visually-hidden"> active</span></span>
+          ) : null}
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
 
-        <Facet
-          id={`${id}-line`}
-          label="Line"
-          value={filter.line}
-          options={remote ? remote.lines.map(value => ({ value, label: value })) : lineOptions(groups, filter.line)}
-          onChange={(value) => set("line", value)}
-        />
-        <Facet
-          id={`${id}-campaign`}
-          label="Campaign"
-          value={filter.campaign}
-          options={remote ? remote.campaigns.map(row => ({ value: row.slug, label: row.name })) : campaignOptions(groups, disabledPromos, filter.campaign)}
-          onChange={(value) => set("campaign", value)}
-        />
-        <Facet
-          id={`${id}-tier`}
-          label="Tier"
-          value={filter.tier}
-          options={remote ? remote.tiers.map(value => ({ value, label: value })) : tierOptions(groups, filter.tier)}
-          onChange={(value) => set("tier", value)}
-        />
+        <div id={`${id}-options`} className="groups-filter-options">
+          <FilterField id={`${id}-status`} label="Status">
+            <select
+              id={`${id}-status`}
+              value={filter.status}
+              onChange={(event) => set("status", event.target.value)}
+            >
+              {/* Each option reads on its own: an optgroup's label is announced
+                  inconsistently, so "Advertising" cannot rely on "Views". */}
+              <optgroup label="Views">
+                {VIEWS.map((view) => (
+                  <option key={view} value={view}>
+                    {GROUP_VIEW_LABEL[view]}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Status">
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {STATUS_LABEL[status]}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </FilterField>
 
-        <FilterActions>
-          <button type="button" className="btn" onClick={clear} disabled={unfiltered}>
-            Clear filters
-          </button>
-        </FilterActions>
+          <Facet
+            id={`${id}-line`}
+            label="Line"
+            value={filter.line}
+            options={remote ? remote.lines.map(value => ({ value, label: value })) : lineOptions(groups, filter.line)}
+            onChange={(value) => set("line", value)}
+          />
+          <Facet
+            id={`${id}-campaign`}
+            label="Campaign"
+            value={filter.campaign}
+            options={remote ? remote.campaigns.map(row => ({ value: row.slug, label: row.name })) : campaignOptions(groups, disabledPromos, filter.campaign)}
+            onChange={(value) => set("campaign", value)}
+          />
+          <Facet
+            id={`${id}-tier`}
+            label="Tier"
+            value={filter.tier}
+            options={remote ? remote.tiers.map(value => ({ value, label: value })) : tierOptions(groups, filter.tier)}
+            onChange={(value) => set("tier", value)}
+          />
+
+          <FilterActions>
+            <button type="button" className="btn" onClick={clear} disabled={unfiltered}>
+              Clear filters
+            </button>
+          </FilterActions>
+        </div>
       </FilterBar>
 
       {incomplete ? (
@@ -317,7 +337,7 @@ export function GroupsTable({
         noun="group"
         unfiltered={unfiltered && (!remote || visible.length === remote.total)}
       >
-        <p className="card-note">
+        <p className="card-note groups-table-key">
           Groups needing a decision are listed first. A group the bot cannot post in returns{" "}
           <code>forbidden</code> at send time; one it has left returns <code>item-not-found</code>.
           Highlighted campaigns are the ones today&apos;s rotation gives the group&apos;s allowance
@@ -330,7 +350,7 @@ export function GroupsTable({
       </FilterSummary>
 
       {canAssign ? (
-        <div className="group-assignment-controls">
+        <div className={`group-assignment-controls${selectedGroups.size === 0 ? " is-empty" : ""}`}>
           <span className="card-note" role="status">
             {selectedGroups.size} {selectedGroups.size === 1 ? "group" : "groups"} selected
             {selectionFull ? ` (maximum ${MAX_GROUPS_PER_ASSIGNMENT})` : ""}
@@ -389,7 +409,7 @@ export function GroupsTable({
                       ) : null}
                     </td>
                   ) : null}
-                  <td>
+                  <td className="group-name-cell">
                     <div className="cell-strong">{groupLabel(group)}</div>
                     <div className="cell-mono">{shortJid(group.jid)}</div>
                   </td>
@@ -412,7 +432,7 @@ export function GroupsTable({
                       </>
                     )}
                   </td>
-                  <td>
+                  <td className="group-campaigns-cell">
                     <div className="tag-row group-campaign-tags">
                       {group.promos.length === 0 ? (
                         <span className="cell-muted">none</span>

@@ -1580,14 +1580,41 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .groups-results .filter-summary { padding: 8px 12px; }
   .groups-results .group-assignment-controls { padding: 8px 12px; gap: 8px; }
 }
+/* Phones put the search box and the table first. The facets and the table key
+   wait behind the Filters button, and the selection bar waits for a ticked
+   group. Wider screens never see the button, and the wrapper around the
+   facets drops out of the layout, so their flex and grid rules are untouched. */
+.groups-filter-toggle { display: none; }
+.groups-filter-options { display: contents; }
 @media (max-width: 600px) {
-  .groups-results .filter-bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
-  .groups-results .filter-field-search { grid-column: 1 / -1; }
+  .console-app-groups .page-sub { display: none; }
+  .groups-results .filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  /* The placeholder says the same thing; the label stays for screen readers. */
+  .groups-results .filter-field-search .filter-label {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .groups-filter-toggle { display: inline-flex; align-items: center; gap: 6px; padding-inline: 10px; }
+  .groups-filter-toggle .pill { padding: 0 6px; }
+  .groups-filter-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .groups-filter-options { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
+  .groups-results:not(.options-open) .groups-filter-options,
+  .groups-results:not(.options-open) .groups-table-key { display: none; }
+  .groups-results.options-open .filter-summary > .groups-table-key { max-height: 6em; }
   .groups-results .filter-actions { margin: 0; }
   .groups-results .filter-bar input, .groups-results .filter-bar select { width: 100%; }
   .groups-results .filter-actions .btn { width: 100%; padding-inline: 4px; }
-  .groups-results .filter-summary > p:not([role]) { max-height: 1.5em; }
+  .groups-results .group-assignment-controls.is-empty { display: none; }
   .groups-results .group-assignment-controls .btn { font-size: 12px; padding: 6px 8px; }
+
+  /* Short rows. An overflowing table shrinks every column to its narrowest
+     content, which broke campaign chips one word per line and stretched rows
+     to several hundred pixels. Chips now wrap whole, the campaigns column
+     keeps room for a few of them, and the short columns do not wrap at all. */
+  .groups-table-wrap table.data th, .groups-table-wrap table.data td { padding: 7px 10px; }
+  .groups-table-wrap tr[data-live-id] > td:not(.group-name-cell, .group-campaigns-cell) { white-space: nowrap; }
+  .groups-table-wrap .group-name-cell > div { max-width: 11rem; }
+  .groups-table-wrap .group-campaign-tags { min-width: 22rem; }
+  .groups-table-wrap .tag { white-space: nowrap; }
 }
 @media (max-height: 500px) {
   .console-app-groups > .console-sidebar { padding-block: 4px; }
