@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("@/src/config", () => ({ BOT_SOURCE: "remote", BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read-token", GENAEBOT_CHECKOUT: "/unused", WRITE_SOURCE: "remote", WRITES_ENABLED: true, BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "write-token" }));
+vi.mock("@/src/config", () => ({ BOT_SOURCE: "remote", GENAEBOT_CHECKOUT: "/unused", WRITE_SOURCE: "remote", WRITES_ENABLED: true }));
 import { saveSchedule, saveScheduleEntries, WriteRefusedError } from "@/src/lib/bot-client";
 const input = { date: "2026-11-10", timezone: "Africa/Harare", changes: [{ slug: "borehole-drilling", time: "07:10", expectedRevision: "a".repeat(64) }] };
 const saved = { slug: "borehole-drilling", minutes: 430, scheduleEdit: { revision: "b".repeat(64), editable: true, status: "pending", confirmedMinutes: 435 } };

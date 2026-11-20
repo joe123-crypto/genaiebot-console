@@ -9,17 +9,27 @@ It is **not** a reimplementation of OpenClaw's own control UI.
 
 ## How it reads state
 
-The console keeps no database or authoritative copy of bot state. Campaign group
-drafts are stored only in the browser. Live data on every screen comes from
-genaebot's own state, through one of two adapters in
-[`src/lib/bot-client.ts`](src/lib/bot-client.ts):
+The console keeps no copy of bot state. Campaign group drafts are stored only
+in the browser. **Every user has their own workspace and sees only its data.**
+Each workspace has its own bot deployment. The console's one registry,
+`consoleUsers/{uid}` and `workspaces/{id}`, says which bot that is. See
+[Workspaces](docs/authentication.md#workspaces-whose-data-a-request-sees) and
+[Provisioning a workspace's bot](docs/provision-bot.md).
 
-- **local** (development) — runs `workspace/bin/console-read` out of a genaebot
-  checkout.
-- **remote** (production) — calls the console API beside the gateway on Railway,
-  which runs that same script in the container. Set `BOT_API_BASE_URL` and the
-  remote adapter takes over; it wins whenever it is configured, so a deployed
-  console can never silently fall back to a checkout that is not there.
+A new sign-up's workspace has no bot. Its pages show `/setup`, and the console
+makes no bot call for it.
+
+Live data on every screen comes from the user's own bot, through one of two
+adapters in [`src/lib/bot-client.ts`](src/lib/bot-client.ts):
+
+- **remote** (always in production): calls the console API of the workspace's
+  bot on Railway, which runs that same script in its container. The address
+  comes from the workspace record, and the token is derived per workspace from
+  `BOT_TOKEN_SECRET`. No environment variable names a bot, so there is nothing
+  to fall back to.
+- **local** (development only, `BOT_SOURCE=local`): runs
+  `workspace/bin/console-read` out of a genaebot checkout, with
+  `GENAIE_WORKSPACE_ID` set to the signed-in user's workspace.
 
 Both adapters therefore execute **the same script**, which lives in genaebot
 rather than here. That is deliberate: the bridge imports the bot's own
@@ -46,13 +56,12 @@ minutes between failed refreshes and retain the original snapshot timestamp and
 failure reason. Unknown write outcomes, including timeouts, still say the change
 may have happened. This does not increase Firestore quotas or change billing.
 
-Switching between them is environment only, so the same build runs locally and
-on Vercel:
+The same build runs locally and on Vercel:
 
-| `BOT_API_BASE_URL` | Adapter | Reads |
+| `BOT_SOURCE` | Adapter | Reads |
 |---|---|---|
-| empty | local | `$GENAEBOT_CHECKOUT/workspace/bin/console-read` |
-| set | remote | `GET $BOT_API_BASE_URL/internal/console/*` with `BOT_API_TOKEN` |
+| unset (or production) | remote | `GET <workspace bot>/internal/console/*` with the workspace's derived token |
+| `local` (development only) | local | `$GENAEBOT_CHECKOUT/workspace/bin/console-read` for the user's workspace |
 
 ## Running it
 
@@ -61,16 +70,16 @@ npm install
 npm run dev
 ```
 
-By default it reads `/home/joseph/projects/genaebot`. Point it elsewhere with
-`GENAEBOT_CHECKOUT`.
-
 | Variable | Meaning |
 |---|---|
-| `GENAEBOT_CHECKOUT` | Path to a genaebot checkout (local adapter) |
-| `BOT_API_BASE_URL` | Console API base URL; set this and the remote adapter is used |
-| `BOT_API_TOKEN` | Bearer token; must match `CONSOLE_API_TOKEN` on the bot |
+| `BOT_TOKEN_SECRET` | Server-only secret, 32+ characters. Each workspace's bot token is derived from it |
 | `CONSOLE_WRITES` | `1` arms editing controls; anything else keeps every screen read-only |
-| `BOT_WRITE_API_BASE_URL`, `BOT_WRITE_TOKEN` | Normally unset: writes then go to the same bot as the reads |
+| `BOT_SOURCE` | `local` (development only) runs the bridges from `GENAEBOT_CHECKOUT` |
+| `GENAEBOT_CHECKOUT` | Path to a genaebot checkout for the local adapter; defaults to `/home/joseph/projects/genaebot` |
+
+`BOT_API_BASE_URL`, `BOT_API_TOKEN` and `BOT_WRITE_*` are gone. A console-wide
+bot address is exactly what would let one user's request reach another user's
+bot.
 
 `npm run dev` binds to `127.0.0.1`. Open `http://localhost:3000` and sign in
 with Google. Every console page, API and server action requires a verified
@@ -176,7 +185,7 @@ including in an existing chat. Publishing retains optimistic revision checks.
 
 Deploy the companion live-lookup bot support first (see
 [integration notes](integrations/README.md#customer-bot-instructions-and-live-lookups)).
-The page uses `BOT_API_BASE_URL` and `BOT_API_TOKEN`, including in local mode.
+The page always calls the workspace's own bot API, even with the local adapter.
 `CONSOLE_WRITES=1` enables publishing. Legacy knowledge-bearing publishes are
 rejected by the updated bot; old tab drafts use a separate v1 storage key and
 cannot overwrite the new instructions-only draft.
@@ -518,8 +527,7 @@ cache invalidation fences in-flight reads both in the bot and console process.
 
 ## WhatsApp account controls
 
-Set `BOT_API_BASE_URL` and `BOT_API_TOKEN` to the live console API, even when
-running the UI locally. Deploy the companion `genaebot` backend changes first;
+These always use the workspace's own bot API, even when running the UI locally. Deploy the companion `genaebot` backend changes first;
 the checkout-only `console-read` adapter cannot operate WhatsApp accounts. The
 backend uses its pinned OpenClaw 2026.9.9 SDK and existing gateway credentials.
 Browser requests go through same-origin Next.js routes; tokens remain server-side.

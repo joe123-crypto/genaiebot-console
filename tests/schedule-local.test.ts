@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const local = vi.hoisted(() => ({ checkout: "" }));
-vi.mock("@/src/config", () => ({ BOT_SOURCE: "local", BOT_API_BASE_URL: "", BOT_API_TOKEN: "", get GENAEBOT_CHECKOUT() { return local.checkout; }, WRITE_SOURCE: "local", WRITES_ENABLED: true, BOT_WRITE_API_BASE_URL: "", BOT_WRITE_TOKEN: "" }));
+vi.mock("@/src/config", () => ({ BOT_SOURCE: "local", get GENAEBOT_CHECKOUT() { return local.checkout; }, WRITE_SOURCE: "local", WRITES_ENABLED: true }));
 beforeEach(() => { local.checkout = mkdtempSync(path.join(tmpdir(), "schedule-save-")); mkdirSync(path.join(local.checkout, "workspace/bin"), { recursive: true }); vi.resetModules(); });
 afterEach(() => rmSync(local.checkout, { recursive: true, force: true }));
 it("uses the same stdin schedule protocol through a local bridge", async () => {

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("@/src/config", async original => ({ ...await original<object>(), BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read" }));
+vi.mock("@/src/config", async original => ({ ...await original<object>() }));
 import { getLiveView } from "@/src/lib/live-client";
 afterEach(() => vi.unstubAllGlobals());
 it("never falls back to full-directory endpoints or retries a missing live endpoint", async () => {

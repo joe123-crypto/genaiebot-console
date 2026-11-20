@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/config", () => ({
-  BOT_SOURCE: "remote", BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read-token",
-  GENAEBOT_CHECKOUT: "/unused", WRITE_SOURCE: "remote", WRITES_ENABLED: true,
-  BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "read-token",
+  BOT_SOURCE: "remote", GENAEBOT_CHECKOUT: "/unused", WRITE_SOURCE: "remote", WRITES_ENABLED: true,
 }));
 import { BotUnavailableError, getCampaignPreview, getCampaigns, getGroups, getOverview, updateCampaign } from "@/src/lib/bot-client";
 
@@ -14,6 +12,9 @@ const busy = (retryAfter?: string) => new Response('{"error":"busy"}', {
   status: 503, headers: retryAfter === undefined ? {} : { "Retry-After": retryAfter },
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+// Each read first resolves which workspace's bot it is for, so its request
+// leaves a few microtasks after the call rather than synchronously.
+const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 describe("remote reads", () => {
   it("uses the fresh read contract without reusing an ordinary read", async () => {
@@ -48,6 +49,7 @@ describe("remote reads", () => {
     });
     vi.stubGlobal("fetch", fetch);
     const reads = Promise.all([getCampaigns(), getGroups(), getCampaignPreview("borehole"), getOverview()]);
+    await settle();
     expect(fetch).toHaveBeenCalledTimes(2);
     release();
     await reads;
@@ -62,6 +64,7 @@ describe("remote reads", () => {
     vi.stubGlobal("fetch", fetch);
     const first = getCampaignPreview("borehole");
     const second = getCampaignPreview("borehole");
+    await settle();
     expect(fetch).toHaveBeenCalledTimes(1);
     release();
     expect(await first).toEqual(await second);
@@ -74,6 +77,7 @@ describe("remote reads", () => {
     const fetch = vi.fn().mockResolvedValueOnce(busy("1")).mockResolvedValue(Response.json({ campaigns: [] }));
     vi.stubGlobal("fetch", fetch);
     const read = getCampaigns();
+    await settle();
     await vi.advanceTimersByTimeAsync(999);
     expect(fetch).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -87,6 +91,7 @@ describe("remote reads", () => {
       const fetch = vi.fn().mockResolvedValueOnce(busy(retryAfter)).mockResolvedValue(Response.json({ campaigns: [] }));
       vi.stubGlobal("fetch", fetch);
       const read = getCampaigns();
+      await settle();
       await vi.advanceTimersByTimeAsync(4999);
       expect(fetch).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1);

@@ -1,4 +1,5 @@
-import { BOT_API_BASE_URL, BOT_API_TOKEN } from '@/src/config';
+import { BotUnavailableError } from './bot-errors';
+import { botTarget, type BotTarget } from './workspace';
 import type { AccountsPayload, LinkSession } from './account-types';
 
 export class AccountApiError extends Error {
@@ -7,14 +8,17 @@ export class AccountApiError extends Error {
 
 /** Account operations always use the live gateway API, never console-read. */
 export async function accountRequest(route = '', body?: Record<string, unknown>): Promise<unknown> {
-  if (!BOT_API_BASE_URL || !BOT_API_TOKEN) {
-    throw new AccountApiError(503, 'Set BOT_API_BASE_URL and BOT_API_TOKEN to the live console API to manage WhatsApp accounts.');
+  let target: BotTarget;
+  try { target = await botTarget(); }
+  catch (error) {
+    if (error instanceof BotUnavailableError) throw new AccountApiError(error.status === 409 ? 409 : 503, error.detail);
+    throw error;
   }
   let response: Response;
   try {
-    response = await fetch(`${BOT_API_BASE_URL.replace(/\/$/, '')}/internal/console/accounts${route}`, {
+    response = await fetch(`${target.baseUrl}/internal/console/accounts${route}`, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { accept: 'application/json', authorization: `Bearer ${BOT_API_TOKEN}`,
+      headers: { accept: 'application/json', authorization: `Bearer ${target.token}`,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       cache: 'no-store', signal: AbortSignal.timeout(60_000),
@@ -31,7 +35,7 @@ export async function accountRequest(route = '', body?: Record<string, unknown>)
     const error = value as { error?: unknown };
     const detail = typeof error?.error === 'string' ? error.error : '';
     const message = response.status === 404 ? 'Account controls are unavailable or the pairing session expired. Update the gateway API or start Link again.' :
-      response.status === 401 || response.status === 403 ? 'The console API rejected its server credentials. Check BOT_API_TOKEN.' :
+      response.status === 401 || response.status === 403 ? "Your bot rejected the console's credentials. Check its CONSOLE_API_TOKEN matches this workspace." :
       detail || 'Account operation could not be confirmed. Refresh status before retrying.';
     throw new AccountApiError([400, 404, 409, 502, 503, 504].includes(response.status) ? response.status : 502, message);
   }

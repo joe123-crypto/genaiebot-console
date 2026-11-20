@@ -1,9 +1,53 @@
 # Google authentication
 
 All console pages, API handlers and server actions require a verified Firebase
-session. Any Google account with a verified email can access this **shared bot
-console**. There are no viewer/admin roles or per-user bot datasets. The existing
+session. Sign-up is open: any Google account with a verified email can sign in.
+What it sees is **its own workspace and nothing else**. The existing
 `CONSOLE_WRITES` switch and backend capabilities still control editing.
+
+## Workspaces: whose data a request sees
+
+Each user owns one workspace, created on their first signed-in request. A
+workspace's data (groups, campaigns, lines, settings, pictures, audit) lives
+under `workspaces/{id}/` in Firestore. Its own bot deployment reads and writes
+that data, and the console reaches the bot at the address the workspace names.
+The registry is two documents per user, in the `(default)` database:
+
+| Document | Fields |
+|---|---|
+| `consoleUsers/{uid}` | `email`, `workspaceId`, `createdAt` |
+| `workspaces/{id}` | `name`, `ownerUid`, `createdAt`, `bot: { baseUrl } \| null` |
+
+The pointer is `consoleUsers`, not `users`. This Firebase project and its
+sign-in uids are shared with agent_genaie, which keeps its own profiles in a
+root `users/{uid}`. The console never reads or writes that collection.
+
+`src/lib/workspace.ts` is the only code that reads or creates these documents.
+It is also the only access rule (`canAccess`: the user owns the workspace).
+Teammates later mean a members list and a change to that one function. No data
+moves.
+
+- **No fallback bot.** No environment variable names a bot. A workspace whose
+  `bot` is `null`, as every new sign-up's is, makes no bot call at all. Its
+  pages redirect to `/setup`. Its APIs answer `409 No bot is connected to your
+  workspace yet.` Uploads and the caption assistant are refused for it, so a
+  stranger can neither fill the picture bucket nor spend the OpenRouter key.
+- **One token per bot, none stored.** The console holds `BOT_TOKEN_SECRET`, at
+  least 32 characters. Each workspace's bot is called with
+  `base64url(HMAC-SHA256(secret, "genaie-bot:" + id))`, which that bot holds as
+  its `CONSOLE_API_TOKEN`. A registry entry naming the wrong bot gets a 401, not
+  another user's data.
+- **The bot confirms its workspace.** A bot pinned with `GENAIE_WORKSPACE_ID`
+  reports it in `writes.workspace`. `connect-bot` refuses a bot that reports
+  any other value, and so do campaign creation and picture uploads.
+- **Unreadable registry, nothing shown.** If the registry cannot be read, data
+  requests fail with 503. A pointer to a workspace the user does not own is
+  refused, never followed. Lookups are cached for 30 seconds per user.
+
+The `genaie-console-auth` service account needs **Cloud Datastore User** on the
+project, in addition to Firebase Authentication Admin, to create a first-time
+user's workspace. Registering, connecting and inspecting workspaces is done with
+`scripts/workspace-admin.mjs` (see [Provisioning a workspace's bot](provision-bot.md)).
 
 ## Configured Firebase resources
 
@@ -11,7 +55,8 @@ console**. There are no viewer/admin roles or per-user bot datasets. The existin
 - Web app: **Genaie Console**, `1:766882916139:web:8733489a96e8e6dbce076e`.
 - Google provider enabled; `localhost` and `127.0.0.1` added to authorized domains.
 - Service account: `genaie-console-auth@database-8982a.iam.gserviceaccount.com`,
-  with the Firebase Authentication Admin role. It does not receive Firestore access.
+  with the Firebase Authentication Admin role and Cloud Datastore User, for the
+  workspace registry. The console never writes a workspace's own data; its bot does.
 
 Authentication users and provider settings are project-wide, including the existing
 Filter-backend web app. Existing providers and authorized domains were preserved.
@@ -93,8 +138,10 @@ npm run test:auth:e2e
 ```
 
 The browser suite uses `demo-genaie-console`, a loopback Auth Emulator on port
-9099, and a separate development server on port 3100. It overrides real Firebase
-configuration and does not contact production authentication or mutate the bot.
+9099, a Firestore Emulator on port 8085 for the workspace registry, and a separate
+development server on port 3100. It overrides real Firebase configuration and
+does not contact production authentication, Firestore or any bot. Every test user
+is a new sign-up with a bot-less workspace, which the suite also checks.
 It exercises Firebase's simulated Google popup, server cookie exchange, reload,
 deep links, expiry, draft isolation and multi-tab sign-out. A real Google smoke
 test remains a separate check with the account owner choosing their account.

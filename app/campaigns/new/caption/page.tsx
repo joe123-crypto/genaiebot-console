@@ -1,17 +1,19 @@
 import { requireOperator } from "@/src/lib/auth";
+import { requireBot } from "@/src/lib/workspace";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { CampaignCaptionStep } from "@/app/campaigns/_components/campaign-caption-step";
 import { WRITES_ENABLED } from "@/src/config";
 import { getCapabilities, BotUnavailableError } from "@/src/lib/bot-client";
-import { canCreateCampaign } from "@/src/lib/write-capabilities";
+import { canCreateInWorkspace } from "@/src/lib/write-capabilities";
 import { captionAIUnavailableReason } from "@/src/lib/caption-ai";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 export default async function NewCampaignCaptionPage() {
   await requireOperator();
+  const workspace = await requireBot();
   try {
     const writes = await getCapabilities();
-    const gate = canCreateCampaign(WRITES_ENABLED, writes);
+    const gate = canCreateInWorkspace(WRITES_ENABLED, writes, workspace.id);
     return <Shell live><CampaignCaptionStep gate={gate} aiUnavailableReason={captionAIUnavailableReason()} /></Shell>;
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;

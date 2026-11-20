@@ -19,10 +19,9 @@ python3 deploy/test_console_read.py
 ```
 
 Deploy the bot update with its existing Firestore write credentials and
-`GENAIE_CONFIG_SOURCE=firestore`. Set the console's `BOT_WRITE_API_BASE_URL` to the
-service exposing `POST /internal/console/config/campaigns/<slug>` and
-`BOT_WRITE_TOKEN` to its bearer token. Keep reads pointed at the same bot, and
-set `CONSOLE_WRITES=1` to show editing controls. Local development uses the same
+`GENAIE_CONFIG_SOURCE=firestore`. Writes go to the workspace's own bot, the
+same one the reads use (`POST /internal/console/config/campaigns/<slug>`). Set
+`CONSOLE_WRITES=1` to show editing controls. Local development uses the same
 JSON request on `console-write` stdin when no remote write URL is configured.
 
 The request is `{ "fields": { "captions": ["caption template", "another"] },
@@ -447,9 +446,8 @@ PATH="$PWD/.venv-console/bin:$PATH" ./deploy/ci-check.sh
 
 Deploy the bot through its existing validated release pipeline first. Verify
 `/internal/console/live/status` and ten-row group/campaign pages with the existing
-console bearer token, then deploy the console. Local console development requires
-`BOT_API_BASE_URL` and its matching read token; indexed views deliberately refuse
-legacy full-directory fallbacks. Legacy endpoints remain available to older
+console bearer token, then deploy the console. Indexed views always call the workspace's own bot API, even in local console
+development, and deliberately refuse legacy full-directory fallbacks. Legacy endpoints remain available to older
 consoles. Roll back the frontend before rolling back the bot.
 
 Live routes use the same authentication and uncacheable responses as other console

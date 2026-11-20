@@ -2,7 +2,8 @@
 
 import { requireOperator } from "@/src/lib/auth";
 
-import { WRITES_ENABLED } from "@/src/config";
+import { BOT_SOURCE, WRITES_ENABLED } from "@/src/config";
+import { getWorkspace } from "@/src/lib/workspace";
 import { CaptionAIError, generateCaptionReply, parseCaptionAIRequest } from "@/src/lib/caption-ai";
 import type { CaptionAIOutcome } from "@/src/lib/caption-ai-types";
 
@@ -12,6 +13,10 @@ let activeRequests = 0;
 export async function suggestCaptionAction(value: unknown): Promise<CaptionAIOutcome> {
   await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode." };
+  // Paid calls are for workspaces with a bot to post the caption: an open
+  // sign-up with nothing connected cannot spend the shared key.
+  const workspace = await getWorkspace();
+  if (!workspace?.bot && BOT_SOURCE !== "local") return { ok: false, detail: "Connect a bot to your workspace to use the caption assistant." };
   if (activeRequests >= 4) return { ok: false, detail: "The caption assistant is busy. Try again in a moment." };
   activeRequests++;
   try {

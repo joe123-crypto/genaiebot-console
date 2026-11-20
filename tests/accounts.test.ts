@@ -3,7 +3,7 @@ import { GET, POST } from '@/app/api/accounts/[[...path]]/route';
 
 const mockRequest = vi.hoisted(() => vi.fn());
 const flags = vi.hoisted(() => ({ enabled: true }));
-vi.mock('@/src/config', () => ({ get ACCOUNT_WRITES_ENABLED() { return flags.enabled; }, BOT_API_BASE_URL: '', BOT_API_TOKEN: '' }));
+vi.mock('@/src/config', () => ({ get ACCOUNT_WRITES_ENABLED() { return flags.enabled; } }));
 vi.mock('@/src/lib/account-client', async (original) => ({ ...await original<typeof import('@/src/lib/account-client')>(), accountRequest: mockRequest }));
 const context = (path: string[] = []) => ({ params: Promise.resolve({ path }) });
 const payload = { observedAt: '2026-11-06T00:00:00Z', accounts: [{ id: 'ads', number: null, enabled: false, linked: true, running: false, connected: false,

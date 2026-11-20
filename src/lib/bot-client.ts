@@ -3,11 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-  BOT_API_BASE_URL,
-  BOT_API_TOKEN,
   BOT_SOURCE,
-  BOT_WRITE_API_BASE_URL,
-  BOT_WRITE_TOKEN,
   GENAEBOT_CHECKOUT,
   WRITE_SOURCE,
   WRITES_ENABLED,
@@ -26,28 +22,20 @@ import { canWrite } from "@/src/lib/write-capabilities";
 import { isScheduleSaveResult } from "@/src/domains/schedule";
 import { deduplicateRead, invalidateRemoteReads, withReadSlot } from "@/src/lib/remote-read";
 import { botErrorMetadata, type BotErrorMetadata } from "@/src/lib/bot-error-metadata";
+import { BotUnavailableError, WriteRefusedError } from "./bot-errors";
+import { botTarget, getWorkspace } from "./workspace";
 
 const run = promisify(execFile);
 
 /**
- * The console reads operator state from exactly one of two places: a local
- * genaebot checkout (development) or the console API beside the gateway
- * (production). Both return the same shapes, produced by the same Python
- * helpers, so a screen cannot behave differently depending on which is in use.
+ * The console reads operator state from exactly one of two places: the console
+ * API of the signed-in user's own bot (production), or, in development only, a
+ * local genaebot checkout run for that user's workspace. Both return the same
+ * shapes, produced by the same Python helpers, so a screen cannot behave
+ * differently depending on which is in use.
  */
 
-export class BotUnavailableError extends Error {
-  readonly detail: string;
-  readonly status?: number;
-  readonly metadata: BotErrorMetadata;
-  constructor(detail: string, status?: number, metadata: BotErrorMetadata = {}) {
-    super("Could not reach the bot's state.");
-    this.name = "BotUnavailableError";
-    this.detail = detail;
-    this.status = status;
-    this.metadata = botErrorMetadata(metadata);
-  }
-}
+export { BotUnavailableError, WriteRefusedError } from "./bot-errors";
 
 /**
  * The read bridge lives in genaebot rather than here, so this adapter and the
@@ -103,24 +91,6 @@ export function imageWritesUnavailableReason(): string {
   return "Picture changes need the companion bot update — the bot still reads each campaign\u2019s picture from its post_ad.py, not from the record the console can write.";
 }
 
-/**
- * The bot refused a config change and said why. Unlike "could not reach the
- * bot", the change definitely did not happen, and `problems` carries the bot's
- * own reasons -- for a group, the validator's words about what the change would
- * have broken. A subclass of BotUnavailableError so every existing catch still
- * shows `detail`; a screen that can show the reasons checks for this one.
- */
-export class WriteRefusedError extends BotUnavailableError {
-  readonly problems: string[];
-  readonly status: number;
-  constructor(detail: string, problems: string[], status: number, metadata: BotErrorMetadata = {}) {
-    super(detail, status, metadata);
-    this.name = "WriteRefusedError";
-    this.problems = problems;
-    this.status = status;
-  }
-}
-
 /** console-write's refusal: `{"ok": false, "status", "error", "problems"}`. A read
  *  bridge's error has no `ok`, so this never mistakes one for the other. */
 function refusalFrom(text: string | undefined): WriteRefusedError | null {
@@ -166,6 +136,10 @@ function reportedUnavailable(stdout: string | undefined): BotUnavailableError | 
  * genaebot's `workspace/lib` on the path itself.
  */
 async function runBridge<T>(bridge: string, args: string[], input?: unknown): Promise<T> {
+  // The checkout reads whichever tree GENAIE_WORKSPACE_ID names: always the
+  // signed-in user's own, never the root collections by default.
+  const workspace = await getWorkspace();
+  if (!workspace) throw new BotUnavailableError("Sign in to continue.", 401);
   // Checked up front: python3 exists, so spawning it against a missing script
   // succeeds and python reports the problem as exit 2, which reads far worse
   // than saying which path we looked at.
@@ -180,6 +154,7 @@ async function runBridge<T>(bridge: string, args: string[], input?: unknown): Pr
     const child = run("python3", ["-I", bridge, ...args], {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 120_000,
+      env: { ...process.env, GENAIE_WORKSPACE_ID: workspace.id },
     });
     if (input !== undefined) {
       // console-write accepts one JSON request on stdin; copy never enters a shell.
@@ -216,13 +191,13 @@ function readLocal<T>(args: string[]): Promise<T> {
 }
 
 async function readRemote<T>(route: string, params: URLSearchParams): Promise<T> {
-  const url = `${BOT_API_BASE_URL.replace(/\/$/, "")}/internal/console/${route}?${params}`;
-  const headers: Record<string, string> = { accept: "application/json" };
-  if (BOT_API_TOKEN) headers.authorization = `Bearer ${BOT_API_TOKEN}`;
+  const target = await botTarget();
+  const url = `${target.baseUrl}/internal/console/${route}?${params}`;
+  const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${target.token}` };
 
   // The authentication context stays in server memory and prevents reuse of
-  // a result fetched with different credentials.
-  return deduplicateRead(JSON.stringify([url, BOT_API_TOKEN]), async () => {
+  // a result fetched with different credentials -- or for another workspace.
+  return deduplicateRead(JSON.stringify([url, target.token]), async () => {
     for (let attempt = 0; ; attempt++) {
       const result = await withReadSlot(async () => {
         let response: Response;
@@ -280,7 +255,7 @@ async function readRemote<T>(route: string, params: URLSearchParams): Promise<T>
 function staleBridge(missing: string): never {
   const remedy =
     BOT_SOURCE === "remote"
-      ? `the console API at ${BOT_API_BASE_URL} is serving an older read bridge — redeploy the gateway`
+      ? "this workspace's bot is serving an older read bridge — redeploy its gateway"
       : `the read bridge at ${BRIDGE} is older than this console expects — git -C ${GENAEBOT_CHECKOUT} pull --ff-only`;
   throw new BotUnavailableError(`${missing}; ${remedy}`);
 }
@@ -465,7 +440,7 @@ export async function deleteCampaign(slug: string, { by }: { by: string }): Prom
 }
 
 export class WritesDisabledError extends Error {
-  readonly detail = "writes are switched off; set CONSOLE_WRITES=1 and a write target";
+  readonly detail = "writes are switched off; set CONSOLE_WRITES=1";
   constructor() {
     super("The console is in read-only mode.");
     this.name = "WritesDisabledError";
@@ -480,12 +455,13 @@ async function writeRemote<T>(route: string, body: unknown): Promise<T> {
 }
 
 async function sendWriteRemote<T>(route: string, body: unknown): Promise<T> {
-  const url = `${BOT_WRITE_API_BASE_URL.replace(/\/$/, "")}/internal/console/${route}`;
+  const target = await botTarget();
+  const url = `${target.baseUrl}/internal/console/${route}`;
   const headers: Record<string, string> = {
     accept: "application/json",
     "content-type": "application/json",
+    authorization: `Bearer ${target.token}`,
   };
-  if (BOT_WRITE_TOKEN) headers.authorization = `Bearer ${BOT_WRITE_TOKEN}`;
 
   let response: Response;
   try {

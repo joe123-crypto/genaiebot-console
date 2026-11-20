@@ -14,7 +14,7 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type GroupChoice = Pick<Group, "jid" | "name" | "account" | "status">;
 type Picture = { id: string; file: File; preview: string; uploaded?: CampaignImageUpload };
-export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean }) {
+export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix = "ads/" }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean; keyPrefix?: string }) {
   const [lastGroups, setLastGroups] = useState(incomingGroups);
   if (!loadError && lastGroups !== incomingGroups) setLastGroups(incomingGroups);
   const [pickedGroups, setPickedGroups] = useState<GroupChoice[]>([]);
@@ -92,13 +92,14 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
     setPictures((current) => { const next = [...current]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; return next; });
   }
   async function describe(picture: Picture): Promise<CampaignImageUpload> {
-    if (picture.uploaded?.key.startsWith(`ads/${slug}/`)) return picture.uploaded;
+    // The bot names where its workspace's pictures go; a key elsewhere is refused.
+    if (picture.uploaded?.key.startsWith(`${keyPrefix}${slug}/`)) return picture.uploaded;
     const digest = await crypto.subtle.digest("SHA-256", await picture.file.arrayBuffer());
     const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     const contentType = picture.file.type as CampaignImageUpload["contentType"];
     const filename = campaignImageFilename(picture.file.name, sha256, contentType);
     return { filename, sha256, contentType, bytes: picture.file.size,
-      key: `ads/${slug}/${sha256}.${contentType === "image/png" ? "png" : "jpg"}` };
+      key: `${keyPrefix}${slug}/${sha256}.${contentType === "image/png" ? "png" : "jpg"}` };
   }
   async function submit(event: FormEvent) {
     event.preventDefault();

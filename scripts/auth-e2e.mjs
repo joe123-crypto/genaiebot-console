@@ -24,7 +24,7 @@ if (runTests) {
   delete env.DEBUG;
   executable = "firebase";
   const command = [process.execPath, resolve("scripts/auth-e2e.mjs"), "--run", ...extra].map(quote).join(" ");
-  args = ["emulators:exec", "--project", "demo-genaie-console", "--only", "auth", command];
+  args = ["emulators:exec", "--project", "demo-genaie-console", "--only", "auth,firestore", command];
 }
 const grouped = process.platform !== "win32";
 const child = spawn(executable, args, { stdio: "inherit", env, detached: grouped });

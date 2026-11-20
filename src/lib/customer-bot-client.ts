@@ -1,4 +1,5 @@
-import { BOT_API_BASE_URL, BOT_API_TOKEN } from "@/src/config";
+import { BotUnavailableError } from "./bot-errors";
+import { botTarget, type BotTarget } from "./workspace";
 import { isCustomerBotVersion, type CustomerBotText, type CustomerBotVersion } from "./customer-bot-types";
 
 type Result =
@@ -8,15 +9,17 @@ type Result =
   | { kind: "unknown" };
 
 export async function customerBotRequest(publish?: CustomerBotText & { expectedRevision: string; actor: string }): Promise<Result> {
-  if (!BOT_API_BASE_URL || !BOT_API_TOKEN) {
-    return { kind: "error", detail: "Connect the console to the live bot API to load its customer instructions." };
+  let target: BotTarget;
+  try { target = await botTarget(); }
+  catch (error) {
+    if (error instanceof BotUnavailableError) return { kind: "error", detail: error.detail };
+    throw error;
   }
-  // Pin the read and publish to the same live gateway, as with account actions.
-  // A general config write override must never send this draft to another bot.
+  // Pin the read and publish to the workspace's own bot, as with account actions.
   try {
-    const response = await fetch(`${BOT_API_BASE_URL.replace(/\/+$/, "")}/internal/console/customer-bot`, {
+    const response = await fetch(`${target.baseUrl}/internal/console/customer-bot`, {
       method: publish ? "POST" : "GET",
-      headers: { accept: "application/json", authorization: `Bearer ${BOT_API_TOKEN}`,
+      headers: { accept: "application/json", authorization: `Bearer ${target.token}`,
         ...(publish ? { "content-type": "application/json" } : {}) },
       ...(publish ? { body: JSON.stringify(publish) } : {}),
       cache: "no-store",

@@ -57,7 +57,25 @@ function weekdays(value: unknown): value is number[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 7 &&
     new Set(value).size === value.length && value.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
 }
-export function uploadError(value: unknown, slug: string): string | undefined {
+/** The two key shapes the bot accepts: `ads/` for the install that predates
+ *  workspaces, `w/<workspace>/ads/` for every other workspace. */
+export const KEY_PREFIX = /^(?:w\/[A-Za-z0-9_-]{6,40}\/)?ads\/$/;
+
+/** The prefix a bot will accept new pictures under: its reported one, `ads/`
+ *  for a bot older than workspaces, undefined when it reports none it can use. */
+export function keyPrefixOf(writes: { campaignCreation?: { keyPrefix?: string | null } } | undefined): string | undefined {
+  const reported = writes?.campaignCreation?.keyPrefix;
+  if (reported === undefined) return "ads/";
+  return typeof reported === "string" && KEY_PREFIX.test(reported) ? reported : undefined;
+}
+
+/**
+ * Why one picture cannot be uploaded or created, or undefined. With a
+ * `keyPrefix` (the server, which knows the bot's) the key must sit exactly
+ * under it; without one (a browser draft) any shape the bot accepts will do,
+ * and the server and the bot both check the exact prefix again.
+ */
+export function uploadError(value: unknown, slug: string, keyPrefix?: string): string | undefined {
   if (!value || typeof value !== "object") return "Choose a JPEG or PNG picture.";
   const image = value as CampaignImageUpload;
   if (!["image/jpeg", "image/png"].includes(image.contentType)) return "Pictures must be JPEG or PNG.";
@@ -66,10 +84,13 @@ export function uploadError(value: unknown, slug: string): string | undefined {
   if (image.filename.length > CAMPAIGN_IMAGE_NAME_MAX) return `Picture filenames must be at most ${CAMPAIGN_IMAGE_NAME_MAX} characters, so the bot can cache the picture.`;
   if (!/^[a-f0-9]{64}$/.test(image.sha256)) return "The picture checksum is invalid.";
   const extension = image.contentType === "image/png" ? "png" : "jpg";
-  if (image.key !== `ads/${slug}/${image.sha256}.${extension}`) return "The picture does not belong to this campaign.";
+  const tail = `ads/${slug}/${image.sha256}.${extension}`;
+  if (typeof image.key !== "string" || !image.key.endsWith(tail)) return "The picture does not belong to this campaign.";
+  const prefix = image.key.slice(0, image.key.length - tail.length) + "ads/";
+  if (!KEY_PREFIX.test(prefix) || (keyPrefix !== undefined && prefix !== keyPrefix)) return "The picture does not belong to this campaign.";
 }
 /** Everything but the captions, which the create form collects on its own. */
-export function campaignDraftError(value: unknown): string | undefined {
+export function campaignDraftError(value: unknown, keyPrefix?: string): string | undefined {
   if (!value || typeof value !== "object") return "The campaign could not be read.";
   const campaign = value as CampaignDraft;
   if (typeof campaign.requestId !== "string" || !/^[a-f0-9-]{36}$/.test(campaign.requestId)) return "The creation request ID is invalid.";
@@ -77,7 +98,7 @@ export function campaignDraftError(value: unknown): string | undefined {
   if (typeof campaign.name !== "string" || !campaign.name.trim() || campaign.name.length > 120) return "Enter a campaign name of at most 120 characters.";
   if (typeof campaign.enabled !== "boolean") return "Enabled must be on or off.";
   if (!Array.isArray(campaign.images) || !campaign.images.length || campaign.images.length > 20) return "Choose between 1 and 20 pictures.";
-  for (const image of campaign.images) { const error = uploadError(image, campaign.slug); if (error) return error; }
+  for (const image of campaign.images) { const error = uploadError(image, campaign.slug, keyPrefix); if (error) return error; }
   if (new Set(campaign.images.map((image) => image.filename)).size !== campaign.images.length || new Set(campaign.images.map((image) => image.key)).size !== campaign.images.length) return "Remove duplicate pictures or filenames.";
   if (!campaign.schedule || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(campaign.schedule.time) || !weekdays(campaign.schedule.weekdays)) return "Choose a posting time and at least one weekday.";
   try { if (!campaign.schedule.timezone) return "Choose a timezone."; new Intl.DateTimeFormat("en", { timeZone: campaign.schedule.timezone }); } catch { return "Enter a valid timezone, such as Africa/Harare."; }
@@ -97,8 +118,8 @@ export function campaignDraftError(value: unknown): string | undefined {
   for (const field of ["comment", "weeklyComment"] as const) if (campaign[field] !== undefined && (typeof campaign[field] !== "string" || campaign[field]!.length > 2000)) return "Notes must be at most 2000 characters.";
 }
 /** The same checks run in the form and on the server; the bot checks again. */
-export function campaignCreateError(value: unknown): string | undefined {
-  const invalid = campaignDraftError(value);
+export function campaignCreateError(value: unknown, keyPrefix?: string): string | undefined {
+  const invalid = campaignDraftError(value, keyPrefix);
   if (invalid) return invalid;
   const campaign = value as NewCampaign;
   if (!Array.isArray(campaign.captions) || !campaign.captions.length || campaign.captions.some((caption) => typeof caption !== "string" || !caption.trim())) return "Enter text for every caption and keep at least one variant.";

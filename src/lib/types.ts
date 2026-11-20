@@ -190,7 +190,12 @@ export type WriteCapabilities = {
   affectsProduction: boolean;
   fields: Record<string, string[]>;
   delete: string[];
-  campaignCreation?: { create: boolean; images: boolean; scheduling: boolean };
+  /** The workspace this bot is pinned to (GENAIE_WORKSPACE_ID); null when it
+   *  is not pinned, absent from a bot older than workspaces. */
+  workspace?: string | null;
+  /** keyPrefix: where this bot's new pictures go (`ads/` or `w/<id>/ads/`);
+   *  null when misconfigured, absent from an older bot (which used `ads/`). */
+  campaignCreation?: { create: boolean; images: boolean; scheduling: boolean; keyPrefix?: string | null };
   campaignDeletion?: { delete: boolean; reason?: string };
   scheduleEditing?: { edit: boolean; entries?: boolean; reason?: string };
 };

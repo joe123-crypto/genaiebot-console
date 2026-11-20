@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/config", () => ({
-  BOT_SOURCE: "remote", BOT_API_BASE_URL: "https://bot.example", BOT_API_TOKEN: "read",
+  BOT_SOURCE: "remote",
   GENAEBOT_CHECKOUT: "/unused", WRITE_SOURCE: "remote", WRITES_ENABLED: true,
-  BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "write",
 }));
 import { getCampaignPayload, getCampaignPreview, getCampaignState, getCapabilities, getConfiguration,
   getGroups, getNavigation, updateGroupBatch } from "@/src/lib/bot-client";

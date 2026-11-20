@@ -32,10 +32,10 @@ async function signIn(page: Page, email = `console-${Date.now()}@example.com`) {
 }
 
 test("Google popup signs in, returns to a deep link, and survives reload", async ({ page, context }) => {
-  await page.goto("/settings?source=auth-test");
+  await page.goto("/setup?source=auth-test");
   await expect(page).toHaveURL(/\/login\?returnTo=/);
   const email = await signIn(page);
-  await expect(page).toHaveURL(/\/settings\?source=auth-test$/);
+  await expect(page).toHaveURL(/\/setup\?source=auth-test$/);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
   const cookie = (await context.cookies()).find(cookie => cookie.name === "genaie_console_session")!;
   expect(cookie.httpOnly).toBe(true); expect(cookie.sameSite).toBe("Lax");
@@ -74,7 +74,20 @@ test("direct APIs refuse anonymous requests and external return paths stay local
   for (const path of ["/api/live/groups", "/api/accounts", "/api/account-membership"]) expect((await page.request.get(path)).status()).toBe(401);
   expect((await page.request.post("/api/campaigns/uploads", { data: {} })).status()).toBe(401);
   await page.goto("/login?returnTo=https%3A%2F%2Fevil.example"); await signIn(page);
-  await expect(page).toHaveURL("http://127.0.0.1:3100/");
+  // Home, then on to /setup: a new account's workspace has no bot yet.
+  await expect(page).toHaveURL("http://127.0.0.1:3100/setup");
+});
+
+test("a new account gets its own empty workspace and reaches no bot", async ({ page }) => {
+  await page.goto("/groups"); await signIn(page);
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByRole("heading", { name: "No bot connected yet" })).toBeVisible();
+  const first = await page.getByText(/^w[A-Za-z0-9_-]{16}$/).textContent();
+  const live = await page.request.get("/api/live/groups");
+  expect(live.status()).toBe(409);
+  expect(await live.json()).toEqual({ error: "No bot is connected to your workspace yet." });
+  await page.reload();
+  expect(await page.getByText(/^w[A-Za-z0-9_-]{16}$/).textContent()).toBe(first);
 });
 
 for (const invalidation of ["disabled", "revoked"] as const) {

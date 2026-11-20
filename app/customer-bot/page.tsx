@@ -1,8 +1,8 @@
 import { requireOperator } from "@/src/lib/auth";
-import { createHash } from "node:crypto";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
-import { ACCOUNT_WRITES_ENABLED, BOT_API_BASE_URL } from "@/src/config";
+import { ACCOUNT_WRITES_ENABLED } from "@/src/config";
+import { draftScope, requireBot } from "@/src/lib/workspace";
 import { customerBotRequest } from "@/src/lib/customer-bot-client";
 import { CustomerBotEditor } from "./_components/customer-bot-editor";
 
@@ -10,8 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function CustomerBotPage() {
   await requireOperator();
+  const workspace = await requireBot();
   const result = await customerBotRequest();
-  const target = createHash("sha256").update(BOT_API_BASE_URL.replace(/\/+$/, "")).digest("hex").slice(0, 16);
+  // Drafts are keyed to this workspace's bot, so one can never publish to another.
+  const target = draftScope(workspace);
   return (
     <Shell live>
       <PageHead title="Customer Bot" subtitle="Manage how Genaie replies on WhatsApp and review the data sources it uses for current answers." />

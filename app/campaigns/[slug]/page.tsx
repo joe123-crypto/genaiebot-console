@@ -1,4 +1,5 @@
 import { requireOperator } from "@/src/lib/auth";
+import { requireBot } from "@/src/lib/workspace";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { IndexedCampaignView } from "../_components/indexed-campaign-view";
 import { getLiveView } from "@/src/lib/live-client";
@@ -10,6 +11,7 @@ import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 export default async function CampaignPage({ params }: { params: Promise<{ slug: string }> }) {
   await requireOperator();
+  await requireBot();
   const { slug } = await params;
   let initial: { campaign: CampaignRow | null; context?: LiveContext; sync: SyncStatus } | null = null;
   let initialError: string | undefined;

@@ -12,3 +12,19 @@ vi.mock("@/src/lib/auth", () => ({
   apiOperator: vi.fn(async () => ({ uid: "test-operator", email: "operator@example.com", name: "Test Operator" })),
   auditActor: (operator: { email: string; uid: string }) => `${operator.email} (${operator.uid})`,
 }));
+
+// Every existing test runs inside one workspace whose bot is https://bot.example
+// with the token below. Isolation tests replace these, or import the actual
+// module with vi.importActual, to exercise the resolver itself.
+export const TEST_WORKSPACE = { id: "test-workspace", name: "Test workspace", ownerUid: "test-operator", bot: { baseUrl: "https://bot.example" } };
+export const TEST_BOT_TOKEN = "write-token";
+vi.mock("@/src/lib/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/workspace")>();
+  const workspace = () => ({ id: "test-workspace", name: "Test workspace", ownerUid: "test-operator", bot: { baseUrl: "https://bot.example" } });
+  return {
+    ...actual,
+    getWorkspace: vi.fn(async () => workspace()),
+    requireBot: vi.fn(async () => workspace()),
+    botTarget: vi.fn(async () => ({ baseUrl: "https://bot.example", token: "write-token", workspaceId: "test-workspace" })),
+  };
+});

@@ -14,13 +14,10 @@ async function loadWith(source: "local" | "remote", overrides: ConfigOverrides =
   vi.resetModules();
   vi.doMock("@/src/config", () => ({
     BOT_SOURCE: source,
-    BOT_API_BASE_URL: source === "remote" ? "https://bot.example" : "",
-    BOT_API_TOKEN: "",
     GENAEBOT_CHECKOUT: "/checkout",
-    // Writes are a separate target with a separate switch, so a read-only
-    // console is the default here exactly as it is in production.
-    BOT_WRITE_API_BASE_URL: "",
-    BOT_WRITE_TOKEN: "",
+    // Writes have their own switch, so a read-only console is the default here
+    // exactly as it is in production. The bot is always the workspace's own
+    // (https://bot.example in tests/auth-fixture.ts).
     WRITE_SOURCE: "local",
     WRITES_ENABLED: false,
     ...overrides,
@@ -143,7 +140,7 @@ describe("checkShape", () => {
 
   it("tells a remote reader to redeploy the gateway instead", async () => {
     const { checkShape } = await loadWith("remote");
-    expect(detailOf(() => checkShape("groups", {}))).toMatch(/redeploy the gateway/);
+    expect(detailOf(() => checkShape("groups", {}))).toMatch(/redeploy its gateway/);
   });
 
   it("does not require configShadow, which older bridges do not send", async () => {
@@ -182,8 +179,6 @@ describe("deleteGroup", () => {
   });
 
   const REMOTE = {
-    BOT_WRITE_API_BASE_URL: "https://write.example/",
-    BOT_WRITE_TOKEN: "write-token",
     WRITE_SOURCE: "remote",
     WRITES_ENABLED: true,
   };
@@ -225,7 +220,7 @@ describe("deleteGroup", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(
-      "https://write.example/internal/console/config/groups/1203%40g.us",
+      "https://bot.example/internal/console/config/groups/1203%40g.us",
     );
     expect(calls[0].init.method).toBe("POST");
     expect((calls[0].init.headers as Record<string, string>).authorization).toBe(
@@ -316,7 +311,6 @@ describe("writeConfig", () => {
   });
 
   const REMOTE = {
-    BOT_WRITE_API_BASE_URL: "https://bot.example", BOT_WRITE_TOKEN: "t",
     WRITE_SOURCE: "remote", WRITES_ENABLED: true,
   };
 
@@ -441,13 +435,12 @@ describe("updateCampaignCaptions", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { updateCampaignCaptions } = await loadWith("remote", {
       WRITE_SOURCE: "remote", WRITES_ENABLED: true,
-      BOT_WRITE_API_BASE_URL: "https://write.example/", BOT_WRITE_TOKEN: "write-key",
     });
     await updateCampaignCaptions("borehole", ["💧 {bot_number}\n\n{ref_link}"], { by: "Joseph" });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://write.example/internal/console/config/campaigns/borehole");
+    expect(url).toBe("https://bot.example/internal/console/config/campaigns/borehole");
     expect(init.method).toBe("POST");
-    expect(init.headers.authorization).toBe("Bearer write-key");
+    expect(init.headers.authorization).toBe("Bearer write-token");
     expect(JSON.parse(init.body)).toEqual({ fields: { captions: ["💧 {bot_number}\n\n{ref_link}"] }, actor: "Joseph" });
   });
   it("passes local copy as JSON stdin to the write bridge without shell interpolation", async () => {
@@ -475,8 +468,6 @@ describe("groupAction", () => {
   });
 
   const REMOTE = {
-    BOT_WRITE_API_BASE_URL: "https://write.example/",
-    BOT_WRITE_TOKEN: "write-token",
     WRITE_SOURCE: "remote",
     WRITES_ENABLED: true,
   };
@@ -514,7 +505,7 @@ describe("groupAction", () => {
       .resolves.toMatchObject(result);
 
     expect(calls[0].url).toBe(
-      "https://write.example/internal/console/groups/1203%40g.us/actions",
+      "https://bot.example/internal/console/groups/1203%40g.us/actions",
     );
     expect(calls[0].init.method).toBe("POST");
     expect((calls[0].init.headers as Record<string, string>).authorization).toBe(

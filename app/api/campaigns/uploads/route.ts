@@ -1,9 +1,10 @@
 import { apiOperator } from "@/src/lib/auth";
 import { NextResponse } from "next/server";
 import { WRITES_ENABLED } from "@/src/config";
-import { CAMPAIGN_SLUG, uploadError } from "@/src/domains/campaign-create";
+import { CAMPAIGN_SLUG, keyPrefixOf, uploadError } from "@/src/domains/campaign-create";
+import { getWorkspace } from "@/src/lib/workspace";
 import { getOverview, BotUnavailableError } from "@/src/lib/bot-client";
-import { canCreateCampaign } from "@/src/lib/write-capabilities";
+import { canCreateInWorkspace } from "@/src/lib/write-capabilities";
 import { imageUploadConfigured, signCampaignUpload } from "@/src/lib/campaign-upload";
 
 export async function POST(request: Request) {
@@ -26,16 +27,21 @@ export async function POST(request: Request) {
     if (typeof slug !== "string" || !CAMPAIGN_SLUG.test(slug)) return refuse("Enter a valid campaign name first.");
     const error = uploadError(image, slug);
     if (error) return refuse(error);
+    const workspace = await getWorkspace();
+    if (!workspace) return refuse("Sign in to continue.", 401);
     const overview = await getOverview(undefined, { fresh: true });
-    const gate = canCreateCampaign(WRITES_ENABLED, overview.writes);
+    const gate = canCreateInWorkspace(WRITES_ENABLED, overview.writes, workspace.id);
     if (!gate.allowed) return refuse(gate.reason, 403);
+    // Signed only under the prefix this workspace's bot names: never another's.
+    const placed = uploadError(image, slug, keyPrefixOf(overview.writes));
+    if (placed) return refuse(placed);
     if (overview.deletedCampaigns?.includes(slug) || overview.campaigns?.some((campaign) => campaign.slug === slug)) {
       return refuse("This campaign ID is already in use or has been deleted. Choose a different name.", 409);
     }
     return NextResponse.json(await signCampaignUpload(image), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof TypeError) return refuse("Upload metadata could not be read.");
-    if (error instanceof BotUnavailableError) return refuse(error.detail, 503);
+    if (error instanceof BotUnavailableError) return refuse(error.detail, error.status === 409 ? 409 : 503);
     return refuse("The upload URL could not be prepared. Try again.", 503);
   }
 }
