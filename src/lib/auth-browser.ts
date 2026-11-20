@@ -1,5 +1,6 @@
 "use client";
 import { safeReturnTo } from "./auth-types";
+import { DRAFT_FILES_DB } from "./campaign-files";
 
 export const AUTH_LOGOUT_EVENT = "genaie:logout";
 export const AUTH_UID_KEY = "genaie:auth-uid";
@@ -12,6 +13,9 @@ export function clearConsoleDrafts(scope: "session" | "all" = "all") {
       for (const key of Object.keys(storage)) if (key.startsWith("genaie:") || key.startsWith("genaie-")) storage.removeItem(key);
     } catch { /* Storage can be disabled; mounted drafts disappear on navigation. */ }
   }
+  // Pictures chosen for a new campaign are kept in IndexedDB, which is shared
+  // across tabs like localStorage, so they go only when every draft goes.
+  if (scope === "all") try { indexedDB.deleteDatabase(DRAFT_FILES_DB); } catch { /* No IndexedDB, nothing kept. */ }
 }
 export function loginLocation(): string {
   return `/login?returnTo=${encodeURIComponent(safeReturnTo(window.location.pathname + window.location.search))}`;

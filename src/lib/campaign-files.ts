@@ -1,7 +1,8 @@
 /** The chosen pictures, carried between the two creation steps without a round
  *  trip: an in-memory map for the client navigation, and IndexedDB so a reload
  *  in the caption step does not lose them. Nothing here leaves the browser. */
-const DB = "genaie-campaign-create";
+export const DRAFT_FILES_DB = "genaie-campaign-create";
+const DB = DRAFT_FILES_DB;
 const STORE = "pictures";
 const RECORD = "draft";
 

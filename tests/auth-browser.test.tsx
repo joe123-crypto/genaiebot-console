@@ -33,10 +33,26 @@ describe("browser identity and drafts", () => {
     render(<SessionBoundary uid="one"><span>Editor</span></SessionBoundary>); await screen.findByText("Editor");
     expect(localStorage.getItem(groupKey)).toBe("shared draft");
   });
+  it("adopts drafts with no recorded owner on the first signed-in load", async () => {
+    sessionStorage.setItem(draftKey, "pre-sign-in draft"); localStorage.setItem(groupKey, "pre-sign-in groups");
+    render(<SessionBoundary uid="one"><span>Editor</span></SessionBoundary>); await screen.findByText("Editor");
+    expect(sessionStorage.getItem(draftKey)).toBe("pre-sign-in draft"); expect(localStorage.getItem(groupKey)).toBe("pre-sign-in groups");
+    for (const storage of [sessionStorage, localStorage]) expect(storage.getItem(AUTH_UID_KEY)).toBe("one");
+  });
+  it("clears another user's tab drafts even when this browser's owner is unknown", async () => {
+    sessionStorage.setItem(AUTH_UID_KEY, "old-user"); sessionStorage.setItem(draftKey, "old draft");
+    render(<SessionBoundary uid="one"><span>Editor</span></SessionBoundary>); await screen.findByText("Editor");
+    expect(sessionStorage.getItem(draftKey)).toBeNull();
+  });
   it("clears console drafts without deleting unrelated browser data", () => {
     for (const storage of [sessionStorage, localStorage]) { storage.setItem(draftKey, "draft"); storage.setItem("unrelated", "keep"); }
     clearConsoleDrafts();
     for (const storage of [sessionStorage, localStorage]) { expect(storage.getItem(draftKey)).toBeNull(); expect(storage.getItem("unrelated")).toBe("keep"); }
+  });
+  it("deletes stored campaign pictures only when every draft is cleared", () => {
+    const deleteDatabase = vi.fn(); vi.stubGlobal("indexedDB", { deleteDatabase });
+    clearConsoleDrafts("session"); expect(deleteDatabase).not.toHaveBeenCalled();
+    clearConsoleDrafts(); expect(deleteDatabase).toHaveBeenCalledExactlyOnceWith("genaie-campaign-create");
   });
   it("reroutes expired API sessions without treating failures as bot outages", async () => {
     const replace = vi.fn(); vi.stubGlobal("window", { location: { pathname: "/campaigns", search: "?q=trees", replace } });

@@ -7,8 +7,13 @@ export function SessionBoundary({ uid, children }: { uid: string; children: Reac
   const [readyUid, setReadyUid] = useState<string>();
   useEffect(() => {
     try {
-      if (localStorage.getItem(AUTH_UID_KEY) !== uid) clearConsoleDrafts();
-      else if (sessionStorage.getItem(AUTH_UID_KEY) !== uid) clearConsoleDrafts("session");
+      // No recorded owner means drafts from before sign-in existed (or storage
+      // was already cleared on sign-out), so adopt them; clear only when the
+      // drafts are known to belong to someone else.
+      const local = localStorage.getItem(AUTH_UID_KEY);
+      const session = sessionStorage.getItem(AUTH_UID_KEY);
+      if (local !== null && local !== uid) clearConsoleDrafts();
+      else if (session !== null && session !== uid) clearConsoleDrafts("session");
       localStorage.setItem(AUTH_UID_KEY, uid);
       sessionStorage.setItem(AUTH_UID_KEY, uid);
     } catch { /* Editors already handle unavailable storage. */ }

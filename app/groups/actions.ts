@@ -444,7 +444,8 @@ export async function removeDiscoveredGroupAction(
   jid: string,
   observedThrough: string,
 ): Promise<WriteOutcome & { refreshLive?: boolean }> {
-  const operator = await requireOperator();
+  // The bot's discovery-removal API takes no actor, so nothing is recorded.
+  await requireOperator();
   if (!WRITES_ENABLED) return READ_ONLY_OUTCOME;
   if (typeof jid !== "string" || jid.length > 128 || !/^\d+(?:-\d+)?@g\.us$/.test(jid)) {
     return { ok: false, detail: "No valid group was named." };

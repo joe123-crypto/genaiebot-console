@@ -119,7 +119,8 @@ settings because emulator tokens are unsigned.
 Protected APIs return JSON `401`, not login HTML. Pages and server actions redirect
 to `/login?returnTo=…`. Only local return paths are accepted. Session expiry retains
 existing browser-stored drafts for the same user; signing out or switching identity
-clears console draft storage. Rejected server-to-bot credentials return a service
+clears console draft storage, including pictures kept for an unsaved new campaign.
+Drafts saved before a browser's first sign-in are adopted by that first operator. Rejected server-to-bot credentials return a service
 error (`502`) rather than expiring a valid browser session.
 Audit fields accepted by existing bot APIs identify the server-verified email and UID.
 Actor labels honor the existing 120-character backend limit: long emails are

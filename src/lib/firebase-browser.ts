@@ -21,7 +21,8 @@ function initialize() {
   return { auth, ready: setPersistence(auth, inMemoryPersistence) };
 }
 export async function firebaseBrowserAuth() {
-  initialized ??= initialize();
-  await initialized.ready;
-  return initialized.auth;
+  const current = initialized ??= initialize();
+  // A failed setup must not be cached, or "Retry sign-in setup" cannot recover.
+  try { await current.ready; } catch (error) { if (initialized === current) initialized = undefined; throw error; }
+  return current.auth;
 }
