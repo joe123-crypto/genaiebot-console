@@ -22,7 +22,9 @@ export type NewCampaign = {
   schedule: { time: string; timezone: string; weekdays: number[] };
   groups: { jid: string; weekdays?: number[]; paused?: boolean }[];
   tracking?: Tracking; comment?: string; weeklyComment?: string;
-  timeoutSeconds?: number; failureAlertTo?: string;
+  /** No run timeout: the bot derives it from the group count, so a campaign's
+   *  run gets as long as its groups need. */
+  failureAlertTo?: string;
 };
 /** Everything the create form collects; captions are written in the caption step. */
 export type CampaignDraft = Omit<NewCampaign, "captions">;
@@ -102,13 +104,14 @@ export function campaignDraftError(value: unknown, keyPrefix?: string): string |
   if (new Set(campaign.images.map((image) => image.filename)).size !== campaign.images.length || new Set(campaign.images.map((image) => image.key)).size !== campaign.images.length) return "Remove duplicate pictures or filenames.";
   if (!campaign.schedule || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(campaign.schedule.time) || !weekdays(campaign.schedule.weekdays)) return "Choose a posting time and at least one weekday.";
   try { if (!campaign.schedule.timezone) return "Choose a timezone."; new Intl.DateTimeFormat("en", { timeZone: campaign.schedule.timezone }); } catch { return "Enter a valid timezone, such as Africa/Harare."; }
-  if (!Array.isArray(campaign.groups) || !campaign.groups.length || campaign.groups.length > 100 || new Set(campaign.groups.map((group) => group?.jid)).size !== campaign.groups.length) return "Select between 1 and 100 different active groups.";
+  // No upper bound: the bot gives a bigger campaign a longer run rather than a
+  // ceiling. The 60 KiB request cap below still bounds one request.
+  if (!Array.isArray(campaign.groups) || !campaign.groups.length || new Set(campaign.groups.map((group) => group?.jid)).size !== campaign.groups.length) return "Select at least one active group, each only once.";
   for (const group of campaign.groups) {
     if (!group || typeof group.jid !== "string" || !/^[0-9-]+@g\.us$/.test(group.jid)) return "A selected group ID is invalid.";
     if (group.paused !== undefined && typeof group.paused !== "boolean") return "A group pause must be on or off.";
     if (group.weekdays !== undefined && (!weekdays(group.weekdays) || group.weekdays.some((day) => !campaign.schedule.weekdays.includes(day)))) return "Group weekdays must be a nonempty subset of the campaign weekdays.";
   }
-  if (campaign.timeoutSeconds !== undefined && (!Number.isInteger(campaign.timeoutSeconds) || campaign.timeoutSeconds < 60 || campaign.timeoutSeconds > 7200)) return "Execution timeout must be between 60 and 7200 seconds.";
   if (campaign.failureAlertTo && !/^\+[1-9][0-9]{6,14}$/.test(campaign.failureAlertTo)) return "Use an international phone number for failure alerts.";
   if (campaign.tracking !== undefined) {
     if (!campaign.tracking || typeof campaign.tracking !== "object" || Array.isArray(campaign.tracking) || typeof campaign.tracking.prefix !== "string" || !/^[A-Za-z0-9-]{1,64}$/.test(campaign.tracking.prefix)) return "Enter a tracking prefix using letters, numbers or dashes, or leave tracking blank.";

@@ -10,7 +10,7 @@ import { CampaignImages } from "@/app/campaigns/_components/campaign-images";
 import { CampaignSwitch } from "@/app/campaigns/_components/campaign-switch";
 import { CaptionVariants } from "@/app/campaigns/_components/caption-variants";
 import { campaignAssetDir } from "@/src/lib/campaign-images";
-import { campaignOffLabel, campaignTitle, groupLabel } from "@/src/lib/format";
+import { campaignOffLabel, campaignTitle, groupLabel, worstCaseRunSeconds } from "@/src/lib/format";
 import { displaySlotLabel, displayStamp } from "@/src/lib/timezone";
 import { useDisplayTimezone } from "@/app/_components/timezone-context";
 import { canWrite, type WriteGate } from "@/src/lib/write-capabilities";
@@ -114,7 +114,8 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
 
     {notice("Campaign preview", detail.preview, previewSnapshot?.receivedAt)}
     <div className="grid grid-stats" style={{ marginBottom: 16 }}>
-      <Stat label="Groups targeted" value={campaign?.targetCount ?? "—"} />
+      <Stat label="Groups targeted" value={campaign?.targetCount ?? "—"}
+        note={campaign?.targetCount ? `Each run takes up to about ${Math.round(worstCaseRunSeconds(campaign.targetCount) / 60)} min` : undefined} />
       <Stat label="Posting today" value={sendingToday ?? "—"} note={preview
         ? `${heldBack} held back by caps${pausedRows > 0 ? ` · ${pausedRows} paused` : ""}` : "Preview unavailable"} />
       <Stat label="Caption variants" value={preview?.captions.length ?? "—"} />
