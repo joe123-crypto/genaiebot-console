@@ -10,10 +10,16 @@ describe("campaign creation", () => {
   it.each([ ["blank caption", { captions: [" "] }], ["no pictures", { images: [] }], ["no groups", { groups: [] }],
     ["inactive-shaped group", { groups: [{ jid: "someone" }] }], ["invalid time", { schedule: { time: "25:10", timezone: "Africa/Harare", weekdays: [0] } }],
     ["timezone", { schedule: { time: "10:10", timezone: "nope", weekdays: [0] } }], ["empty weekdays", { schedule: { time: "10:10", timezone: "Africa/Harare", weekdays: [] } }],
-    ["boolean timeout", { timeoutSeconds: true }], ["tracking without prefix", { tracking: { number: "+263700000000" } }],
+    ["duplicate groups", { groups: [{ jid: "1@g.us" }, { jid: "1@g.us" }] }], ["tracking without prefix", { tracking: { number: "+263700000000" } }],
     ["outside group weekdays", { schedule: { time: "10:10", timezone: "Africa/Harare", weekdays: [0] }, groups: [{ jid: "1@g.us", weekdays: [1] }] }] ])("rejects %s", (_, patch) => {
       expect(campaignCreateError({ ...validCampaign(), ...patch })).toBeTruthy();
     });
+  it("has no ceiling on how many groups a campaign posts to", () => {
+    // The bot used to refuse more than 100, and more than its two-hour job
+    // reached at full spacing. It now gives a bigger campaign a longer run.
+    const groups = Array.from({ length: 250 }, (_, n) => ({ jid: `1203639${String(n).padStart(11, "0")}@g.us` }));
+    expect(campaignCreateError({ ...validCampaign(), groups })).toBeUndefined();
+  });
   it("accepts the details on their own, and still demands captions to create", () => {
     const { captions, ...draft } = validCampaign();
     expect(captions).toBeTruthy();

@@ -9,6 +9,7 @@ import { ALL_WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignImag
   type CampaignDraft, type CampaignImageUpload } from "@/src/domains/campaign-create";
 import { CAMPAIGN_DRAFT_KEY, parseCampaignDraft } from "@/src/lib/campaign-draft";
 import { draftFiles, keepDraftFiles } from "@/src/lib/campaign-files";
+import { worstCaseRunSeconds } from "@/src/lib/format";
 import type { Group, Tracking } from "@/src/lib/types";
 import type { WriteGate } from "@/src/lib/write-capabilities";
 
@@ -33,7 +34,6 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
   const [tracking, setTracking] = useState<Tracking>({});
   const [comment, setComment] = useState("");
   const [weeklyComment, setWeeklyComment] = useState("");
-  const [timeout, setTimeoutValue] = useState("");
   const [alertTo, setAlertTo] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -63,13 +63,15 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
       return [{ id: crypto.randomUUID(), file, preview, uploaded: image }];
     })));
     setTracking(draft.tracking ?? {}); setComment(draft.comment ?? ""); setWeeklyComment(draft.weeklyComment ?? "");
-    setTimeoutValue(draft.timeoutSeconds ? String(draft.timeoutSeconds) : ""); setAlertTo(draft.failureAlertTo ?? "");
+    setAlertTo(draft.failureAlertTo ?? "");
   }, []);
   const slug = campaignSlug(name);
   const campaignDays = cadence === "daily" ? ALL_WEEKDAYS : days;
   const query = search.trim().toLowerCase();
   const matching = groups.filter((group) => `${group.name ?? "Unnamed group"} ${group.jid} ${group.account}`.toLowerCase().includes(query));
   const unavailable = Object.keys(selected).filter((jid) => !groups.some((group) => group.jid === jid && group.status === "active"));
+  // A paused assignment sends nothing, so it does not lengthen the run.
+  const sending = Object.values(selected).filter((settings) => !settings.paused).length;
   function pick(files: FileList | null) {
     if (!files) return;
     const list = Array.from(files);
@@ -114,7 +116,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
         groups: Object.entries(selected).map(([jid, settings]) => ({ jid, ...settings })),
         ...(Object.keys(configuredTracking).length ? { tracking: configuredTracking } : {}),
         ...(comment.trim() ? { comment: comment.trim() } : {}), ...(weeklyComment.trim() ? { weeklyComment: weeklyComment.trim() } : {}),
-        ...(timeout ? { timeoutSeconds: Number(timeout) } : {}), ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
+        ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
       const invalid = campaignDraftError(draft);
       if (invalid) { setError(invalid); return; }
       // Nothing is sent yet: the pictures upload when the campaign is created.
@@ -159,7 +161,8 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
         <div><label className="modal-label" htmlFor="campaign-cadence">Repeat</label><select className="modal-input" id="campaign-cadence" value={cadence} onChange={(event) => setCadence(event.target.value)}><option value="daily">Every day</option><option value="weekdays">Selected weekdays</option></select></div></div>
         {cadence === "weekdays" ? <Days label="Campaign weekdays" value={days} onChange={setDays} /> : null}
       </section>
-      <section className="card card-pad"><h2 className="card-title">Groups</h2><p className="card-note">Each group uses its existing sending line. {Object.keys(selected).length} selected.</p>
+      <section className="card card-pad"><h2 className="card-title">Groups</h2><p className="card-note">Each group uses its existing sending line. {Object.keys(selected).length} selected.
+        {sending ? ` Each run takes up to about ${Math.round(worstCaseRunSeconds(sending) / 60)} min; the bot gives it as long as its groups need.` : ""}</p>
         {paginated ? <><button type="button" className="btn" onClick={() => setPickerOpen(true)}>Add groups</button>
           {pickerOpen ? <PaginatedPicker kind="groups" exclude={Object.keys(selected)} close={() => setPickerOpen(false)} choose={rows => {
             setPickedGroups(previous => [...previous, ...rows.map(row => ({ jid: row.id, name: row.name, account: row.account ?? "default", status: row.status ?? "active" }))]);
@@ -191,7 +194,6 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
         <h3>Operational settings</h3>
         <label className="modal-label" htmlFor="campaign-note">Campaign note</label><textarea id="campaign-note" className="modal-input" maxLength={2000} value={comment} onChange={(event) => setComment(event.target.value)} />
         <label className="modal-label" htmlFor="campaign-weekly-note">Weekly note</label><textarea id="campaign-weekly-note" className="modal-input" maxLength={2000} value={weeklyComment} onChange={(event) => setWeeklyComment(event.target.value)} />
-        <label className="modal-label" htmlFor="campaign-timeout">Execution timeout (seconds)</label><input id="campaign-timeout" className="modal-input" type="number" min={60} max={7200} placeholder="7200" value={timeout} onChange={(event) => setTimeoutValue(event.target.value)} />
         <label className="modal-label" htmlFor="campaign-alert">Failure alert WhatsApp number</label><input id="campaign-alert" className="modal-input" placeholder="Off by default" value={alertTo} onChange={(event) => setAlertTo(event.target.value)} />
       </details>
     </fieldset>
