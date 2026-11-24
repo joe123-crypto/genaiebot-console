@@ -751,8 +751,6 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .caption-card-text { height: 330px; overflow: auto; }
 .caption-back { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 16px; }
 .caption-save, .caption-undo, .caption-section-title { display: inline-flex; align-items: center; gap: 8px; }
-.caption-editor-page .btn-primary { color: var(--text-inverse); background: var(--primary); border-color: var(--primary); }
-.caption-editor-page .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 .caption-editor-page { max-width: 1440px; margin-inline: auto; }
 .caption-editor-page .page-head { align-items: center; }
 .caption-editor-feedback { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin: -4px 0 18px; }
@@ -902,8 +900,6 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .campaign-group-dialog { padding: 16px; }
 }
 .row-action:disabled { color: var(--text-faint); opacity: 0.45; cursor: not-allowed; }
-.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
-.btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
 .customer-bot, .customer-bot-review { display: grid; gap: 14px; }
 .customer-bot-status, .customer-bot-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -1141,6 +1137,9 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 
 .btn:hover:not(:disabled) { background: var(--surface-muted); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
 .btn-danger {
   background: var(--danger);
