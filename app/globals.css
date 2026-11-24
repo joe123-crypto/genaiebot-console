@@ -711,10 +711,11 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   font-size: 12px; white-space: nowrap; pointer-events: none;
 }
 
-/* An operator watching a timeline does not need a heartbeat to read it. */
+/* An operator watching a timeline does not need a heartbeat to read it, and
+   neither does one watching their bot being created. */
 
 @media (prefers-reduced-motion: reduce) {
-  .run-dot.is-live { animation: none; }
+  .run-dot.is-live, .setup-spinner { animation: none; }
 }
 
 /* --------------------------------------------------------------- misc ------ */
@@ -751,8 +752,6 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .caption-card-text { height: 330px; overflow: auto; }
 .caption-back { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 16px; }
 .caption-save, .caption-undo, .caption-section-title { display: inline-flex; align-items: center; gap: 8px; }
-.caption-editor-page .btn-primary { color: var(--text-inverse); background: var(--primary); border-color: var(--primary); }
-.caption-editor-page .btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 .caption-editor-page { max-width: 1440px; margin-inline: auto; }
 .caption-editor-page .page-head { align-items: center; }
 .caption-editor-feedback { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin: -4px 0 18px; }
@@ -903,8 +902,6 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .campaign-group-dialog { padding: 16px; }
 }
 .row-action:disabled { color: var(--text-faint); opacity: 0.45; cursor: not-allowed; }
-.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
-.btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
 .customer-bot, .customer-bot-review { display: grid; gap: 14px; }
 .customer-bot-status, .customer-bot-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -1142,6 +1139,9 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 
 .btn:hover:not(:disabled) { background: var(--surface-muted); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-strong); }
 
 .btn-danger {
   background: var(--danger);
@@ -1384,6 +1384,28 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .account-pairing { text-align: center; }
 .account-pairing img { display: block; width: min(280px, 100%); height: auto; margin: 18px auto; image-rendering: pixelated; }
 @media (max-width: 600px) { .account-stats { gap: 22px; } .account-actions { gap: 8px; } }
+
+/* --------------------------------------------------------------- setup ----- */
+/* Creating a workspace's bot: the stages it is waiting on, in order. */
+.setup-steps {
+  list-style: none; margin: 14px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.setup-step {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--text-faint);
+}
+.setup-step svg { flex: 0 0 auto; }
+.setup-step.is-done { color: var(--text-muted); }
+.setup-step.is-done svg { color: var(--success); }
+.setup-step.is-current { color: var(--text); font-weight: 600; }
+.setup-step.is-current svg { color: var(--primary); }
+.setup-step.is-failed { color: var(--danger); font-weight: 600; }
+.setup-spinner { animation: setup-spin 1s linear infinite; }
+@keyframes setup-spin { to { transform: rotate(360deg); } }
+.setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.console-nav-item.is-disabled { color: var(--text-faint); cursor: default; }
+.console-nav-item.is-disabled:hover { background: none; }
 
 /* The campaign's own on/off switch, above its statistics. */
 .campaign-read-notice {

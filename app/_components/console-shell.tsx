@@ -19,6 +19,7 @@ export function ConsoleShell({
   counts,
   attention = [],
   operator,
+  navDisabled,
   homeLayout,
   campaignsLayout,
   groupsLayout,
@@ -27,13 +28,15 @@ export function ConsoleShell({
   counts: NavCounts;
   attention?: Attention[];
   operator: { name: string; meta: string };
+  /** No bot yet: every section would only redirect back here. */
+  navDisabled?: boolean;
   homeLayout?: boolean;
   campaignsLayout?: boolean;
   groupsLayout?: boolean;
 }) {
   const initial = operator.name.trim().charAt(0).toUpperCase() || "?";
   const navigation = <>
-    <ConsoleNav counts={counts} />
+    <ConsoleNav counts={counts} disabled={navDisabled} />
     <div className="console-account">
       <span className="console-avatar" aria-hidden>{initial}</span>
       <span>

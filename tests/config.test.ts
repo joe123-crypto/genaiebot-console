@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  */
 async function configWith(env: Record<string, string>) {
   vi.resetModules();
-  for (const name of ["BOT_SOURCE", "CONSOLE_WRITES", "NODE_ENV",
+  for (const name of ["BOT_SOURCE", "CONSOLE_WRITES", "NODE_ENV", "BOT_PROVISIONING",
                       "BOT_API_BASE_URL", "BOT_API_TOKEN", "BOT_WRITE_API_BASE_URL", "BOT_WRITE_TOKEN"]) {
     vi.stubEnv(name, env[name] ?? "");
   }
@@ -59,5 +59,21 @@ describe("write switch", () => {
     const config = await configWith({ CONSOLE_WRITES: "1", BOT_SOURCE: "local", NODE_ENV: "development" });
     expect(config.WRITES_ENABLED).toBe(true);
     expect(config.ACCOUNT_WRITES_ENABLED).toBe(false);
+  });
+});
+
+describe("creating a bot from the console", () => {
+  it("is off unless this deployment asks for it", async () => {
+    expect((await configWith({})).BOT_PROVISIONING).toBe("none");
+    expect((await configWith({ BOT_PROVISIONING: "railway" })).BOT_PROVISIONING).toBe("none");
+  });
+
+  it("stubs a run only outside production, whatever production is told", async () => {
+    expect((await configWith({ BOT_PROVISIONING: "stub", NODE_ENV: "development" })).BOT_PROVISIONING).toBe("stub");
+    expect((await configWith({ BOT_PROVISIONING: "stub", NODE_ENV: "production" })).BOT_PROVISIONING).toBe("none");
+  });
+
+  it("does not arm itself off the editing switch: a workspace with no bot has nothing to write to", async () => {
+    expect((await configWith({ CONSOLE_WRITES: "1" })).BOT_PROVISIONING).toBe("none");
   });
 });

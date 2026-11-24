@@ -12,6 +12,25 @@ server credentials, which includes `BOT_TOKEN_SECRET`:
 alias wsadmin='node --env-file=.env.local scripts/workspace-admin.mjs'
 ```
 
+## From the console (development only)
+
+`/setup` can run the creation itself: the user clicks **Create my bot** and
+watches the stages. Behind it is a stub, not a provisioner -- it builds nothing,
+and `BOT_PROVISIONING` can never be `stub` in production, so every real bot is
+still created by the runbook below.
+
+```sh
+BOT_PROVISIONING=stub npm run dev
+```
+
+With `BOT_PROVISIONING_STUB_URL` set to a bot's origin, the run's last stage
+performs the real handshake and connects it, exactly as `connect-bot` does, and
+the console comes out of it working. Without it, the run finishes as simulated
+and the screen says nothing was created.
+
+Linking WhatsApp is not part of that run. It stays on the Lines page, and needs
+`CONSOLE_WRITES=1` as well.
+
 ## A new user's bot
 
 1. **Find the workspace.** The user reads its ID off `/setup`, or:

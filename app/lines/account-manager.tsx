@@ -10,6 +10,7 @@ import { campaignTitle } from '@/src/lib/format';
 import { displayStamp } from '@/src/lib/timezone';
 import { useDisplayTimezone } from '@/app/_components/timezone-context';
 import { ConfirmDialog } from '@/app/_components/confirm-dialog';
+import { usePolling } from '@/app/_components/use-polling';
 import { setContactLineAction, syncLineNumberAction } from '@/app/lines/actions';
 import { linkedNumberChange } from '@/src/domains/line-edit';
 import { canWrite } from '@/src/lib/write-capabilities';
@@ -35,41 +36,6 @@ async function request<T>(url: string, body?: Record<string, unknown>): Promise<
 const message = (error: unknown) => error instanceof Error ? error.message : 'Account controls are unavailable.';
 const configPending = (error: unknown) => error instanceof AccountRequestError &&
   [409, 503].includes(error.status) && /gateway configuration is still being applied/i.test(error.message);
-
-/** Poll after each completed read; hidden/offline tabs do no background work. */
-function usePolling(read: () => Promise<void>, interval: number, enabled = true) {
-  useEffect(() => {
-    if (!enabled) return;
-    let stopped = false;
-    let running = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let active = document.visibilityState === 'visible' && navigator.onLine;
-    async function tick() {
-      if (stopped || running || !active) return;
-      running = true;
-      await read();
-      running = false;
-      if (!stopped && active) timer = setTimeout(tick, interval);
-    }
-    function availability() {
-      const previous = active;
-      active = document.visibilityState === 'visible' && navigator.onLine;
-      if (!active) clearTimeout(timer);
-      else if (!previous) void tick();
-    }
-    void tick();
-    document.addEventListener('visibilitychange', availability);
-    window.addEventListener('online', availability);
-    window.addEventListener('offline', availability);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      document.removeEventListener('visibilitychange', availability);
-      window.removeEventListener('online', availability);
-      window.removeEventListener('offline', availability);
-    };
-  }, [read, interval, enabled]);
-}
 
 function Modal({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
