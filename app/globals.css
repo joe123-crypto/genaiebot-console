@@ -1648,8 +1648,47 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .login-brand { display: block; font-size: 24px; font-weight: 700; margin-bottom: 28px; }
 .login-card h1 { font-size: 24px; line-height: 1.25; margin-bottom: 12px; }
 .login-card p { line-height: 1.5; color: #637083; }
-.login-google { width: 100%; justify-content: center; gap: 12px; margin-top: 20px; min-height: 46px; }
-.login-card .login-error { color: #ad2626; font-size: 14px; min-height: 21px; }
+/* .btn is inline-block, so the sign-in button has to declare its own flow before
+   gap and centring mean anything. */
+.login-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  margin-top: 24px;
+  padding: 0 16px;
+  font-size: 15px;
+  background: var(--surface);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.login-google:hover:not(:disabled) { background: var(--surface); border-color: #b9c6d6; box-shadow: var(--shadow-pop); }
+.login-google:active:not(:disabled) { background: var(--surface-muted); box-shadow: var(--shadow-card); }
+/* A deliberate resting state rather than the generic half-faded button. */
+.login-google:disabled { opacity: 1; background: var(--surface-muted); border-color: var(--border); color: var(--text-faint); box-shadow: none; }
+.login-google-mark { flex: none; }
+.login-google:disabled .login-google-mark { filter: grayscale(1); opacity: 0.55; }
+.login-spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: login-spin 700ms linear infinite;
+}
+@keyframes login-spin { to { transform: rotate(360deg); } }
+.login-card .login-error { color: #9e3123; font-size: 13px; line-height: 1.45; min-height: 18px; margin-top: 16px; }
+.login-card .login-error:not(:empty) {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  text-align: left;
+}
 
 /* Sign-in alone gets a sky behind it; the session-loading flash keeps the plain canvas. */
 .login-page { position: relative; overflow: hidden; isolation: isolate; }
@@ -1694,6 +1733,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 
 @media (prefers-reduced-motion: reduce) {
   .login-aurora-sky, .login-aurora-glow, .login-aurora-ember { animation: none; }
+  .login-spinner { animation: none; }
 }
 .console-sign-out { padding: 0 16px 16px; }
 .console-sign-out .btn { width: 100%; }
