@@ -21,6 +21,27 @@ export type BotSource = "local" | "remote";
 export const BOT_SOURCE: BotSource =
   process.env.BOT_SOURCE?.trim() === "local" && process.env.NODE_ENV !== "production" ? "local" : "remote";
 
+export type ProvisionSource = "stub" | "none";
+
+/**
+ * Whether `/setup` can create a workspace's bot itself.
+ *
+ * `none` everywhere except an explicit `BOT_PROVISIONING=stub` in development,
+ * which walks the creation screen through its stages without building anything.
+ * Production is never anything but `none`: until a real provisioner exists, a
+ * bot is still created by hand (`docs/provision-bot.md`), and a screen that
+ * claimed otherwise would be lying to the one user who cannot check.
+ */
+export const BOT_PROVISIONING: ProvisionSource =
+  process.env.BOT_PROVISIONING?.trim() === "stub" && process.env.NODE_ENV !== "production" ? "stub" : "none";
+
+/**
+ * Development only: a bot origin the stub's last stage really connects to, so
+ * the finished run leaves a working console rather than a simulated one. Unset,
+ * the stub writes nothing and the screen says the run was simulated.
+ */
+export const BOT_PROVISIONING_STUB_URL = process.env.BOT_PROVISIONING_STUB_URL?.trim() || "";
+
 /** Reads and writes always reach the same bot: the workspace's own. */
 export const WRITE_SOURCE: BotSource = BOT_SOURCE;
 

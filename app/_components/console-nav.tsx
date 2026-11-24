@@ -23,8 +23,24 @@ const items: ReadonlyArray<{ href: string; label: string; icon: LucideIcon }> = 
   { href: "/settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
-export function ConsoleNav({ counts }: { counts: NavCounts }) {
+export function ConsoleNav({ counts, disabled = false }: { counts: NavCounts; disabled?: boolean }) {
   const pathname = usePathname() || "/";
+
+  // Without a bot every section redirects straight back to setup, so they are
+  // shown as the places they will be rather than as links that go nowhere.
+  if (disabled) {
+    return (
+      <nav className="console-nav" aria-label="Console sections">
+        {items.map(({ href, label, icon: Icon }) => (
+          <span key={href} className="console-nav-item is-disabled" aria-disabled="true"
+                title="Available once your bot is connected.">
+            <Icon size={17} strokeWidth={2} aria-hidden />
+            <span>{label}</span>
+          </span>
+        ))}
+      </nav>
+    );
+  }
 
   return (
     <nav className="console-nav" aria-label="Console sections">
