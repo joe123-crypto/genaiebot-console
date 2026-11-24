@@ -712,6 +712,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 }
 
 /* An operator watching a timeline does not need a heartbeat to read it. */
+
 @media (prefers-reduced-motion: reduce) {
   .run-dot.is-live { animation: none; }
 }
@@ -818,6 +819,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   .caption-chat-bottom { padding: 12px; }
   .caption-send span { display: none; }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .caption-chat-history { scroll-behavior: auto; }
 }
@@ -1696,29 +1698,34 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .login-aurora > span { position: absolute; display: block; }
 /* Sampled from the reference: a vertical blue-to-ember wash, uniform across the width. */
 .login-aurora-sky {
-  inset: -16% 0;
+  inset: -30% 0;
   background: linear-gradient(180deg,
-    #6895fc 0%, #6895fc 12.12%, #8cb1f8 15.15%, #accdfa 18.18%, #c7dcfb 21.21%, #d6e6f6 24.24%,
-    #e5eef7 27.27%, #eef1f6 31.06%, #f3f5f4 34.85%, #eeedeb 39.39%, #eceee9 43.94%,
-    #f2efea 50.00%, #f1ede4 53.79%, #f7ead7 57.58%, #fae1b9 61.36%, #fcd39d 65.15%,
-    #fec87e 68.94%, #fcbf64 72.73%, #fcad48 76.52%, #fc9a39 78.79%, #fb812c 81.06%,
-    #f96422 83.33%, #fd471f 85.61%, #fc341b 87.88%, #fc341b 100%);
+    #6895fc 0%, #6895fc 18.75%, #8cb1f8 21.25%, #accdfa 23.75%, #c7dcfb 26.25%, #d6e6f6 28.75%,
+    #e5eef7 31.25%, #eef1f6 34.38%, #f3f5f4 37.50%, #eeedeb 41.25%, #eceee9 45.00%,
+    #f2efea 50.00%, #f1ede4 53.12%, #f7ead7 56.25%, #fae1b9 59.38%, #fcd39d 62.50%,
+    #fec87e 65.62%, #fcbf64 68.75%, #fcad48 71.88%, #fc9a39 73.75%, #fb812c 75.62%,
+    #f96422 77.50%, #fd471f 79.38%, #fc341b 81.25%, #fc341b 100%);
   will-change: transform;
-  animation: aurora-sky 18s ease-in-out infinite alternate;
+  animation: aurora-sky 24s ease-in-out infinite;
 }
 .login-aurora-glow {
   inset: -30%;
-  background: radial-gradient(44% 34% at 50% 20%, #5c8ffb8c, transparent 68%);
+  background: radial-gradient(44% 34% at 50% 16%, #2f6ffad1, transparent 68%);
   will-change: transform;
-  animation: aurora-glow 14s ease-in-out infinite alternate;
+  animation: aurora-glow 30s ease-in-out infinite;
 }
 .login-aurora-ember {
   inset: -30%;
-  background: radial-gradient(50% 36% at 50% 82%, #fc5f22a6, transparent 70%);
+  background: radial-gradient(48% 36% at 50% 84%, #fa3f0ddb, transparent 70%);
   will-change: transform;
-  animation: aurora-ember 12s ease-in-out infinite alternate;
+  animation: aurora-ember 26s ease-in-out infinite;
 }
-.login-aurora-dust { position: absolute; display: block; inset: 0; width: 100%; height: 100%; }
+.login-aurora-drift {
+  inset: -30%;
+  background: radial-gradient(40% 30% at 50% 50%, #f7a04ea1, transparent 68%);
+  will-change: transform;
+  animation: aurora-drift 38s ease-in-out infinite;
+}
 /* Static grain: the reference carries it, and animating it would cost a full repaint a frame. */
 .login-aurora-grain {
   inset: 0;
@@ -1727,12 +1734,35 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-@keyframes aurora-sky { from { transform: translate3d(0, -4%, 0) scaleY(1); } to { transform: translate3d(0, 4%, 0) scaleY(1.12); } }
-@keyframes aurora-glow { from { transform: translate3d(-22%, -6%, 0) scale(1); } to { transform: translate3d(24%, 8%, 0) scale(1.3); } }
-@keyframes aurora-ember { from { transform: translate3d(20%, 6%, 0) scale(1.28); } to { transform: translate3d(-22%, -5%, 0) scale(1); } }
+@keyframes aurora-sky {
+  0% { transform: translate3d(0, -14%, 0) scaleY(1); }
+  40% { transform: translate3d(0, 6%, 0) scaleY(1.14); }
+  70% { transform: translate3d(0, 14%, 0) scaleY(1.22); }
+  100% { transform: translate3d(0, -14%, 0) scaleY(1); }
+}
+@keyframes aurora-glow {
+  0% { transform: translate3d(-28%, -16%, 0) scale(1); }
+  25% { transform: translate3d(18%, -30%, 0) scale(1.22); }
+  50% { transform: translate3d(34%, 12%, 0) scale(1.05); }
+  75% { transform: translate3d(-10%, 26%, 0) scale(1.3); }
+  100% { transform: translate3d(-28%, -16%, 0) scale(1); }
+}
+@keyframes aurora-ember {
+  0% { transform: translate3d(30%, 18%, 0) scale(1.1); }
+  25% { transform: translate3d(-16%, 32%, 0) scale(1.34); }
+  50% { transform: translate3d(-34%, -10%, 0) scale(1.02); }
+  75% { transform: translate3d(12%, -28%, 0) scale(1.26); }
+  100% { transform: translate3d(30%, 18%, 0) scale(1.1); }
+}
+@keyframes aurora-drift {
+  0% { transform: translate3d(-20%, 24%, 0) scale(1.15); }
+  33% { transform: translate3d(26%, -8%, 0) scale(0.95); }
+  66% { transform: translate3d(-6%, -26%, 0) scale(1.28); }
+  100% { transform: translate3d(-20%, 24%, 0) scale(1.15); }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .login-aurora-sky, .login-aurora-glow, .login-aurora-ember { animation: none; }
+  .login-aurora-sky, .login-aurora-glow, .login-aurora-ember, .login-aurora-drift { animation: none; }
   .login-spinner { animation: none; }
 }
 .console-sign-out { padding: 0 16px 16px; }

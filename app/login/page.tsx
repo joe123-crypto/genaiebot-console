@@ -2,7 +2,6 @@ import { getOperator } from "@/src/lib/auth";
 import { safeReturnTo } from "@/src/lib/auth-types";
 import { redirect } from "next/navigation";
 import { LoginForm } from "./sign-in";
-import { AuroraDust } from "./_components/aurora-dust";
 export const dynamic = "force-dynamic";
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const returnTo = safeReturnTo((await searchParams).returnTo);
@@ -14,7 +13,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <span className="login-aurora-sky" />
     <span className="login-aurora-glow" />
     <span className="login-aurora-ember" />
-    <AuroraDust />
+    <span className="login-aurora-drift" />
     <span className="login-aurora-grain" />
   </div><section className="login-card" aria-labelledby="login-title">
     {/* eslint-disable-next-line @next/next/no-img-element */}
