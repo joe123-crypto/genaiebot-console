@@ -9,7 +9,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   let operator;
   try { operator = await getOperator(); } catch { unavailable = true; }
   if (operator) redirect(returnTo);
-  return <main className="login-page"><section className="login-card" aria-labelledby="login-title">
+  return <main className="login-page"><div className="login-aurora" aria-hidden="true">
+    <span className="login-aurora-sky" />
+    <span className="login-aurora-glow" />
+    <span className="login-aurora-ember" />
+    <span className="login-aurora-drift" />
+    <span className="login-aurora-grain" />
+  </div><section className="login-card" aria-labelledby="login-title">
     {/* eslint-disable-next-line @next/next/no-img-element */}
     <img src="/logo.png" alt="" width="44" height="100" />
     <span className="login-brand">Genaie</span>
