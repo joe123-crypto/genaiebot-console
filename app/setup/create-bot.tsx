@@ -168,7 +168,7 @@ export function CreateBot({ workspace, enabled }: {
         ) : state?.status === "running" ? (
           <>
             <h2 className="card-title">Creating your bot</h2>
-            <p className="card-note">This takes a moment. You can leave this page open.</p>
+            <p className="card-note">This takes a few minutes. Keep this page open while it finishes.</p>
             <div role="status" aria-live="polite">
               <Steps state={state} />
             </div>
