@@ -7,12 +7,13 @@ import type { Workspace } from "./workspace";
 /**
  * Creating a workspace's bot.
  *
- * The one place that knows how a bot comes into being, so that when a real
- * provisioner replaces the development stub nothing else has to change: a new
- * module exports these same two functions and the switch below gains a branch.
+ * The one place that knows how a bot comes into being. `railway` builds one for
+ * real (`./bot-provisioning-railway`); `stub` walks the screen through the
+ * stages without building anything, for development.
  *
  * With no provisioner configured there is nothing to offer, and saying so is
- * the honest answer -- a bot is still created by hand (`docs/provision-bot.md`).
+ * the honest answer -- a bot is then still created by hand
+ * (`docs/provision-bot.md`), which is also the fallback when a run goes wrong.
  */
 
 export class ProvisioningUnavailableError extends BotUnavailableError {
@@ -34,6 +35,7 @@ export function provisioningEnabled(): boolean {
  */
 export async function readProvisionState(workspace: Workspace): Promise<ProvisionState> {
   if (workspace.bot) return { status: "ready", readyAt: new Date().toISOString() };
+  if (BOT_PROVISIONING === "railway") return (await import("./bot-provisioning-railway")).readProvisionState(workspace);
   if (BOT_PROVISIONING === "stub") return (await import("./bot-provisioning-stub")).readProvisionState(workspace);
   throw new ProvisioningUnavailableError();
 }
@@ -42,6 +44,7 @@ export async function readProvisionState(workspace: Workspace): Promise<Provisio
  *  or a second click, never creates a second bot. */
 export async function startProvisioning(workspace: Workspace): Promise<ProvisionState> {
   if (workspace.bot) return { status: "ready", readyAt: new Date().toISOString() };
+  if (BOT_PROVISIONING === "railway") return (await import("./bot-provisioning-railway")).startProvisioning(workspace);
   if (BOT_PROVISIONING === "stub") return (await import("./bot-provisioning-stub")).startProvisioning(workspace);
   throw new ProvisioningUnavailableError();
 }

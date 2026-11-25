@@ -1,4 +1,5 @@
 import { apiOperator } from "@/src/lib/auth";
+import { BotConnectError } from "@/src/lib/bot-connect";
 import { BotUnavailableError } from "@/src/lib/bot-errors";
 import { provisioningEnabled, readProvisionState, startProvisioning } from "@/src/lib/bot-provisioning";
 import { getWorkspace } from "@/src/lib/workspace";
@@ -18,6 +19,10 @@ const json = (value: unknown, status = 200) =>
 
 function failure(error: unknown) {
   if (error instanceof BotUnavailableError) return json({ error: error.detail }, error.status ?? 503);
+  // A refused handshake is not a BotUnavailableError, so without this it would
+  // read as "something broke" when in fact the bot answered and was turned down.
+  // Its message is this console's own words, which is why it can be shown.
+  if (error instanceof BotConnectError) return json({ error: error.message }, 409);
   return json({ error: "Your bot's setup could not be read. Try again shortly." }, 502);
 }
 

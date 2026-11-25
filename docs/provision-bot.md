@@ -12,26 +12,126 @@ server credentials, which includes `BOT_TOKEN_SECRET`:
 alias wsadmin='node --env-file=.env.local scripts/workspace-admin.mjs'
 ```
 
-## From the console (development only)
+## From the console
 
-`/setup` can run the creation itself: the user clicks **Create my bot** and
-watches the stages. Behind it is a stub, not a provisioner -- it builds nothing,
-and `BOT_PROVISIONING` can never be `stub` in production, so every real bot is
-still created by the runbook below.
+With `BOT_PROVISIONING=railway`, `/setup` creates the bot itself: the user
+clicks **Create my bot** and watches the four stages, which are this runbook's
+steps with nobody running them.
+
+| Stage | What it does |
+|---|---|
+| Reserving your bot | A Railway service with no image yet, its own volume at `BOT_VOLUME_MOUNT_PATH`, its own domain |
+| Starting it up | Copies the template service's variables with this bot's own overridden, gives the service its `BOT_IMAGE` (which is what deploys it), and waits for the bot to answer `/internal/console/capabilities` for this workspace |
+| Setting up its config | Copies `settings/defaults` from `BOT_SETTINGS_TEMPLATE`, without `contact_account` |
+| Connecting it | The same handshake and registry write as `connect-bot` |
+
+Set `BOT_RAILWAY_API_TOKEN`, `BOT_RAILWAY_PROJECT_ID`,
+`BOT_RAILWAY_ENVIRONMENT_ID`, `BOT_TEMPLATE_SERVICE_ID` and `BOT_IMAGE` (see
+`.env.example`). With any of them missing, `/setup` says creating a bot is not
+available rather than starting a run it cannot finish.
+
+> **Do not set these yet.** Two things have to be true of the bot image first,
+> and neither is today:
+>
+> 1. **It must be published**, by exact tag. genaebot releases with
+>    `railway up` (uploaded source), so no registry image exists.
+> 2. **It must cold-start on an empty volume.** A provisioned bot gets a brand
+>    new, empty Railway volume, and `deploy/railway/entrypoint.sh` exits 78
+>    (`FATAL: openclaw.json not found`) unless the volume is already seeded. Its
+>    auto-seed path needs `openclaw-state.tgz` to have been uploaded to the
+>    volume first, which only `railway volume files upload` can do -- the public
+>    GraphQL API has no volume-file call, so the console cannot do it. Until the
+>    image can seed itself (bake the initial state in and let the auto-seed fall
+>    back to the image's copy), a run reaches `starting` and reports that the bot
+>    was created but would not start.
+>
+> Until both hold, leaving `BOT_IMAGE` unset is the safe state: provisioning
+> resolves to `none` and `/setup` hands over the workspace ID as before.
+
+**A run only moves while something is polling it.** It has no process of its
+own: the browser's poll advances it one step at a time. A closed tab stalls a
+run rather than breaking it -- each step checks whether its work has succeeded
+before it checks the deadline, so a deployment that finished while nobody was
+watching is adopted when the page is opened again.
+
+**Nothing is created twice.** Every id is written to
+`workspaces/{id}.provisioning` the instant Railway hands it over, and the
+service is looked up by name (`bot-<workspace id>`) before it is created. A
+failed run is re-armed in place by **Try again**, which carries on from what the
+last attempt built; only a dead deployment is replaced.
+
+**When a run fails**, nothing is connected: `workspaces/{id}.bot` is written
+only after the bot has answered for that workspace. To see where a run got to,
+read `provisioning` on `workspaces/{id}` -- it names the Railway service. The
+steps below are still the fallback for anything the console cannot finish.
+
+The service is the only resource looked up before it is created, so there is a
+narrow window -- a crash between `volumeCreate` returning and the id being
+written down -- in which a retry asks for a second volume and fails. If a run
+wedges that way, read `provisioning`, delete the stray resources in Railway,
+clear the field, and either start again or follow the steps below. A
+`provisioning` record the console cannot read is refused rather than started
+over, for the same reason: it may name resources that exist.
+
+**Deleting a service does not delete its volume.** A `serviceDelete` leaves the
+volume behind, unmounted and still billed, so cleaning up a stray bot is two
+calls:
+
+```sh
+railway api 'mutation { serviceDelete(id: "<service id>", environmentId: "<environment id>") }'
+railway api 'mutation { volumeDelete(volumeId: "<volume id>") }'
+```
+
+`provisioning.railway` on `workspaces/{id}` names both ids.
+
+`volumeDelete` answers `true` and marks the volume for deletion with a few days'
+retention rather than removing it at once, so a deleted volume keeps appearing
+in a project-wide `volumes` query. It is gone when its instance reports
+`isPendingDeletion: true` (or when the environment's own inventory stops listing
+it); the project-level list is not the one to read.
+
+Things worth knowing before the first run on a new project, each checked
+against the live Railway API:
+
+* **The service is created without an image, and gets one last.** A
+  `serviceCreate` that names an image deploys immediately, which would boot the
+  bot before its volume is mounted and before it holds any of its config. So the
+  order is service, volume, domain, variables, then the image -- and setting the
+  image is the deploy. A sourceless service starts nothing.
+* **The region is set with the image.** The volume is pinned to one region
+  (`BOT_RAILWAY_REGION`), and a service left to deploy elsewhere could not mount
+  it.
+* **A sealed Railway variable cannot be read back**, so it cannot be copied onto
+  a new service. A run refuses before it builds anything and names the variable.
+  Keep anything a bot cannot work without unsealed, or a shared project variable.
+  As of 2026-11-25 none of the `gateway` service's variables are sealed and all
+  seven a bot cannot work without are readable.
+* **`GENAIE_ASSET_KEY_PREFIX` is deliberately left unset** on a new bot, which
+  is what puts its pictures under `w/<id>/ads/`. The variable write replaces
+  rather than merges, so it cannot survive from the template.
+* **The `variables` query also returns the fourteen names Railway injects**
+  (`RAILWAY_SERVICE_ID`, `RAILWAY_VOLUME_ID`, `RAILWAY_PUBLIC_DOMAIN` and the
+  rest). They are dropped rather than copied: a new bot given the template's
+  would be holding another bot's identity as literal strings.
+
+Linking WhatsApp is not part of a run. It stays on the Lines page, and needs
+`CONSOLE_WRITES=1` as well.
+
+### Walking the screen through its stages without building anything
 
 ```sh
 BOT_PROVISIONING=stub npm run dev
 ```
 
-With `BOT_PROVISIONING_STUB_URL` set to a bot's origin, the run's last stage
-performs the real handshake and connects it, exactly as `connect-bot` does, and
-the console comes out of it working. Without it, the run finishes as simulated
-and the screen says nothing was created.
+The stub builds nothing, and `BOT_PROVISIONING` can never be `stub` in
+production. With `BOT_PROVISIONING_STUB_URL` set to a bot's origin, the run's
+last stage performs the real handshake and connects it, exactly as `connect-bot`
+does. Without it, the run finishes as simulated and the screen says so.
 
-Linking WhatsApp is not part of that run. It stays on the Lines page, and needs
-`CONSOLE_WRITES=1` as well.
+## A new user's bot, by hand
 
-## A new user's bot
+This is what `BOT_PROVISIONING=railway` automates, and the fallback when it is
+off or a run could not finish.
 
 1. **Find the workspace.** The user reads its ID off `/setup`, or:
    `wsadmin show --email <their email>`.

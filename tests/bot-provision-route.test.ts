@@ -87,3 +87,28 @@ describe("creating a bot over HTTP", () => {
     expect((await GET()).status).toBe(503);
   });
 });
+
+describe("what a failed run is answered with", () => {
+  it("shows a refused handshake's own words rather than calling it a breakage", async () => {
+    const { BotConnectError } = await import("@/src/lib/bot-connect");
+    state.read.mockRejectedValue(new BotConnectError("Your bot refused this workspace's token."));
+    const response = await GET();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "Your bot refused this workspace's token." });
+  });
+
+  it("shows a provisioner's own detail, with its own status", async () => {
+    const { BotUnavailableError } = await import("@/src/lib/bot-errors");
+    state.read.mockRejectedValue(new BotUnavailableError("This console cannot read the settings a new bot needs.", 503));
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "This console cannot read the settings a new bot needs." });
+  });
+
+  it("never passes an unrecognised failure's words on", async () => {
+    state.read.mockRejectedValue(new Error("Railway said: no access with token sk-live-123"));
+    const response = await GET();
+    expect(response.status).toBe(502);
+    expect(JSON.stringify(await response.json())).not.toContain("sk-live-123");
+  });
+});

@@ -17,9 +17,11 @@ Each workspace has its own bot deployment. The console's one registry,
 [Provisioning a workspace's bot](docs/provision-bot.md).
 
 A new sign-up's workspace has no bot. Its pages show `/setup`, and the console
-makes no bot call for it. That screen creates the bot where a provisioner is
-configured (`BOT_PROVISIONING`, development only so far); everywhere else it
-hands over the workspace ID for the manual runbook.
+makes no bot call for it. Where `BOT_PROVISIONING` names a provisioner, that
+screen creates the bot itself -- `railway` builds a real one, with its own
+service, volume, domain and config; `stub` walks the same screen without
+building anything. Everywhere else it hands over the workspace ID for the
+manual runbook.
 
 Live data on every screen comes from the user's own bot, through one of two
 adapters in [`src/lib/bot-client.ts`](src/lib/bot-client.ts):
@@ -104,7 +106,7 @@ npm run build
 | Customer Bot | Publish reply instructions and review the live data sources used for customer answers. Requires the companion bot API update. |
 | Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
 | WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
-| Setup | Where a workspace with no bot lands. Creates the bot and reports each stage when `BOT_PROVISIONING` names a provisioner -- so far a development stub only -- then sends the user to WhatsApp lines to link a number. Otherwise it shows the workspace ID for [the manual runbook](docs/provision-bot.md). |
+| Setup | Where a workspace with no bot lands. With `BOT_PROVISIONING=railway` it creates the bot for real -- its own Railway service, volume, domain and config -- and reports each stage, then sends the user to WhatsApp lines to link a number; `stub` walks the same screen without building anything. Otherwise it shows the workspace ID for [the manual runbook](docs/provision-bot.md). |
 
 Overview's total and a campaign's own total are not the same measure and will not
 add up: the bot filters Overview to group links so rollout smoke-test links stay

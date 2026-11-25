@@ -21,19 +21,97 @@ export type BotSource = "local" | "remote";
 export const BOT_SOURCE: BotSource =
   process.env.BOT_SOURCE?.trim() === "local" && process.env.NODE_ENV !== "production" ? "local" : "remote";
 
-export type ProvisionSource = "stub" | "none";
+export type ProvisionSource = "railway" | "stub" | "none";
+
+/**
+ * How a new bot is built, and where. `railway` creates a service of its own for
+ * the workspace from a published image; everything a run needs is here, because
+ * a provisioner that discovered half its settings mid-run could leave a service
+ * behind with no way to reach it.
+ *
+ * `token` is a Railway account token: it can create and delete services, so it
+ * is server-only and never prefixed `NEXT_PUBLIC_`. `templateServiceId` is the
+ * service a new bot copies its shared values from (the Firestore keys, R2, the
+ * model keys); the console reads them at provision time rather than holding its
+ * own copy of anybody's secrets.
+ *
+ * Every name is prefixed `BOT_`, including the Railway ones, because Railway
+ * injects `RAILWAY_PROJECT_ID` and `RAILWAY_ENVIRONMENT_ID` into every service
+ * it runs: a console deployed on Railway would read its own ids from those
+ * names and create each user's bot inside the console's own project.
+ */
+export type RailwayProvisioning = {
+  token: string;
+  projectId: string;
+  environmentId: string;
+  templateServiceId: string;
+  image: string;
+  /** Only for a private package. Railway pulls with these; we never store them. */
+  registry: { username: string; password: string } | null;
+  mountPath: string;
+  region: string;
+  port: number;
+};
+
+/** The bot's state volume, and the port its console API listens on. Defaults are
+ *  the running bot's own, so a deployment that sets neither matches it. */
+const DEFAULT_MOUNT_PATH = "/home/joseph/.openclaw";
+const DEFAULT_REGION = "europe-west4-drams3a";
+const DEFAULT_PORT = 18790;
+/**
+ * Which tree a new workspace's `settings/defaults` is copied from: `root`, or
+ * `workspace:<id>` once the root install is retired. The same vocabulary as
+ * genaebot's `deploy/init-workspace.py --settings-from`. An unrecognised value
+ * is empty here, which leaves provisioning off rather than seeding a bot from
+ * somewhere nobody meant.
+ */
+const SETTINGS_TEMPLATE = /^(root|workspace:[A-Za-z0-9_-]{6,40})$/;
+const settingsTemplate = process.env.BOT_SETTINGS_TEMPLATE?.trim() || "root";
+export const BOT_SETTINGS_TEMPLATE = SETTINGS_TEMPLATE.test(settingsTemplate) ? settingsTemplate : "";
+
+function railwayProvisioning(): RailwayProvisioning | null {
+  const read = (name: string) => process.env[name]?.trim() || "";
+  const token = read("BOT_RAILWAY_API_TOKEN");
+  const projectId = read("BOT_RAILWAY_PROJECT_ID");
+  const environmentId = read("BOT_RAILWAY_ENVIRONMENT_ID");
+  const templateServiceId = read("BOT_TEMPLATE_SERVICE_ID");
+  const image = read("BOT_IMAGE");
+  // Half-configured is not configured. A run that got as far as creating a
+  // service and then found no image would have spent money for nothing, so an
+  // incomplete environment leaves provisioning off and `/setup` says so.
+  if (!token || !projectId || !environmentId || !templateServiceId || !image) return null;
+  const port = Number.parseInt(read("BOT_CONSOLE_API_PORT") || String(DEFAULT_PORT), 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  if (!BOT_SETTINGS_TEMPLATE) return null;
+  const username = read("BOT_IMAGE_REGISTRY_USERNAME");
+  const password = read("BOT_IMAGE_REGISTRY_PASSWORD");
+  // Both or neither: one of the pair alone is a misconfiguration, not a public image.
+  if (Boolean(username) !== Boolean(password)) return null;
+  return {
+    token, projectId, environmentId, templateServiceId, image,
+    registry: username && password ? { username, password } : null,
+    mountPath: read("BOT_VOLUME_MOUNT_PATH") || DEFAULT_MOUNT_PATH,
+    region: read("BOT_RAILWAY_REGION") || DEFAULT_REGION,
+    port,
+  };
+}
+
+export const RAILWAY_PROVISIONING = railwayProvisioning();
 
 /**
  * Whether `/setup` can create a workspace's bot itself.
  *
- * `none` everywhere except an explicit `BOT_PROVISIONING=stub` in development,
- * which walks the creation screen through its stages without building anything.
- * Production is never anything but `none`: until a real provisioner exists, a
- * bot is still created by hand (`docs/provision-bot.md`), and a screen that
- * claimed otherwise would be lying to the one user who cannot check.
+ * `railway` is the real provisioner and the only value production may use; it
+ * needs its whole environment, or it resolves to `none` rather than failing a
+ * run halfway. `stub` walks the creation screen through its stages without
+ * building anything and is development-only -- a screen that claimed in
+ * production to have created a bot would be lying to the one user who cannot
+ * check. `none` leaves a bot to the runbook (`docs/provision-bot.md`).
  */
 export const BOT_PROVISIONING: ProvisionSource =
-  process.env.BOT_PROVISIONING?.trim() === "stub" && process.env.NODE_ENV !== "production" ? "stub" : "none";
+  process.env.BOT_PROVISIONING?.trim() === "railway" && RAILWAY_PROVISIONING ? "railway"
+  : process.env.BOT_PROVISIONING?.trim() === "stub" && process.env.NODE_ENV !== "production" ? "stub"
+  : "none";
 
 /**
  * Development only: a bot origin the stub's last stage really connects to, so
