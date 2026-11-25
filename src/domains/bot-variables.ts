@@ -19,6 +19,7 @@ export const PER_BOT = [
   "CONSOLE_API_TOKEN",
   "GATEWAY_AUTH_TOKEN",
   "GENAIE_CONSOLE_API",
+  "GENAIE_COLD_START",
   "GENAIE_CAMPAIGN_CLICK_BASE_URL",
   "PUBLIC_BASE_URL",
 ] as const;
@@ -104,6 +105,12 @@ export function botVariables(template: Record<string, string>, identity: BotIden
   // The entrypoint starts the console API only when this is exactly "1"; without
   // it the bot never answers, and the run could only ever time out waiting.
   variables.GENAIE_CONSOLE_API = "1";
+  // This bot's volume is brand new and empty, and nothing can put a file on a
+  // Railway volume before its first boot. Without this the bot refuses to start
+  // (`exit 78`) rather than writing its initial config from the baked template.
+  // It is set only on a bot created from nothing, which is every bot this
+  // provisioner makes; the template bot must never have it.
+  variables.GENAIE_COLD_START = "1";
   variables.GENAIE_CAMPAIGN_CLICK_BASE_URL = origin;
   variables.PUBLIC_BASE_URL = origin;
   return variables;

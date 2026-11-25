@@ -24,6 +24,7 @@ const TEMPLATE: Record<string, string> = {
   APP_BASE_URL: "https://agent.example",
   RAILWAY_SERVICE_ID: "the-template-service",
   GENAIE_OVERNIGHT_STANDBY: "1",
+  GENAIE_COLD_START: "0",
 };
 
 const IDENTITY = {
@@ -58,6 +59,12 @@ describe("a new bot's variables", () => {
 
   it("turns the console API on, which is what makes the bot answer at all", () => {
     expect(variables.GENAIE_CONSOLE_API).toBe("1");
+  });
+
+  it("lets the bot write its own first config, since its volume starts empty", () => {
+    // Without this the bot exits 78 instead of booting: nothing can seed a
+    // Railway volume before its first boot.
+    expect(variables.GENAIE_COLD_START).toBe("1");
   });
 
   it("points the bot's own links at its own domain", () => {

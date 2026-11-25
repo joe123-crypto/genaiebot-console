@@ -37,13 +37,13 @@ available rather than starting a run it cannot finish.
 >    `railway up` (uploaded source), so no registry image exists.
 > 2. **It must cold-start on an empty volume.** A provisioned bot gets a brand
 >    new, empty Railway volume, and `deploy/railway/entrypoint.sh` exits 78
->    (`FATAL: openclaw.json not found`) unless the volume is already seeded. Its
->    auto-seed path needs `openclaw-state.tgz` to have been uploaded to the
->    volume first, which only `railway volume files upload` can do -- the public
->    GraphQL API has no volume-file call, so the console cannot do it. Until the
->    image can seed itself (bake the initial state in and let the auto-seed fall
->    back to the image's copy), a run reaches `starting` and reports that the bot
->    was created but would not start.
+>    (`FATAL: openclaw.json not found`) unless the volume is already seeded --
+>    and nothing can seed one before first boot, since the public Railway API has
+>    no volume-file call. genaebot's `GENAIE_COLD_START=1` answers this: the
+>    entrypoint installs its baked `config/openclaw.template.json` as the initial
+>    config. This provisioner already sets that variable on every bot it creates
+>    (`src/domains/bot-variables`), so this holds as soon as a genaebot carrying
+>    the flag is published.
 >
 > Until both hold, leaving `BOT_IMAGE` unset is the safe state: provisioning
 > resolves to `none` and `/setup` hands over the workspace ID as before.
