@@ -31,11 +31,13 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit): P
   if (response.status === 401) { sessionExpired(); throw new Error("Your session ended. Sign in to continue."); }
   return response;
 }
-export async function authMutation(method: "POST" | "DELETE", body: object = {}) {
+/** A same-origin mutation carrying a fresh CSRF token. `path` is the session
+ *  itself unless another route checks the same pair (`validAuthMutation`). */
+export async function authMutation(method: "POST" | "DELETE", body: object = {}, path = "/api/auth/session") {
   const csrf = await fetch("/api/auth/csrf", { cache: "no-store" });
   const data = await csrf.json();
   if (!csrf.ok) throw new Error(data.error || "Sign-in is temporarily unavailable.");
-  const response = await fetch("/api/auth/session", {
+  const response = await fetch(path, {
     method, headers: { "Content-Type": "application/json", "X-CSRF-Token": data.token }, body: JSON.stringify(body), cache: "no-store",
   });
   const result = await response.json();

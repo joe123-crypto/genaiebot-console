@@ -65,4 +65,15 @@ describe("browser identity and drafts", () => {
     await authMutation("DELETE");
     expect(fetch).toHaveBeenNthCalledWith(2, "/api/auth/session", expect.objectContaining({ method: "DELETE", headers: { "Content-Type": "application/json", "X-CSRF-Token": "csrf-token" } }));
   });
+  it("carries the same token to another route that checks the pair", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ token: "csrf-token" })).mockResolvedValueOnce(Response.json({ ok: true }));
+    await authMutation("DELETE", {}, "/api/workspace");
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/auth/csrf", { cache: "no-store" });
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/workspace", expect.objectContaining({ method: "DELETE", headers: { "Content-Type": "application/json", "X-CSRF-Token": "csrf-token" } }));
+  });
+  it("reports the reason a route refused rather than a generic failure", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ token: "csrf-token" }))
+      .mockResolvedValueOnce(Response.json({ error: "Your data was deleted, but your sign-in could not be." }, { status: 503 }));
+    await expect(authMutation("DELETE", {}, "/api/workspace")).rejects.toThrow("your sign-in could not be");
+  });
 });

@@ -6,6 +6,7 @@ import { SessionBoundary } from "@/app/_components/session-boundary";
 import { getWorkspace } from "@/src/lib/workspace";
 import { BOT_PROVISIONING } from "@/src/config";
 import { CreateBot } from "./create-bot";
+import { DeleteAccountCard } from "@/app/settings/_components/delete-account-card";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +28,16 @@ export default async function SetupPage() {
         title={enabled ? "Set up your bot" : "Your workspace"}
         subtitle="Your groups, campaigns and schedule will appear here once a bot is connected."
       />
-      <CreateBot
-        workspace={{ id: workspace?.id ?? "", name: workspace?.name ?? "Workspace" }}
-        enabled={enabled}
-      />
+      <div className="settings-page">
+        <CreateBot
+          workspace={{ id: workspace?.id ?? "", name: workspace?.name ?? "Workspace" }}
+          enabled={enabled}
+        />
+        {/* Settings sits behind requireBot, which sends a workspace without one
+            back here. Without this card the only way out of a workspace they
+            do not want would be to ask an operator. */}
+        <DeleteAccountCard email={operator.email} />
+      </div>
     </ConsoleShell></SessionBoundary>
   );
 }
