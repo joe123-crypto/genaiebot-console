@@ -1,43 +1,88 @@
 /* Console palette and layout primitives.
+   The palette is derived from the sign-in sky: every colour below is a stop of
+   .login-aurora-sky (at the foot of this file, between its 31.25% and 81.25%
+   marks) or that stop darkened along its own hue until it could carry text.
    Light only, matching the operator tooling it sits beside. */
 :root {
   color-scheme: light;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
 
-  --canvas: #f2f5f9;
+  /* Neutrals, warmed off the sky's own cream band (#f2efea - #f3f5f4). Cards
+     stay pure white so the warmth reads as light rather than as a tint. */
+  --canvas: #f4f1ec;
   --surface: #ffffff;
-  --surface-muted: #f7f9fc;
-  --border: #e6ebf2;
-  --border-strong: #d4dde8;
+  --surface-muted: #faf7f2;
+  --border: #e9e3da;
+  --border-strong: #d8cfc2;
 
-  --text: #0f1b2d;
-  --text-muted: #6b7a90;
-  --text-faint: #93a1b4;
+  --text: #241f1a;
+  --text-muted: #6f685e;
+  /* Deliberately under 4.5:1: a second line about something already named,
+     never the only copy saying it. */
+  --text-faint: #8c8378;
   --text-inverse: #ffffff;
 
-  --primary: #2f80ed;
-  --primary-strong: #1d6fdc;
-  --primary-soft: #eaf2fe;
-  --primary-border: #c6dcfb;
+  /* The sky. A shade darker than the aurora's own glow (#2f6ffa) so that
+     white text on a filled button clears 4.5:1 rather than sitting at 4.4. */
+  --primary: #2a66f0;
+  --primary-strong: #1f58dd;
+  --primary-soft: #e8effd;
+  --primary-border: #c7dcfb;
+  --primary-ink: #1a4fae;
 
-  --success: #16a37b;
-  --success-soft: #e7f7f1;
-  --success-border: #bfe9d9;
-  --warning: #c77a10;
-  --warning-soft: #fdf3e3;
-  --warning-border: #f2dbb0;
-  --danger: #d4503f;
-  --danger-soft: #fdeeec;
-  --danger-border: #f4c7c0;
-  --neutral-soft: #eef1f6;
-  --neutral-border: #dde3ec;
+  /* The ember, for the one thing being worked on right now. It gets no
+     border and no chip family on purpose: a pale orange tint is a hair from
+     --danger-soft, and "selected" must never read as "something is wrong".
+     --accent is 3.1:1 on white, so only --accent-strong may carry text. */
+  --accent: #f96422;
+  --accent-strong: #c4460f;
+  --accent-soft: #fdeee3;
+  --accent-ink: #9c3c0c;
+
+  --success: #13886b;
+  --success-soft: #e6f5ef;
+  --success-border: #bce3d3;
+  --success-ink: #0d6b53;
+  --warning: #c07a0c;
+  --warning-soft: #fdf2df;
+  --warning-border: #f3dcae;
+  --warning-ink: #8a5807;
+  --danger: #d93a1e;
+  --danger-strong: #b52f15;
+  --danger-soft: #fdeae5;
+  --danger-border: #f6c7b8;
+  --danger-ink: #8e2f1a;
+  --neutral-soft: #f0ebe3;
+  --neutral-border: #e0d8cc;
+
+  /* Which line a run posts on. Named because it is meaning and not chrome:
+     the Schedule screen tells the operator in prose that blue is the default
+     line and purple the ads line. Nothing else may use either, and the two
+     move only as a pair, far enough apart to tell at a bar's height. */
+  --line-default: #4aa8f7;
+  --line-default-strong: #2a66f0;
+  --line-ads: #9d7af2;
+  --line-ads-strong: #7c3aed;
+
+  /* The sign-in sky read across rather than down, flattened and dissolved
+     into the canvas. Its ends are clamped to the 31.25% and 56.25% stops:
+     any further out and muted text laid on it drops below 4.5:1. */
+  --page-wash:
+    linear-gradient(180deg, rgb(244 241 236 / 0) 44%, var(--canvas) 100%),
+    linear-gradient(100deg, #e5eef7 0%, #eef1f6 24%, #f3f5f4 46%,
+                            #f2efea 62%, #f1ede4 78%, #f7ead7 100%);
 
   --radius: 12px;
   --radius-sm: 8px;
   --radius-pill: 999px;
-  --shadow-card: 0 1px 2px rgba(15, 27, 45, 0.04), 0 1px 3px rgba(15, 27, 45, 0.03);
-  --shadow-pop: 0 8px 24px rgba(15, 27, 45, 0.12);
+  --scrim: rgb(36 31 26 / 0.42);
+  --shadow-card: 0 1px 2px rgb(36 31 26 / 0.05), 0 1px 3px rgb(36 31 26 / 0.04);
+  --shadow-pop: 0 8px 24px rgb(36 31 26 / 0.14);
+  /* The lit nav item's own glow, and the live dot's pulse. Named so they
+     cannot drift out of step with the token each was mixed from. */
+  --shadow-nav: 0 2px 8px rgb(42 102 240 / 0.28);
+  --pulse-success: rgb(19 136 107 / 0.45);
   --sidebar-width: 268px;
 }
 
@@ -120,7 +165,7 @@ a { color: inherit; text-decoration: none; }
 .console-nav-item[aria-current="page"] {
   background: var(--primary);
   color: var(--text-inverse);
-  box-shadow: 0 2px 8px rgba(47, 128, 237, 0.28);
+  box-shadow: var(--shadow-nav);
 }
 
 .console-nav-item svg { flex: 0 0 auto; }
@@ -136,8 +181,8 @@ a { color: inherit; text-decoration: none; }
 }
 
 .console-nav-item[aria-current="page"] .console-nav-count {
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
+  background: rgb(255 255 255 / 0.22);
+  color: var(--text-inverse);
 }
 
 .console-account {
@@ -155,8 +200,8 @@ a { color: inherit; text-decoration: none; }
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #5b53c4;
-  color: #fff;
+  background: var(--accent-strong);
+  color: var(--text-inverse);
   font-weight: 600;
   flex: 0 0 auto;
 }
@@ -167,7 +212,11 @@ a { color: inherit; text-decoration: none; }
 
 .console-content {
   min-width: 0;
-  padding: 28px 32px 56px;
+  /* The page-head wash bleeds out to these edges, so they are named here
+     rather than repeated there. Every override below sets them too. */
+  --content-pad-x: 32px;
+  --content-pad-top: 28px;
+  padding: var(--content-pad-top) var(--content-pad-x) 56px;
 }
 
 :is(.console-app-home, .console-app-campaigns) {
@@ -210,14 +259,14 @@ a { color: inherit; text-decoration: none; }
   gap: 7px;
   font-weight: 600;
   font-size: 13px;
-  color: #11427f;
+  color: var(--primary-ink);
 }
 
 .attention-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--primary);
+  background: var(--accent);
   flex: 0 0 auto;
 }
 
@@ -227,7 +276,7 @@ a { color: inherit; text-decoration: none; }
   justify-content: space-between;
   gap: 8px;
   font-size: 12.5px;
-  color: #2a5590;
+  color: var(--primary-ink);
   font-weight: 500;
 }
 
@@ -244,13 +293,47 @@ a { color: inherit; text-decoration: none; }
 
 /* ---------------------------------------------------------------- page ----- */
 
+/* The one gradient in the signed-in console: the sign-in sky, flattened and
+   laid behind the page's own heading so the two screens read as one product.
+   It is a pseudo-element rather than a background on .page-head because the
+   caption screens open with a Back link above the heading, and a negative
+   margin here would pull the wash up over it. Static: nothing but sign-in
+   moves, so the reduced-motion blocks have no work to do. */
 .page-head {
+  position: relative;
+  /* Keeps the -1 layer inside this box. Without it the wash sinks past
+     .console-content into the root stacking context and disappears behind
+     the body background. */
+  isolation: isolate;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
 }
+
+.page-head::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  /* Out to the content's padding edges and up over its top padding, so the
+     wash meets the sidebar and the window rather than floating in a box.
+     Absolutely positioned, so it is not a flex item and adds no height: the
+     clipped, flex-column home and campaigns shells are untouched by it. */
+  inset-block: calc(-1 * var(--content-pad-top, 28px)) -18px;
+  inset-inline: calc(-1 * var(--content-pad-x, 32px));
+  background: var(--page-wash);
+  pointer-events: none;
+}
+
+/* Those two screens put a Back link above the heading; start the wash at the
+   heading so it sits under the link rather than over it. */
+.caption-editor-page > .page-head::before { inset-block-start: -14px; }
+
+/* A link in the head sits on the wash, where plain --primary is 3.5:1. */
+.page-head .link { color: var(--primary-ink); }
+
+@media (forced-colors: active) { .page-head::before { display: none; } }
 
 .page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; margin: 0; }
 .page-sub { color: var(--text-muted); margin: 4px 0 0; font-size: 13.5px; }
@@ -308,10 +391,10 @@ a { color: inherit; text-decoration: none; }
   white-space: nowrap;
 }
 
-.pill-success { background: var(--success-soft); border-color: var(--success-border); color: #0d6f53; }
-.pill-warning { background: var(--warning-soft); border-color: var(--warning-border); color: #8c5608; }
-.pill-danger  { background: var(--danger-soft);  border-color: var(--danger-border);  color: #9e3123; }
-.pill-info    { background: var(--primary-soft); border-color: var(--primary-border); color: #1a5bb5; }
+.pill-success { background: var(--success-soft); border-color: var(--success-border); color: var(--success-ink); }
+.pill-warning { background: var(--warning-soft); border-color: var(--warning-border); color: var(--warning-ink); }
+.pill-danger  { background: var(--danger-soft);  border-color: var(--danger-border);  color: var(--danger-ink); }
+.pill-info    { background: var(--primary-soft); border-color: var(--primary-border); color: var(--primary-ink); }
 
 /* -------------------------------------------------------------- filters ---- */
 
@@ -438,7 +521,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   color: var(--text-muted);
 }
 
-.tag-on { background: var(--primary-soft); border-color: var(--primary-border); color: #1a5bb5; }
+.tag-on { background: var(--primary-soft); border-color: var(--primary-border); color: var(--primary-ink); }
 
 /* A campaign the manifest switches off. Struck through rather than merely
    muted, so it cannot be mistaken for one today's cap happened to hold back. */
@@ -514,18 +597,18 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 6px;
-  background: linear-gradient(90deg, #4aa8f7, #2f80ed);
+  background: linear-gradient(90deg, var(--line-default), var(--line-default-strong));
   min-width: 4px;
 }
 
-.timeline-fill.is-ads { background: linear-gradient(90deg, #8f7bf0, #6b53d8); }
+.timeline-fill.is-ads { background: linear-gradient(90deg, var(--line-ads), var(--line-ads-strong)); }
 
 /* The run whose worst case still covers now. Lit with a ring rather than
    recoloured: the fill's colour has to go on meaning which line it posts on. */
 .timeline-fill.is-running {
   /* A white gap and then a dark ring, so the lit bar reads the same against
      the blue line's fill and the purple one's. */
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px rgba(15, 27, 45, 0.32);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px rgb(36 31 26 / 0.32);
   z-index: 1;
 }
 
@@ -585,8 +668,8 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 }
 
 @keyframes run-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 123, 0.45); }
-  50% { box-shadow: 0 0 0 4px rgba(22, 163, 123, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--pulse-success); }
+  50% { box-shadow: 0 0 0 4px transparent; }
 }
 
 /* ------------------------------------------------- dragging a run's time ---
@@ -662,7 +745,8 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 }
 .timeline-track .timeline-fill { overflow: visible; min-height: 14px; }
 .timeline-track .timeline-fill::after { content: ""; position: absolute; inset: -6px; min-width: 20px; }
-.timeline-track .timeline-fill[style*="width: 0%"] { border-left: 2px solid var(--primary); }
+.timeline-track .timeline-fill[style*="width: 0%"] { border-left: 2px solid var(--line-default-strong); }
+.timeline-track .timeline-fill.is-ads[style*="width: 0%"] { border-left-color: var(--line-ads-strong); }
 .timeline-range { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .timeline-row { display: grid; grid-template-columns: 180px 1fr; gap: 10px; align-items: center; margin-bottom: 4px; }
 .timeline-row.timeline-header {
@@ -680,11 +764,11 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .timeline-label-button { border: 0; background: none; padding: 0; color: var(--text); cursor: pointer; font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: left; }
 .timeline-label-button:hover { text-decoration: underline; }
 .timeline-fill.is-inactive { opacity: 0.45; background: repeating-linear-gradient(135deg, var(--text-faint) 0 4px, var(--surface-muted) 4px 8px); }
-.timeline-fill.is-selected { outline: 2px solid var(--primary); outline-offset: 2px; z-index: 4; }
+.timeline-fill.is-selected { outline: 2px solid var(--accent-strong); outline-offset: 2px; z-index: 4; }
 .timeline-time-input { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .timeline-time-input input { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; background: var(--surface); color: var(--text); }
 /* Fixed so it can extend beyond the timeline scroll area. */
-.timeline-pop { position: fixed; z-index: 40; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 10px; box-shadow: 0 10px 28px rgb(0 0 0 / 0.18); }
+.timeline-pop { position: fixed; z-index: 40; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 10px; box-shadow: var(--shadow-pop); }
 .timeline-pop:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
 .timeline-pop-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .timeline-pop-head h3 { margin: 0; font-size: 14px; }
@@ -700,7 +784,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .icon-btn:hover:not(:disabled) { background: var(--surface-muted); }
 .icon-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .icon-btn:disabled { opacity: 0.45; cursor: default; }
-.icon-btn.is-on { border-color: var(--primary); color: var(--primary); }
+.icon-btn.is-on { border-color: var(--accent); color: var(--accent-ink); }
 .icon-btn.is-danger:hover:not(:disabled) { border-color: var(--danger-border); color: var(--danger); }
 .timeline-track .timeline-now { pointer-events: none; }
 .timeline-duration { display: none; }
@@ -792,8 +876,8 @@ table.data tbody tr:hover { background: var(--surface-muted); }
 .caption-chat-pending { display: flex; gap: 8px; align-items: center; color: var(--text-muted); font-size: 13px; }
 .caption-chat-bottom { position: sticky; bottom: 0; background: var(--surface); padding: 16px 20px 12px; border-top: 1px solid var(--border); }
 .caption-starter-prompts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.caption-starter { border: 1px solid var(--primary-border); border-radius: var(--radius-pill); color: var(--primary-strong); background: var(--surface); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; }
-.caption-starter:hover:not(:disabled) { background: var(--primary-soft); }
+.caption-starter { border: 1px solid var(--accent); border-radius: var(--radius-pill); color: var(--accent-ink); background: var(--surface); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; }
+.caption-starter:hover:not(:disabled) { background: var(--accent-soft); }
 .caption-starter:disabled { opacity: .5; cursor: default; }
 .caption-composer { display: flex; align-items: flex-end; gap: 12px; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
 .caption-composer:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
@@ -847,7 +931,7 @@ table.data tbody tr:hover { background: var(--surface-muted); }
   color: var(--text);
   box-shadow: var(--shadow-pop);
 }
-.campaign-group-dialog::backdrop { background: rgba(15, 27, 45, .4); }
+.campaign-group-dialog::backdrop { background: var(--scrim); }
 .campaign-group-dialog-head, .campaign-group-dialog-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .campaign-group-dialog-footer { margin-top: 16px; flex-wrap: wrap; }
 .campaign-group-options { margin-top: 14px; max-height: min(360px, 45dvh); overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
@@ -1009,7 +1093,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   border-radius: var(--radius);
   border: 1px solid var(--danger-border);
   background: var(--danger-soft);
-  color: #8e2f22;
+  color: var(--danger-ink);
   font-size: 13px;
   margin-bottom: 18px;
 }
@@ -1017,7 +1101,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 /* The overlap card and the counts share a row when there is room. */
 .schedule-summary { container-type: inline-size; display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; margin-bottom: 18px; }
 .schedule-summary > .banner { flex: 1 1 380px; margin-bottom: 0; min-width: 0; }
-.banner-ok { border-color: var(--success-border); background: var(--success-soft); color: #12694f; }
+.banner-ok { border-color: var(--success-border); background: var(--success-soft); color: var(--success-ink); }
 
 .schedule-overlap { position: relative; display: block; overflow-wrap: anywhere; }
 .schedule-overlap-disclosure { margin-top: 6px; }
@@ -1062,7 +1146,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   opacity: 0.85;
 }
 
-.link { color: var(--primary); font-weight: 600; }
+.link { color: var(--primary-strong); font-weight: 600; }
 .link:hover { text-decoration: underline; }
 
 .seg {
@@ -1074,7 +1158,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 }
 
 .seg a { padding: 5px 13px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
-.seg a[aria-current="true"] { background: var(--primary); color: #fff; }
+.seg a[aria-current="true"] { background: var(--primary); color: var(--text-inverse); }
 
 /* ------------------------------------------------------- actions, modal --- */
 
@@ -1149,7 +1233,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   color: var(--text-inverse);
 }
 
-.btn-danger:hover:not(:disabled) { background: #bf4536; border-color: #bf4536; }
+.btn-danger:hover:not(:disabled) { background: var(--danger-strong); border-color: var(--danger-strong); }
 
 .modal-backdrop {
   position: fixed;
@@ -1159,7 +1243,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(15, 27, 45, 0.38);
+  background: var(--scrim);
 }
 
 .modal {
@@ -1216,7 +1300,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 }
 
 .modal-error {
-  color: #8e2f22;
+  color: var(--danger-ink);
   background: var(--danger-soft);
   border: 1px solid var(--danger-border);
   border-radius: var(--radius-sm);
@@ -1239,7 +1323,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 
 /* A save that will be accepted but will not change what is sent. */
 .modal-warning {
-  color: #8c5608;
+  color: var(--warning-ink);
   background: var(--warning-soft);
   border: 1px solid var(--warning-border);
   border-radius: var(--radius-sm);
@@ -1266,7 +1350,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .console-nav { flex-direction: row; flex-wrap: wrap; }
   .console-account { border-top: none; margin-left: auto; }
   .attention-card { order: 99; width: 100%; }
-  .console-content { padding: 20px 16px 40px; }
+  .console-content { --content-pad-x: 16px; --content-pad-top: 20px; padding: 20px 16px 40px; }
   .group-details {
     position: sticky;
     left: 14px;
@@ -1293,7 +1377,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   }
   :is(.console-app-home, .console-app-campaigns) .console-brand { padding: 0; }
   :is(.console-app-home, .console-app-campaigns) .console-brand-mark { height: 30px; }
-  :is(.console-app-home, .console-app-campaigns) > .console-content { padding: 12px 16px; }
+  :is(.console-app-home, .console-app-campaigns) > .console-content { --content-pad-x: 16px; --content-pad-top: 12px; padding: 12px 16px; }
   :is(.console-app-home, .console-app-campaigns) .page-head { margin-bottom: 10px; }
   .console-app-home > .console-content > .banner {
     max-block-size: min(5rem, 12dvh);
@@ -1360,7 +1444,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .account-button:hover:not(:disabled) { background: var(--surface-muted); }
 .account-button:disabled { opacity: .5; cursor: not-allowed; }
 .account-button:focus-visible, .account-icon-button:focus-visible, .account-form input:focus-visible { outline: 3px solid var(--primary-border); outline-offset: 3px; }
-.account-button-primary { background: var(--primary); border-color: var(--primary); color: white; }
+.account-button-primary { background: var(--primary); border-color: var(--primary); color: var(--text-inverse); }
 .account-button-primary:hover:not(:disabled) { background: var(--primary-strong); }
 .account-button-danger { color: var(--danger); border-color: var(--danger-border); }
 .account-button-danger:hover:not(:disabled) { background: var(--danger-soft); }
@@ -1372,9 +1456,9 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .account-stats strong { display: block; font-size: 23px; font-weight: 600; }
 .account-actions { justify-content: flex-start; }
 .account-card-body .card-note { margin: 0; }
-.account-notice { padding: 12px 16px; border: 1px solid var(--success-border); border-radius: var(--radius-sm); background: var(--success-soft); color: #12694f; }
+.account-notice { padding: 12px 16px; border: 1px solid var(--success-border); border-radius: var(--radius-sm); background: var(--success-soft); color: var(--success-ink); }
 .account-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; margin: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow-pop); color: var(--text); background: var(--surface); }
-.account-dialog::backdrop { background: rgba(15, 27, 45, .4); }
+.account-dialog::backdrop { background: var(--scrim); }
 .account-dialog-head { flex-wrap: nowrap; margin-bottom: 18px; }
 .account-dialog-head h2 { margin: 0; font-size: 19px; }
 .account-icon-button { display: inline-flex; background: none; border: 0; color: var(--text-muted); padding: 6px; cursor: pointer; }
@@ -1419,7 +1503,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   border: 1px solid var(--warning-border);
   border-radius: var(--radius-sm);
   background: var(--warning-soft);
-  color: #8c5608;
+  color: var(--warning-ink);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -1430,7 +1514,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .campaign-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .campaign-switch .btn { display: inline-flex; align-items: center; gap: 6px; }
 .campaign-switch p + p { margin-top: 8px; }
-.account-config { border-top: 1px solid var(--border, rgba(0,0,0,.08)); padding-top: 12px; }
+.account-config { border-top: 1px solid var(--border); padding-top: 12px; }
 
 /* Settings: one column of cards at one width, so the clock, the caps and the
    account end where each other end rather than where their own content runs
@@ -1543,7 +1627,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .caption-pictures-option:has(input:disabled) { opacity: .6; cursor: default; }
 
 .caption-restored, .caption-shrink {
-  color: var(--warning); background: var(--warning-soft);
+  color: var(--warning-ink); background: var(--warning-soft);
   border: 1px solid var(--warning-border); border-radius: var(--radius-sm);
   padding: 8px 11px; font-size: 12.5px; line-height: 1.6;
 }
@@ -1660,7 +1744,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 }
 @media (max-height: 500px) {
   .console-app-groups > .console-sidebar { padding-block: 4px; }
-  .console-app-groups > .console-content { padding-block: 8px; }
+  .console-app-groups > .console-content { --content-pad-top: 8px; padding-block: 8px; }
   .console-app-groups .page-sub { display: none; }
   .console-app-groups .page-head { margin-bottom: 6px; }
   .console-app-groups > .console-content > .live-groups { gap: 6px; }
@@ -1685,11 +1769,11 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .tracked-link-form .modal-label { display: block; margin-bottom: 6px; }
 /* Authentication shares the console's existing light theme and controls. */
 .login-page, .session-loading { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
-.login-card { position: relative; z-index: 1; width: 100%; max-width: 440px; text-align: center; padding: 40px 28px; background: white; border: 1px solid #e5e7eb; border-radius: 20px; box-shadow: 0 12px 48px #00000008; }
+.login-card { position: relative; z-index: 1; width: 100%; max-width: 440px; text-align: center; padding: 40px 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; box-shadow: 0 12px 48px rgb(36 31 26 / 0.04); }
 .login-card img { display: block; margin: 0 auto 8px; object-fit: contain; }
 .login-brand { display: block; font-size: 24px; font-weight: 700; margin-bottom: 28px; }
 .login-card h1 { font-size: 24px; line-height: 1.25; margin-bottom: 12px; }
-.login-card p { line-height: 1.5; color: #637083; }
+.login-card p { line-height: 1.5; color: var(--text-muted); }
 /* .btn is inline-block, so the sign-in button has to declare its own flow before
    gap and centring mean anything. */
 .login-google {
@@ -1707,7 +1791,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   box-shadow: var(--shadow-card);
   transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
-.login-google:hover:not(:disabled) { background: var(--surface); border-color: #b9c6d6; box-shadow: var(--shadow-pop); }
+.login-google:hover:not(:disabled) { background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-pop); }
 .login-google:active:not(:disabled) { background: var(--surface-muted); box-shadow: var(--shadow-card); }
 /* A deliberate resting state rather than the generic half-faded button. */
 .login-google:disabled { opacity: 1; background: var(--surface-muted); border-color: var(--border); color: var(--text-faint); box-shadow: none; }
@@ -1723,7 +1807,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   animation: login-spin 700ms linear infinite;
 }
 @keyframes login-spin { to { transform: rotate(360deg); } }
-.login-card .login-error { color: #9e3123; font-size: 13px; line-height: 1.45; min-height: 18px; margin-top: 16px; }
+.login-card .login-error { color: var(--danger-ink); font-size: 13px; line-height: 1.45; min-height: 18px; margin-top: 16px; }
 .login-card .login-error:not(:empty) {
   border: 1px solid var(--danger-border);
   background: var(--danger-soft);
@@ -1807,5 +1891,5 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 }
 .console-sign-out { padding: 0 16px 16px; }
 .console-sign-out .btn { width: 100%; }
-.console-sign-out p { color: #ad2626; font-size: 12px; overflow-wrap: anywhere; }
+.console-sign-out p { color: var(--danger-ink); font-size: 12px; overflow-wrap: anywhere; }
 .console-account-name, .console-account-meta { overflow-wrap: anywhere; }

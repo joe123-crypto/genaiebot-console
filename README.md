@@ -576,6 +576,15 @@ Next.js 15 App Router, React 19, TypeScript, vitest. Plain CSS with design
 tokens on `:root` in [`app/globals.css`](app/globals.css), matching `webetu-web`
 rather than introducing Tailwind. Light mode only.
 
+The palette is derived from the sign-in sky. Every token is a stop of
+`.login-aurora-sky` at the foot of that file, or one darkened along its own hue
+until it could carry text: the blues from its 18-31% band, the neutrals from the
+cream at 37-50%, the ember and the amber from 56-81%. Blue carries navigation and
+actions, ember marks the one thing being worked on, and the ember has no tint or
+border of its own because a pale orange chip is indistinguishable from
+`--danger-soft`. `--line-default` and `--line-ads` are meaning rather than chrome:
+the Schedule screen tells the operator which WhatsApp line each bar posts on.
+
 ## Create a campaign
 
 Use **New campaign** on Campaigns. Enter a name, upload one or more JPEG/PNG
