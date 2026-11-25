@@ -5,6 +5,11 @@ import { appOrigin } from "./firebase-admin";
 
 export const CSRF_COOKIE = "genaie_console_csrf";
 export function secureCookies(): boolean { return appOrigin().startsWith("https:"); }
+/** The session cookie's shape. One definition, so the routes that set it and
+ *  the routes that clear it cannot drift apart and leave a cookie behind. */
+export function sessionCookieOptions() {
+  return { httpOnly: true, secure: secureCookies(), sameSite: "lax" as const, path: "/" };
+}
 export async function validAuthMutation(request: Request): Promise<boolean> {
   if (request.headers.get("origin") !== appOrigin() || request.headers.get("sec-fetch-site") === "cross-site" ||
       request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") return false;

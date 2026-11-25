@@ -1432,8 +1432,16 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .campaign-switch p + p { margin-top: 8px; }
 .account-config { border-top: 1px solid var(--border, rgba(0,0,0,.08)); padding-top: 12px; }
 
-/* Settings: the daily cap form. */
-.cap-settings { max-width: 640px; }
+/* Settings: one column of cards at one width, so the clock, the caps and the
+   account end where each other end rather than where their own content runs
+   out. The width lives here rather than on any one card. */
+.settings-page { display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
+.settings-page > .card { min-width: 0; }
+/* A zone or a tier is a short choice; .modal-input is full width, which reads
+   as a text field. Narrowed as .cap-settings-bands narrows its numbers. */
+.settings-page .form-field > .modal-input { max-width: 320px; }
+
+/* The daily cap form. */
 .cap-settings-fields { border: 0; margin: 16px 0 0; padding: 0; min-width: 0; }
 .cap-settings-fields:disabled { opacity: 0.7; }
 .cap-settings-switch { display: flex; align-items: center; gap: 8px; font-weight: 600; }
@@ -1443,6 +1451,16 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .cap-settings-bands caption { text-align: left; padding-bottom: 6px; }
 .cap-settings-bands .modal-input { max-width: 110px; }
 .cap-settings .modal-actions { margin-top: 16px; }
+
+/* Deleting the account: the one card here that destroys something, so it is
+   set apart from the two above it rather than reading as a third setting. */
+.settings-danger { border-color: var(--danger-border); }
+.settings-danger .card-title { color: var(--danger); }
+.settings-danger ul { margin: 10px 0 0; padding-left: 20px; font-size: 12.5px; color: var(--text-muted); }
+.settings-danger li + li { margin-top: 4px; }
+.settings-danger ul + .card-note { display: block; margin-top: 10px; }
+.settings-danger .modal-actions { margin-top: 16px; justify-content: flex-start; }
+.delete-account-confirm { margin-top: 14px; }
 
 /* A campaign's click counts: the total first, the per-group breakdown on demand. */
 .campaign-clicks-groups > summary { cursor: pointer; font-size: 14px; font-weight: 650; }

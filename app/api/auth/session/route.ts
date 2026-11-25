@@ -2,11 +2,10 @@ import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, SESSION_COOKIE_MAX_AGE_SECONDS } from "@/src/config";
 import { apiOperator, isInvalidCredential, operatorFromToken } from "@/src/lib/auth";
 import { firebaseAdminAuth } from "@/src/lib/firebase-admin";
-import { validAuthMutation, secureCookies } from "@/src/lib/auth-csrf";
+import { validAuthMutation, sessionCookieOptions } from "@/src/lib/auth-csrf";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
-const cookieOptions = () => ({ httpOnly: true, secure: secureCookies(), sameSite: "lax" as const, path: "/" });
 async function tokenBody(request: Request): Promise<string | null> {
   if (Number(request.headers.get("content-length")) > 16384) return null;
   const reader = request.body?.getReader();
@@ -41,7 +40,7 @@ export async function POST(request: Request) {
     if (!operator || !Number.isFinite(age) || age < -60 || age > 300) return json({ error: "Please sign in again with Google." }, 401);
     const session = await auth.createSessionCookie(body.idToken, { expiresIn: SESSION_COOKIE_MAX_AGE_SECONDS * 1000 });
     const response = json({ operator });
-    response.cookies.set(SESSION_COOKIE_NAME, session, { ...cookieOptions(), maxAge: SESSION_COOKIE_MAX_AGE_SECONDS });
+    response.cookies.set(SESSION_COOKIE_NAME, session, { ...sessionCookieOptions(), maxAge: SESSION_COOKIE_MAX_AGE_SECONDS });
     return response;
   } catch (error) { return isInvalidCredential(error) ? json({ error: "Please sign in again with Google." }, 401) : json({ error: "Sign-in is temporarily unavailable. Please try again." }, 503); }
 }
@@ -49,7 +48,7 @@ export async function DELETE(request: Request) {
   try {
     if (!await validAuthMutation(request)) return json({ error: "Invalid sign-out request. Reload and try again." }, 403);
     const response = json({ ok: true });
-    response.cookies.set(SESSION_COOKIE_NAME, "", { ...cookieOptions(), maxAge: 0 });
+    response.cookies.set(SESSION_COOKIE_NAME, "", { ...sessionCookieOptions(), maxAge: 0 });
     return response;
   } catch { return json({ error: "Sign-out is temporarily unavailable." }, 503); }
 }

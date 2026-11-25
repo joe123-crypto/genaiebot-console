@@ -11,13 +11,16 @@ import { useId, type ReactNode } from "react";
  * accidental open does nothing.
  */
 export function ConfirmDialog({
-  title, children, warning, confirmLabel, danger = false, pending = false, confirmDisabled = false, error, onConfirm, onClose,
+  title, children, warning, confirmLabel, pendingLabel = "Saving…", danger = false, pending = false, confirmDisabled = false, error, onConfirm, onClose,
 }: {
   title: string;
   children: ReactNode;
   /** The write gate's warning, when a save would not reach the campaigns. */
   warning?: string;
   confirmLabel: string;
+  /** What the confirm button says while the change is in flight. Not every
+   *  change is a save: a deletion that said "Saving…" would misdescribe it. */
+  pendingLabel?: string;
   danger?: boolean;
   pending?: boolean;
   confirmDisabled?: boolean;
@@ -46,7 +49,7 @@ export function ConfirmDialog({
           <button type="button" className="btn" onClick={close} disabled={pending} autoFocus>Cancel</button>
           <button type="button" className={`btn ${danger ? "btn-danger" : "btn-primary"}`}
             onClick={onConfirm} disabled={pending || confirmDisabled}>
-            {pending ? "Saving…" : confirmLabel}
+            {pending ? pendingLabel : confirmLabel}
           </button>
         </div>
       </div>

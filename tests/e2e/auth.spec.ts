@@ -112,3 +112,26 @@ test("a forged session cookie never authenticates an API request", async ({ page
   expect((await page.request.get("/api/auth/session")).status()).toBe(401);
   await page.goto("/settings"); await expect(page).toHaveURL(/\/login\?returnTo=/);
 });
+
+test("deleting an account erases its workspace and its sign-in", async ({ page }) => {
+  // A new account has no bot, so it lands on /setup -- which is why the card is
+  // offered there as well as on Settings, which /setup is standing in front of.
+  await page.goto("/setup"); const email = await signIn(page);
+  const workspace = await page.getByText(/^w[A-Za-z0-9_-]{16}$/).textContent();
+  const { operator } = await (await page.request.get("/api/auth/session")).json();
+
+  await page.getByRole("button", { name: "Delete account", exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog.getByRole("button", { name: "Delete account" })).toBeDisabled();
+  await dialog.getByLabel(/to confirm/).fill(email);
+  await dialog.getByRole("button", { name: "Delete account" }).click();
+
+  await expect(page).toHaveURL(/\/login$/);
+  expect((await page.request.get("/api/auth/session")).status()).toBe(401);
+  await expect(emulatorAdmin().getUser(operator.uid)).rejects.toThrow(/no user record/i);
+
+  // Signing up again with the same address is a new account, not the old one.
+  await signIn(page, email);
+  await page.goto("/setup");
+  expect(await page.getByText(/^w[A-Za-z0-9_-]{16}$/).textContent()).not.toBe(workspace);
+});
