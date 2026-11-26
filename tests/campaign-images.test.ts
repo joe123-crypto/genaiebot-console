@@ -49,13 +49,25 @@ describe("campaign pictures", () => {
     expect(view.container.querySelectorAll("figure.campaign-image")).toHaveLength(2);
     expect(screen.getByText("borehole-1.jpg")).toBeTruthy();
     expect(screen.getByText("borehole-2.jpg")).toBeTruthy();
-    expect(screen.getByText("Picture 1")).toBeTruthy();
-    expect(screen.getByText("Picture 2")).toBeTruthy();
+    // Numbered in the order they rotate, on the picture itself.
+    expect([...view.container.querySelectorAll(".campaign-image-number")].map((badge) => badge.textContent)).toEqual(["1", "2"]);
+    expect(screen.getByRole("img", { name: "Picture 2" })).toBeTruthy();
+  });
+
+  it("opens each picture full size", () => {
+    mount();
+    expect(screen.getByRole("link", { name: "Picture 1" }).getAttribute("href")).toBe(`${BUCKET}/aa.jpg`);
+  });
+
+  it("says nothing about where the pictures come from when nothing is wrong", () => {
+    mount({ writable: false });
+    expect(screen.queryByText(/asset index/)).toBeNull();
+    expect(document.querySelector(".section-foot")).toBeNull();
   });
 
   it("explains daily rotation only when there is more than one picture", () => {
     mount();
-    expect(screen.getByText(/2 pictures/).textContent).toContain("one of them per day");
+    expect(screen.getByText(/2 pictures/).textContent).toContain("one posted per day");
     cleanup();
     mount({ images: ["only.png"], assets: [] });
     expect(screen.getByText(/1 picture/).textContent).toContain("sent with every caption");
@@ -86,7 +98,7 @@ describe("campaign pictures", () => {
   it("says how many declared pictures the index has never heard of", () => {
     mount({ assets: [assets[0]] });
     expect(sources({ container: document.body })).toEqual([`${BUCKET}/aa.jpg`]);
-    expect(screen.getByText(/1 picture below is declared by the campaign but absent/)).toBeTruthy();
+    expect(screen.getByText(/1 picture is declared by the campaign but absent/)).toBeTruthy();
   });
 
   it("shows nothing for an entry the bot could not give an address for", () => {
@@ -134,27 +146,15 @@ describe("campaign pictures", () => {
     expect(screen.getAllByText("Preview unavailable")).toHaveLength(2);
   });
 
-  it("offers add and remove, disabled, with the reason they are off", () => {
+  it("offers no picture controls while nothing can store one, and says so once", () => {
     mount();
-    const add = screen.getByRole("button", { name: /Add picture/ }) as HTMLButtonElement;
-    const remove = screen.getByRole("button", { name: "Remove picture 2" }) as HTMLButtonElement;
-    expect(add.disabled).toBe(true);
-    expect(add.title).toBe(REASON);
-    expect(remove.disabled).toBe(true);
-    expect(remove.title).toBe(REASON);
-    expect(screen.getByText(REASON)).toBeTruthy();
-  });
-
-  it("explains the single picture a campaign cannot go below", () => {
-    mount({ images: ["only.png"], assets: [] });
-    const remove = screen.getByRole("button", { name: "Remove picture 1" }) as HTMLButtonElement;
-    expect(remove.title).toBe("Keep at least one picture");
-  });
-
-  it("shows no controls at all in read-only mode", () => {
-    mount({ writable: false });
     expect(screen.queryByRole("button", { name: /Add picture/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove picture 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove picture/ })).toBeNull();
+    expect(screen.getAllByText(REASON)).toHaveLength(1);
+  });
+
+  it("does not mention editing in read-only mode", () => {
+    mount({ writable: false });
     expect(screen.queryByText(REASON)).toBeNull();
     expect(screen.getByText("borehole-1.jpg")).toBeTruthy();
   });

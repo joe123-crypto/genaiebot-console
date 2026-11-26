@@ -34,7 +34,7 @@ describe("read-only caption cards", () => {
     expect((screen.getByRole("button", { name: "Delete variant 1" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Edit variant 1" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Add variant" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Save or reset pending deletions/)).toBeDefined();
+    expect(screen.getByRole("status").textContent).toBe("1 variant removed, not saved yet. Save or reset before editing or adding a variant.");
     expect(save).not.toHaveBeenCalled();
     await saveChanges();
     expect(save).toHaveBeenCalledWith(props.slug, [props.captions[1]], props.captions);

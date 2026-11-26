@@ -29,7 +29,11 @@ describe("caption editing", () => {
     mount();
     expect(text().value).toBe(props.captions[0]);
     expect(screen.getByRole("heading", { name: "Edit caption · Variant 1" })).toBeDefined();
+    // The preview is a view of the writing surface rather than a second
+    // column, so it is reached the way an operator reaches it.
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(within(screen.getByRole("region", { name: "Preview" })).getByText(props.captions[0].replace(/\s+/g, " "))).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Write" }));
     expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(true);
   });
 

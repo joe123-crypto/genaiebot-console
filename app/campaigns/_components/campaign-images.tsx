@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Image as ImageIcon, Plus, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Image as ImageIcon } from "lucide-react";
+import { Section } from "@/app/_components/ui";
 import { campaignImageSrc } from "@/src/lib/campaign-images";
 import { plural } from "@/src/lib/format";
 import type { AdAssets, CampaignAsset } from "@/src/lib/types";
@@ -42,7 +43,9 @@ function ThumbnailImage({ src }: { src: string }) {
 }
 
 /**
- * A campaign's pictures, in the order the bot declares them.
+ * A campaign's pictures, in the order the bot declares them, as a column of
+ * thumbnails beside the work rather than a wall of tiles above it: nothing
+ * here can be edited yet, so they are reference, and each opens full size.
  *
  * The tiles are `images` — what the campaign's own post script declares, and
  * what a run attaches until the R2 cutover. The pixels come from `assets`, the
@@ -51,10 +54,10 @@ function ThumbnailImage({ src }: { src: string }) {
  * the post script declares and the index has never heard of, which is worth
  * seeing rather than hiding.
  *
- * `writeUnavailableReason` is required rather than optional: nothing can store
- * a picture yet, so the add and remove controls are always rendered disabled
- * with the reason beside them. Making the reason impossible to omit is what
- * keeps a control from appearing that would silently do nothing.
+ * Nothing can store a picture yet, so there are no add or remove controls:
+ * a button that is always disabled is only something to read past. The
+ * reason, `writeUnavailableReason`, is said once at the foot of the card
+ * instead, and is required so that a screen cannot leave it out.
  */
 export function CampaignImages({
   images, assets = NO_ASSETS, adAssets, assetDir, writable, writeUnavailableReason,
@@ -72,77 +75,58 @@ export function CampaignImages({
   // One explanation for the whole card beats the same sentence on every tile.
   const indexed = images.filter((name) => campaignImageSrc(assets, name));
   const missing = images.length - indexed.length;
+  const source = images.length > 0
+    ? pictureSource({ indexed: indexed.length, missing, adAssets, assetDir })
+    : null;
 
   return (
-    <section className="card campaign-images" aria-labelledby="campaign-images-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="campaign-images-title">Pictures</h2>
-          <p className="card-note">
-            {images.length > 1
-              ? `${plural(images.length, "picture")} — the bot posts one of them per day, chosen by the date, so a group never sees the same one twice running.`
-              : `${plural(images.length, "picture")}, sent with every caption.`}
-          </p>
-        </div>
-        {writable ? (
-          <div className="campaign-image-actions">
-            <button type="button" className="btn campaign-image-add" disabled title={writeUnavailableReason}>
-              <Plus size={16} aria-hidden /> Add picture
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {writable ? <div className="caption-feedback"><p className="card-note">{writeUnavailableReason}</p></div> : null}
-      <div className="card-pad grid campaign-image-grid">
-        {images.map((name, index) => {
-          const src = campaignImageSrc(assets, name);
-          const shown = src && !broken.includes(name);
-          return (
-            <figure className="campaign-image" key={name}>
-              <div className="campaign-image-head">
-                <span className="pill pill-info">Picture {index + 1}</span>
-                {writable ? (
-                  <button type="button" className="row-action row-action-danger" disabled
-                    aria-label={`Remove picture ${index + 1}`}
-                    title={images.length === 1 ? "Keep at least one picture" : writeUnavailableReason}>
-                    <Trash2 size={16} aria-hidden />
-                  </button>
-                ) : null}
-              </div>
-              <div className="campaign-image-frame">
-                {shown ? (
-                  <img src={src} alt="" loading="lazy" decoding="async"
-                    onError={() => setBroken((names) => names.includes(name) ? names : [...names, name])} />
-                ) : (
-                  <div className="campaign-image-missing">
-                    <ImageIcon size={20} aria-hidden />
-                    <span>Preview unavailable</span>
-                  </div>
-                )}
-              </div>
-              <figcaption className="cell-mono campaign-image-name">{name}</figcaption>
-            </figure>
-          );
-        })}
-        {images.length === 0 ? (
-          <p className="card-note">
-            This campaign declares no picture. A send would stop before posting, because the bot
-            refuses a campaign whose image is missing.
-          </p>
-        ) : null}
-      </div>
+    <Section id="campaign-images" className="campaign-images" title="Pictures"
+      description={images.length > 1
+        ? `${plural(images.length, "picture")}, one posted per day, so a group never sees the same one twice running.`
+        : images.length === 1 ? `${plural(images.length, "picture")}, sent with every caption.` : undefined}
+      footer={source || writable ? <>
+        {source}
+        {writable ? <p className="card-note">{writeUnavailableReason}</p> : null}
+      </> : null}>
       {images.length > 0 ? (
-        <div className="caption-feedback">
-          <PictureSource indexed={indexed.length} missing={missing} adAssets={adAssets}
-            assetDir={assetDir} />
+        <div className="grid campaign-image-grid">
+          {images.map((name, index) => {
+            const src = campaignImageSrc(assets, name);
+            const shown = src && !broken.includes(name);
+            return (
+              <figure className="campaign-image" key={name}>
+                <div className="campaign-image-frame">
+                  {shown ? (
+                    <a href={src} target="_blank" rel="noreferrer" title={`Open ${name} full size`}>
+                      <img src={src} alt={`Picture ${index + 1}`} loading="lazy" decoding="async"
+                        onError={() => setBroken((names) => names.includes(name) ? names : [...names, name])} />
+                    </a>
+                  ) : (
+                    <div className="campaign-image-missing">
+                      <ImageIcon size={18} aria-hidden />
+                      <span>Preview unavailable</span>
+                    </div>
+                  )}
+                  <span className="campaign-image-number" aria-hidden>{index + 1}</span>
+                </div>
+                <figcaption className="cell-mono campaign-image-name" title={name}>{name}</figcaption>
+              </figure>
+            );
+          })}
         </div>
-      ) : null}
-    </section>
+      ) : (
+        <p className="card-note">
+          This campaign declares no picture. A send would stop before posting, because the bot
+          refuses a campaign whose image is missing.
+        </p>
+      )}
+    </Section>
   );
 }
 
 /**
- * Where the pictures above came from, in the operator's terms.
+ * Where the pictures above came from, in the operator's terms -- but only
+ * when that is worth knowing.
  *
  * Three different facts can leave a tile blank — the bot is too old to report
  * the index, the index could not be read, or the index simply does not list
@@ -150,13 +134,17 @@ export function CampaignImages({
  * needs to know which. The mode matters too: before the R2 cutover the tile is
  * the bucket's copy while the run still attaches the one baked into the
  * container, and claiming otherwise would be a lie by omission.
+ *
+ * The healthy case -- every picture served from the live index, in R2 mode --
+ * says nothing: it is what the operator already assumes. Null then, rather
+ * than an empty fragment, so the card can leave its footer off.
  */
-function PictureSource({ indexed, missing, adAssets, assetDir }: {
+function pictureSource({ indexed, missing, adAssets, assetDir }: {
   indexed: number;
   missing: number;
   adAssets?: AdAssets;
   assetDir: string | null;
-}) {
+}): ReactNode {
   if (!adAssets) {
     return <p className="card-note">
       This bot does not report where its pictures are stored yet, so tiles name their file
@@ -167,22 +155,20 @@ function PictureSource({ indexed, missing, adAssets, assetDir }: {
   // "this is the index" nor "the index could not be read" — saying either one
   // alone would be wrong, so it gets its own sentence.
   const mirrored = adAssets.source === "mirror";
+  const lead = indexed === 0
+    ? <>The bot&rsquo;s asset index lists no picture for this campaign, so tiles name their
+        file instead.</>
+    : mirrored
+      ? <>Pictures are the set committed at the bot&rsquo;s last deploy. It could not reach
+          the live index, so a picture changed since then would not show here.</>
+      : null;
+  const absent = missing > 0 && indexed > 0
+    ? <>{plural(missing, "picture")} {missing === 1 ? "is" : "are"} declared by the campaign
+        but absent from the index, so {missing === 1 ? "it has" : "they have"} no preview.</>
+    : null;
+  if (!lead && !absent && !adAssets.note && adAssets.mode === "r2") return null;
   return <>
-    <p className="card-note">
-      {indexed === 0
-        ? <>The bot&rsquo;s asset index lists no picture for this campaign, so tiles name their
-            file instead.</>
-        : mirrored
-          ? <>Pictures are the set committed at the bot&rsquo;s last deploy. It could not reach
-              the live index, so a picture changed since then would not show here.</>
-          : <>Pictures are served from the bot&rsquo;s asset index — the bucket its images were
-              moved to, named in Firestore.</>}
-      {missing > 0 && indexed > 0
-        ? <> {plural(missing, "picture")} below {missing === 1 ? "is" : "are"} declared by the
-            campaign but absent from the index, so {missing === 1 ? "it has" : "they have"} no
-            preview.</>
-        : null}
-    </p>
+    {lead || absent ? <p className="card-note">{lead}{lead && absent ? " " : null}{absent}</p> : null}
     {adAssets.note
       ? <p className="card-note">
           {mirrored ? "Why the live index was not read" : "The index could not be read"}: {adAssets.note}

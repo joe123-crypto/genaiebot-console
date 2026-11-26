@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Image as ImageIcon, Send, Sparkles } from "lucide-react";
+import { Check, Image as ImageIcon, Link2, Send, Sparkles } from "lucide-react";
 import { captionLinkAccountsAction, suggestCaptionAction } from "@/app/campaigns/caption-ai-actions";
 import { SHRINK_NOTICE, shrinkPercent } from "@/src/lib/caption-diff";
 import { internationalNumber, proposeTrackedLink, whatsappLinks } from "@/src/lib/tracked-caption-link";
@@ -123,27 +123,24 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
     setMessages((previous) => previous.map((message) => message.id === id ? { ...message, state } : message));
   }
 
+  // Three stacked bands of small print used to sit between the heading and
+  // the first message. The heading is now a name and the model it runs on;
+  // how it works is said once, where the conversation starts, and whether
+  // to send the pictures is a setting for the message being written, so it
+  // sits with the composer.
   return <section className="card caption-assistant" aria-labelledby="caption-assistant-title">
-    <div className="card-head">
+    <div className="card-head section-head caption-assistant-head">
       <div className="caption-assistant-heading">
-        <span className="caption-ai-icon"><Sparkles size={20} aria-hidden /></span>
-        <div><h2 className="card-title" id="caption-assistant-title">Your caption assistant</h2>
-          <p className="card-note caption-help">Describe what you’d like to change. Review a suggestion before applying it.</p></div>
+        <span className="caption-ai-icon"><Sparkles size={17} aria-hidden /></span>
+        <h2 className="card-title" id="caption-assistant-title">Caption assistant</h2>
       </div>
-      <span className="pill pill-info">DeepSeek V4.1 Flash</span>
+      <span className="pill pill-info section-actions">DeepSeek V4.1 Flash</span>
     </div>
-    <p className="caption-demo-note">Powered by OpenRouter · Applying a suggestion updates your draft. Nothing changes until you save the caption.</p>
-    {images.length ? <label className="caption-pictures-option">
-      <input type="checkbox" checked={usePictures} disabled={disabled || Boolean(unavailableReason)}
-        onChange={(event) => setUsePictures(event.target.checked)} />
-      <ImageIcon size={15} aria-hidden />
-      <span>Show the assistant {images.length === 1 ? "this campaign’s picture" : `these ${images.length} campaign pictures`}</span>
-    </label> : null}
     {unavailableReason ? <p className="caption-ai-unavailable" role="status">{unavailableReason}</p> : null}
     <div ref={history} className="caption-chat-history" role="log" aria-label="Caption assistant conversation" aria-live="polite" aria-relevant="additions text">
       {messages.length === 0 ? <div className="caption-chat-empty"><Sparkles size={24} aria-hidden />
         <h3>A fresh perspective on your caption</h3>
-        <p>Make it more concise, adjust the tone, or give readers a clear next step.</p>
+        <p>Ask for a change and review the suggestion before it touches your draft. Nothing is saved until you save the caption.</p>
       </div> : null}
       {messages.map((message) => <article className={`caption-message caption-message-${message.role}`} key={message.id}>
         <span className="caption-message-author">{message.role === "user" ? "You" : "Caption assistant"}</span>
@@ -173,11 +170,6 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
       {pending ? <p className="caption-chat-pending" role="status"><Sparkles size={15} aria-hidden /> Thinking about your caption…</p> : null}
     </div>
     <div className="caption-chat-bottom">
-      {linkContext ? <>
-        <button type="button" className="caption-starter" disabled={disabled || pending || Boolean(linkContext.unavailableReason)}
-          title={linkContext.unavailableReason} onClick={() => startLink()}>Add tracked WhatsApp link</button>
-        {linkContext.unavailableReason ? <p className="card-note">{linkContext.unavailableReason}</p> : null}
-      </> : null}
       {linkFlow ? <form className="tracked-link-form" aria-label="Tracked WhatsApp link" onSubmit={(event) => { event.preventDefault(); prepareLink(); }}>
         <p>Which WhatsApp number should the link open? One fixed number applies to every variant in this campaign.</p>
         {accountsLoading ? <p className="card-note" role="status">Loading bot numbers…</p> : accounts.length ? <div>
@@ -207,7 +199,11 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
       </form> : null}
       <div className="caption-starter-prompts" aria-label="Suggested requests">{STARTERS.map((starter) =>
         <button type="button" className="caption-starter" key={starter} disabled={disabled || pending || Boolean(unavailableReason)}
-          onClick={() => void send(starter)}>{starter}</button>)}</div>
+          onClick={() => void send(starter)}>{starter}</button>)}
+        {linkContext ? <button type="button" className="caption-starter caption-starter-link" disabled={disabled || pending || Boolean(linkContext.unavailableReason)}
+          title={linkContext.unavailableReason} onClick={() => startLink()}><Link2 size={13} aria-hidden /> Add tracked WhatsApp link</button> : null}
+      </div>
+      {linkContext?.unavailableReason ? <p className="card-note caption-link-unavailable">{linkContext.unavailableReason}</p> : null}
       <form className="caption-composer" onSubmit={(event) => { event.preventDefault(); void send(prompt); }} aria-label="Ask the caption assistant">
         <label className="sr-only" htmlFor="caption-ai-prompt">Message the caption assistant</label>
         <textarea id="caption-ai-prompt" ref={composer} rows={2} maxLength={4000} value={prompt} disabled={disabled || Boolean(unavailableReason)}
@@ -222,7 +218,15 @@ export function CaptionAssistant({ text, revision, disabled, unavailableReason, 
           <Send size={17} aria-hidden /><span>Send</span>
         </button>
       </form>
-      <p className="card-note" id="caption-chat-keyboard">Enter to send · Shift + Enter for a new line</p>
+      <div className="caption-chat-meta">
+        {images.length ? <label className="caption-pictures-option">
+          <input type="checkbox" checked={usePictures} disabled={disabled || Boolean(unavailableReason)}
+            onChange={(event) => setUsePictures(event.target.checked)} />
+          <ImageIcon size={14} aria-hidden />
+          <span>Show the assistant {images.length === 1 ? "this campaign’s picture" : `these ${images.length} campaign pictures`}</span>
+        </label> : null}
+        <p className="card-note" id="caption-chat-keyboard">Enter to send · Shift + Enter for a new line · via OpenRouter</p>
+      </div>
     </div>
   </section>;
 }

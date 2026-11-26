@@ -62,11 +62,12 @@ describe("campaign read resilience", () => {
     expect(stored()).toEqual(before);
     if (key !== "writes") expect(screen.getByText(/Showing out-of-date data/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Apply 1 change" }) as HTMLButtonElement).disabled).toBe(true);
-    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
+    // No caption deletions are pending, so there is nothing for Save to do
+    // and it is not offered.
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     view.rerender(page());
     expect((screen.getByRole("button", { name: "Apply 1 change" }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     expect(stored()).toEqual(before);
     expect(caption.textContent).toContain("Water for BH-ONE");
   });

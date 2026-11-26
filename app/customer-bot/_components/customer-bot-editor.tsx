@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useDisplayTimezone } from "@/app/_components/timezone-context";
+import Link from "next/link";
+import { Database } from "lucide-react";
+import { PageHead, Section } from "@/app/_components/ui";
 import { checkCustomerBotAction, publishCustomerBotAction } from "../actions";
 import {
   CUSTOMER_BOT_FIELDS, CUSTOMER_BOT_LABELS, customerBotProblem, customerBotText, isCustomerBotText,
@@ -15,7 +18,7 @@ function freshDraft(base: CustomerBotVersion): Draft {
 }
 
 const descriptions = {
-  instructions: "Guide tone, wording and stable business policies. The bot looks up current facts when customers ask; maintain offers in Campaigns.",
+  instructions: "Tone, wording and the business policies that rarely change. Prices and offers come from Campaigns, so they don’t belong here.",
 };
 
 export function CustomerBotEditor({ initial, writable, draftKey }: {
@@ -137,77 +140,102 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
   }
 
   const locked = !ready || pending || !writable;
+  // Every button that publishes, checks or discards sits in the page's own
+  // header, where every console screen keeps what it does. They used to
+  // float under the page with nothing around them saying what they acted on.
+  const actions = ready ? <>
+    {!reviewing && dirty && !checking && <button type="button" className="btn" disabled={pending} onClick={() => {
+      setDraft(freshDraft(live));
+      setRestored(false);
+      setFeedback(null);
+    }}>Discard draft</button>}
+    {reviewing && <button type="button" className="btn" disabled={pending} onClick={() => setReviewing(false)}>Continue editing</button>}
+    {checking ? <button type="button" className="btn btn-primary" disabled={pending} onClick={checkLive}>{pending ? "Checking…" : "Check live version"}</button>
+      : conflict ? <button type="button" className="btn btn-primary" disabled={locked} onClick={useLatestAsBase}>Use latest as base</button>
+      : reviewing ? <button type="button" className="btn btn-primary" disabled={locked} onClick={publish}>{pending ? "Publishing…" : "Publish to WhatsApp bot"}</button>
+      : <button type="button" className="btn btn-primary" disabled={locked || !dirty || problems.some(Boolean)} onClick={() => setReviewing(true)}>Review changes</button>}
+  </> : null;
+
+  // One textarea per field, drawn alone or beside the live text it conflicts with.
+  function editor(field: typeof CUSTOMER_BOT_FIELDS[number], index: number) {
+    return <textarea id={`customer-${field}`} className="customer-bot-input" rows={18} value={draft.text[field]} readOnly={locked}
+      aria-describedby={`customer-${field}-help${problems[index] ? ` customer-${field}-error` : ""}`}
+      aria-invalid={Boolean(problems[index])}
+      onChange={(event) => setDraft({ ...draft, text: { ...draft.text, [field]: event.target.value } })} />;
+  }
+
+  const published = live.publishedAt
+    ? <>Last published <time dateTime={live.publishedAt}>{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: zone }).format(new Date(live.publishedAt))}</time>
+        {live.publishedBy ? ` by ${live.publishedBy}` : null}</>
+    : "Using the bot’s existing content";
+
   return (
-    <div className="customer-bot" aria-busy={pending || !ready}>
-      <section className="card card-pad customer-bot-status" aria-label="Publishing status">
-        <div>
-          <strong>{live.publishedAt ? "Last published" : "Using existing bot content"}</strong>
-          {live.publishedAt && <div className="card-note">
-            <time dateTime={live.publishedAt}>{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: zone }).format(new Date(live.publishedAt))}</time>
-            {live.publishedBy && ` · ${live.publishedBy}`}
-          </div>}
+    <div className="customer-bot page-stack" aria-busy={pending || !ready}>
+      <PageHead title="Customer Bot"
+        status={!ready ? null : dirty
+          ? <span className="pill pill-warning pill-dot">Unpublished changes</span>
+          : <span className="pill pill-success pill-dot">Live</span>}
+        subtitle={<>How Genaie replies to customers on WhatsApp · {published}</>}
+        actions={actions} />
+
+      {/* What the page has to say about the draft as a whole, under its
+          heading rather than inside the card a review replaces. */}
+      <div className="page-notices">
+        {!writable && <p>The console is in read-only mode.</p>}
+        {restored && <p role="status">Your draft was restored from this tab.</p>}
+        {storageFailed && <p role="status">Browser storage is unavailable. Keep this page open to retain your draft.</p>}
+        {feedback && <p className={feedback.error ? "customer-bot-error" : "is-ok"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
+        {conflict && <section className="customer-bot-conflict" role="status">
+          <strong>Someone published changes since you started this draft.</strong>
+          <p>Compare the latest live text with your draft and merge any changes you want to keep. Then use the latest version as the base for your review.</p>
+        </section>}
+      </div>
+
+      <div className="page-columns">
+        <div className="page-stack">
+          {!ready ? <Section id="customer-loading"><p role="status">Loading draft…</p></Section>
+            : reviewing ? (
+              <Section id="customer-review" title="Review changes" titleRef={reviewTitle}
+                description="Publishing updates the customer bot’s next WhatsApp reply, including in conversations already open.">
+                {changed.map((field) => <div className="customer-bot-field" key={field}>
+                  <h3 className="card-title">{CUSTOMER_BOT_LABELS[field]}</h3>
+                  <ReviewText previous={live[field]} proposed={text[field]} />
+                </div>)}
+              </Section>
+            ) : CUSTOMER_BOT_FIELDS.map((field, index) => (
+              // The label stays inside the title: it is what names the textarea.
+              <Section key={field} id={`customer-${field}`} flush className="customer-bot-editor"
+                title={<label htmlFor={`customer-${field}`}>{CUSTOMER_BOT_LABELS[field]}</label>}
+                description={<span id={`customer-${field}-help`}>{descriptions[field]}</span>}
+                actions={<span className="card-note">{size(draft.text[field])} of 16 KB</span>}
+                footer={problems[index] ? <p id={`customer-${field}-error`} className="customer-bot-error">{problems[index]}</p> : null}>
+                {conflict ? <div className="customer-bot-compare">
+                  <div><strong>Latest live text</strong><pre>{live[field]}</pre></div>
+                  <div><strong>Your draft</strong>{editor(field, index)}</div>
+                </div> : editor(field, index)}
+              </Section>
+            ))}
         </div>
-        {dirty && <span className="pill pill-warning">Unpublished draft</span>}
-      </section>
-      <section className="card card-pad" aria-labelledby="customer-sources-title">
-        <h2 className="card-title" id="customer-sources-title">Connected data sources</h2>
-        <p className="card-note">The bot looks up relevant information for each factual question. Update offers in Campaigns; no separate briefing is needed.</p>
-        <dl>{live.sources.map((source) => <div key={source.id}>
-          <dt>{source.label}</dt><dd className="card-note">{source.description}</dd>
-        </div>)}</dl>
-      </section>
-      {!writable && <p className="card-note">The console is in read-only mode.</p>}
-      {restored && <p className="card-note" role="status">Your draft was restored from this tab.</p>}
-      {storageFailed && <p className="card-note" role="status">Browser storage is unavailable. Keep this page open to retain your draft.</p>}
-      {feedback && <p className={feedback.error ? "customer-bot-error" : "card-note"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
-      {!ready ? <p role="status">Loading draft…</p> : (
-        <>
-          {conflict && <section className="banner customer-bot-conflict" role="status">
-            <strong>Someone published changes since you started this draft.</strong>
-            <p>Compare the latest live text with your draft and merge any changes you want to keep. Then use the latest version as the base for your review.</p>
-          </section>}
-          {reviewing ? (
-            <section className="customer-bot-review" aria-labelledby="customer-review-title">
-              <h2 id="customer-review-title" ref={reviewTitle} tabIndex={-1}>Review changes</h2>
-              <p className="card-note">Publishing updates the customer bot’s next WhatsApp reply, including in conversations already open.</p>
-              {changed.map((field) => <section className="card card-pad" key={field}>
-                <h3 className="card-title">{CUSTOMER_BOT_LABELS[field]}</h3>
-                <ReviewText previous={live[field]} proposed={text[field]} />
-              </section>)}
-            </section>
-          ) : CUSTOMER_BOT_FIELDS.map((field, index) => (
-            <section className="card card-pad" key={field}>
-              <h2 className="card-title"><label htmlFor={`customer-${field}`}>{CUSTOMER_BOT_LABELS[field]}</label></h2>
-              <p id={`customer-${field}-help`} className="card-note">{descriptions[field]}</p>
-              <div className={conflict ? "customer-bot-compare" : undefined}>
-                {conflict && <div><strong>Latest live text</strong><pre>{live[field]}</pre></div>}
-                <div>
-                  {conflict && <strong>Your draft</strong>}
-                  <textarea id={`customer-${field}`} rows={12} value={draft.text[field]} readOnly={locked}
-                    aria-describedby={`customer-${field}-help${problems[index] ? ` customer-${field}-error` : ""}`}
-                    aria-invalid={Boolean(problems[index])}
-                    onChange={(event) => setDraft({ ...draft, text: { ...draft.text, [field]: event.target.value } })} />
-                  {problems[index] && <p id={`customer-${field}-error`} className="customer-bot-error">{problems[index]}</p>}
-                </div>
-              </div>
-            </section>
-          ))}
-          <div className="customer-bot-actions">
-            {!reviewing && dirty && !checking && <button type="button" className="btn" disabled={pending} onClick={() => {
-              setDraft(freshDraft(live));
-              setRestored(false);
-              setFeedback(null);
-            }}>Discard draft</button>}
-            {reviewing && <button type="button" className="btn" disabled={pending} onClick={() => setReviewing(false)}>Continue editing</button>}
-            {checking ? <button type="button" className="btn btn-primary" disabled={pending} onClick={checkLive}>{pending ? "Checking…" : "Check live version"}</button>
-              : conflict ? <button type="button" className="btn btn-primary" disabled={locked} onClick={useLatestAsBase}>Use latest as base</button>
-              : reviewing ? <button type="button" className="btn btn-primary" disabled={locked} onClick={publish}>{pending ? "Publishing…" : "Publish to WhatsApp bot"}</button>
-              : <button type="button" className="btn btn-primary" disabled={locked || !dirty || problems.some(Boolean)} onClick={() => setReviewing(true)}>Review changes</button>}
-          </div>
-        </>
-      )}
+
+        <aside className="page-stack">
+          <Section id="customer-sources" title="Connected data sources"
+            description="Looked up for every factual question, so answers stay current without a briefing."
+            footer={<Link prefetch={false} className="link" href="/campaigns">Offers are edited in Campaigns</Link>}>
+            <ul className="source-list">{live.sources.map((source) => <li key={source.id}>
+              <span className="source-list-icon" aria-hidden><Database size={14} /></span>
+              <span><strong>{source.label}</strong><span className="card-note">{source.description}</span></span>
+            </li>)}</ul>
+          </Section>
+        </aside>
+      </div>
     </div>
   );
+}
+
+/** How much of the bot's 16 KB a field uses, as the limit itself counts it. */
+function size(text: string) {
+  const kilobytes = new TextEncoder().encode(text).byteLength / 1024;
+  return `${kilobytes < 10 ? kilobytes.toFixed(1) : Math.round(kilobytes)} KB`;
 }
 
 function ReviewText({ previous, proposed }: { previous: string; proposed: string }) {

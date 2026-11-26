@@ -12,7 +12,7 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 export const NO_CRON_NOTE =
   "No cron is registered for this campaign, so it stays silent whatever this switch says. Registering one is done on the gateway, not here.";
 
-/** What each half of the switch does, said once. The card below and the
+/** What each half of the switch does, said once. The header button below and the
  *  Campaigns table's row ask the operator the same question, and two copies of
  *  this sentence would eventually describe the same change differently. */
 export const TURN_ON_BODY = "It posts to its groups from its next run.";
@@ -25,12 +25,38 @@ export function switchTitle(turningOn: boolean, title: string) {
 }
 
 /**
- * The operator's own on/off switch for a campaign.
+ * Where a campaign stands, for beside its name.
  *
- * A campaign posts only when this switch is on AND a cron is registered for it.
- * This edits the first and only reports the second: when there is no cron the
- * switch still works, but the card says plainly that turning it on will not
- * make the campaign post.
+ * A campaign posts only when the operator's switch is on AND a cron is
+ * registered for it AND its schedule is ready. The pill names the first
+ * thing in that chain that is stopping it, so "on" is never shown for a
+ * campaign that will stay silent. `offLabel` is `campaignOffLabel` of the
+ * same row: it is what catches a schedule still pending.
+ */
+export function CampaignStatus({ storeEnabled, cronEnabled, offLabel }: {
+  storeEnabled: boolean;
+  cronEnabled?: boolean;
+  offLabel?: string | null;
+}) {
+  if (!storeEnabled) return <span className="pill pill-dot">Switched off</span>;
+  if (cronEnabled === false) return <span className="pill pill-warning pill-dot">Switched on, but not posting</span>;
+  if (offLabel) return <span className="pill pill-warning pill-dot">Not posting · {offLabel}</span>;
+  return <span className="pill pill-success pill-dot">Posting</span>;
+}
+
+/** Said under the heading of a campaign with no cron, whatever its switch says. */
+export function NoCronNotice() {
+  return <div className="banner banner-warning banner-slim" role="note">{NO_CRON_NOTE}</div>;
+}
+
+/**
+ * The operator's own on/off switch for a campaign: one button for the
+ * screen's header, and the question it asks.
+ *
+ * This edits the operator's switch and only reports the cron: when there is
+ * no cron the switch still works, and the screen says plainly (with
+ * NoCronNotice) that turning it on will not make the campaign post. Why the
+ * button is off, when it is, is its title.
  */
 export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }: {
   slug: string;
@@ -64,23 +90,14 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
     });
   }
 
-  const state = storeEnabled
-    ? cronEnabled === false ? "Switched on, but not posting." : "Switched on."
-    : "Switched off. It posts nothing until it is turned back on.";
-
   return (
-    <section className="card card-pad campaign-switch" aria-label="Campaign switch">
-      <div className="campaign-switch-row">
-        <p className="card-note"><strong>{state}</strong></p>
-        <button type="button" className="btn" disabled={!gate.allowed || pending}
-          title={gate.allowed ? undefined : gate.reason}
-          onClick={() => setTarget(!storeEnabled)}>
-          {storeEnabled ? <Pause size={15} aria-hidden /> : <Play size={15} aria-hidden />}
-          {storeEnabled ? "Turn off" : "Turn on"}
-        </button>
-      </div>
-      {cronEnabled === false ? <p className="card-note">{NO_CRON_NOTE}</p> : null}
-      {!gate.allowed ? <p className="card-note">{gate.reason}</p> : null}
+    <>
+      <button type="button" className="btn campaign-switch" disabled={!gate.allowed || pending}
+        title={gate.allowed ? undefined : gate.reason}
+        onClick={() => setTarget(!storeEnabled)}>
+        {storeEnabled ? <Pause size={15} aria-hidden /> : <Play size={15} aria-hidden />}
+        {storeEnabled ? "Turn off" : "Turn on"}
+      </button>
       {target !== null && gate.allowed ? (
         <ConfirmDialog
           title={switchTitle(target, title)}
@@ -97,6 +114,6 @@ export function CampaignSwitch({ slug, title, storeEnabled, cronEnabled, gate }:
             : <p>{TURN_OFF_BODY}</p>}
         </ConfirmDialog>
       ) : null}
-    </section>
+    </>
   );
 }
