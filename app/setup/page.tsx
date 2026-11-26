@@ -7,6 +7,7 @@ import { getWorkspace } from "@/src/lib/workspace";
 import { BOT_PROVISIONING } from "@/src/config";
 import { CreateBot } from "./create-bot";
 import { DeleteAccountCard } from "@/app/settings/_components/delete-account-card";
+import { botRemovalOf } from "@/src/lib/bot-teardown";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export default async function SetupPage() {
   const operator = await requireOperator();
   const workspace = await getWorkspace();
   if (workspace?.bot) redirect("/");
+  const botRemoval = await botRemovalOf(workspace);
   const enabled = BOT_PROVISIONING !== "none";
   return (
     <SessionBoundary uid={operator.uid}><ConsoleShell counts={{}} navDisabled operator={{ name: operator.name, meta: operator.email }}>
@@ -36,7 +38,7 @@ export default async function SetupPage() {
         {/* Settings sits behind requireBot, which sends a workspace without one
             back here. Without this card the only way out of a workspace they
             do not want would be to ask an operator. */}
-        <DeleteAccountCard email={operator.email} />
+        <DeleteAccountCard email={operator.email} bot={botRemoval} />
       </div>
     </ConsoleShell></SessionBoundary>
   );

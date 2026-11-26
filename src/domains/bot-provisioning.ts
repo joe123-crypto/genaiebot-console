@@ -36,6 +36,15 @@ export const STAGE_LABEL: Record<ProvisionStage, string> = {
 /** What the step list draws for one stage of a run. */
 export type StepState = "done" | "current" | "pending" | "failed";
 
+/**
+ * What deleting the account does to its bot, as the Settings card says it:
+ * `removed` for a bot this console built, `manual` for one set up by hand,
+ * `none` when there is no bot. Decided server-side by `botRemovalOf`
+ * (`src/lib/bot-teardown`); it lives here so the card can name it without
+ * reaching into a server-only module.
+ */
+export type BotRemoval = "removed" | "manual" | "none";
+
 export function stageStatus(state: ProvisionState, stage: ProvisionStage): StepState {
   const position = PROVISION_STAGES.indexOf(stage);
   if (state.status === "idle") return "pending";

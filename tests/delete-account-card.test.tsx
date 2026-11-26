@@ -22,16 +22,34 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.mutate.mockResolvedValue({ ok: true });
   Object.defineProperty(window, "location", { value: { replace: mocks.replace }, writable: true });
-  render(<DeleteAccountCard email={EMAIL} />);
 });
 afterEach(cleanup);
 
-describe("deleting the account from Settings", () => {
-  it("says what goes, and says plainly that the bot does not", () => {
+describe("what the card says about the bot", () => {
+  it("lists a bot this console created among what goes, and says its storage outlives it briefly", () => {
+    render(<DeleteAccountCard email={EMAIL} bot="removed" />);
     expect(screen.getByText(/cannot be undone/)).toBeTruthy();
-    expect(screen.getByText(/Your bot is not removed by this/)).toBeTruthy();
+    expect(screen.getByText("Your bot, and the WhatsApp connection it holds")).toBeTruthy();
+    expect(screen.getByText(/keeps its storage for a few days/)).toBeTruthy();
+    expect(screen.queryByText(/not removed by this/)).toBeNull();
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
+
+  it("says plainly that a bot set up by hand is not removed", () => {
+    render(<DeleteAccountCard email={EMAIL} bot="manual" />);
+    expect(screen.getByText(/set up by hand, so it is not removed by this/)).toBeTruthy();
+    expect(screen.queryByText("Your bot, and the WhatsApp connection it holds")).toBeNull();
+  });
+
+  it("says nothing about a bot there is none of", () => {
+    render(<DeleteAccountCard email={EMAIL} bot="none" />);
+    expect(screen.queryByText(/Your bot/)).toBeNull();
+    expect(screen.getByText("The pictures stored for your campaigns")).toBeTruthy();
+  });
+});
+
+describe("deleting the account from Settings", () => {
+  beforeEach(() => { render(<DeleteAccountCard email={EMAIL} bot="removed" />); });
 
   it("asks before deleting anything, and deletes nothing on cancel", () => {
     open();

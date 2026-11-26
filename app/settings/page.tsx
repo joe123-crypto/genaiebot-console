@@ -6,6 +6,7 @@ import { CapSettingsForm } from "@/app/settings/_components/cap-settings-form";
 import { DisplayTimezoneForm } from "@/app/settings/_components/display-timezone-form";
 import { AppearanceForm } from "@/app/settings/_components/appearance-form";
 import { DeleteAccountCard } from "@/app/settings/_components/delete-account-card";
+import { botRemovalOf } from "@/src/lib/bot-teardown";
 import { getLiveView } from "@/src/lib/live-client";
 import type { ConfigurationPayload } from "@/src/lib/bot-client";
 import { BotUnavailableError } from "@/src/lib/bot-client";
@@ -20,7 +21,8 @@ const SUBTITLE = "The clock the console is read on, light or dark, how many adve
 
 export default async function SettingsPage() {
   const operator = await requireOperator();
-  await requireBot();
+  const workspace = await requireBot();
+  const botRemoval = await botRemovalOf(workspace);
   const zone = await displayTimezone();
   const theme = await displayTheme();
   const loaded = await getLiveView<ConfigurationPayload>("settings").then((overview) => ({ ok: true as const, overview }), (error: unknown) => {
@@ -37,7 +39,7 @@ export default async function SettingsPage() {
           <DisplayTimezoneForm zone={zone} />
           <AppearanceForm theme={theme} />
           <BotError detail={loaded.detail} />
-          <DeleteAccountCard email={operator.email} />
+          <DeleteAccountCard email={operator.email} bot={botRemoval} />
         </div>
       </Shell>
     );
@@ -62,7 +64,7 @@ export default async function SettingsPage() {
         ) : (
           <Empty>This bot predates cap settings in the console. Deploy a newer genaebot to see and change them here.</Empty>
         )}
-        <DeleteAccountCard email={operator.email} />
+        <DeleteAccountCard email={operator.email} bot={botRemoval} />
       </div>
     </Shell>
   );

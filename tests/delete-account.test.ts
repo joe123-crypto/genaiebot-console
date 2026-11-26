@@ -33,10 +33,37 @@ vi.mock("@/src/lib/firebase-admin", () => ({
   AuthUnavailableError: class extends Error {},
 }));
 
+/** The steps outside Firestore, recorded in the same list so the order of the
+ *  whole deletion can be read off one array. Each is tested on its own in
+ *  `bot-teardown.test.ts`, `workspace-pictures.test.ts` and `provision-run.test.ts`. */
+const outside = vi.hoisted(() => ({
+  beginDeletion: vi.fn(async (): Promise<unknown> => ({ railway: { serviceId: "svc-1", volumeId: "vol-1" } })),
+  removeProvisionedBot: vi.fn(async () => ({ services: ["svc-1"], volumes: ["vol-1"] })),
+  deleteWorkspacePictures: vi.fn(async () => 3),
+}));
+
+vi.mock("@/src/lib/provision-run", async (original) => ({
+  ...await original<typeof import("@/src/lib/provision-run")>(),
+  beginDeletion: (workspace: { id: string }) => { firestore.calls.push(`fence:${workspace.id}`); return outside.beginDeletion(); },
+}));
+vi.mock("@/src/lib/bot-teardown", async (original) => ({
+  ...await original<typeof import("@/src/lib/bot-teardown")>(),
+  removeProvisionedBot: (id: string, run: unknown) => {
+    firestore.calls.push(`removeBot:${id}:${(run as { railway?: { serviceId?: string } } | null)?.railway?.serviceId ?? "-"}`);
+    return outside.removeProvisionedBot();
+  },
+}));
+vi.mock("@/src/lib/workspace-pictures", () => ({
+  deleteWorkspacePictures: (id: string) => { firestore.calls.push(`deletePictures:${id}`); return outside.deleteWorkspacePictures(); },
+}));
+
 const csrf = vi.hoisted(() => ({ cookie: "a".repeat(64) as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => ({ value: csrf.cookie }) }) }));
 
 import { AccountDeletionError, deleteAccount } from "@/src/lib/account-deletion";
+import { BotTeardownError } from "@/src/lib/bot-teardown";
+import { ProvisioningBusyError } from "@/src/lib/provision-run";
+import { RailwayError } from "@/src/lib/railway-api";
 import { DELETE } from "@/app/api/workspace/route";
 import { apiOperator } from "@/src/lib/auth";
 
@@ -52,16 +79,60 @@ beforeEach(() => {
   vi.mocked(getWorkspace).mockResolvedValue(TEST_WORKSPACE);
   vi.mocked(apiOperator).mockResolvedValue(TEST_OPERATOR);
 });
-afterEach(() => { vi.clearAllMocks(); forgetCachedWorkspaces(); });
+afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); forgetCachedWorkspaces(); });
+
+const FIRESTORE_STEPS = ["recursiveDelete:workspaces/test-workspace", "delete:consoleUsers/test-operator", "deleteUser:test-operator"];
 
 describe("deleting the signed-in user's account", () => {
-  it("removes the workspace and its data, then the pointer, then the sign-in", async () => {
+  it("removes the bot, then the pictures, then the workspace and its data, then the pointer, then the sign-in", async () => {
     await deleteAccount(TEST_OPERATOR);
     expect(firestore.calls).toEqual([
-      "recursiveDelete:workspaces/test-workspace",
-      "delete:consoleUsers/test-operator",
-      "deleteUser:test-operator",
+      "fence:test-workspace",
+      // The run record is read before the workspace is deleted, because it is
+      // the only thing that names the bot's volume once the service is gone.
+      "removeBot:test-workspace:svc-1",
+      "deletePictures:test-workspace",
+      ...FIRESTORE_STEPS,
     ]);
+  });
+
+  it("keeps the whole account when the bot could not be removed, so asking again carries on", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    outside.removeProvisionedBot.mockRejectedValueOnce(new RailwayError("Your bot's hosting refused a step of the setup.", "Not Authorized: token sk-123"));
+    const failure = await deleteAccount(TEST_OPERATOR).then(() => { throw new Error("expected a refusal"); },
+      (error: unknown) => error as Error);
+    expect(failure).toBeInstanceOf(AccountDeletionError);
+    expect(failure.message).toBe("Your bot could not be removed, so your account was kept. Try again shortly.");
+    // Railway's own words reach the log, never the message the browser is shown.
+    expect(failure.message).not.toContain("sk-123");
+    expect(firestore.calls).toEqual(["fence:test-workspace", "removeBot:test-workspace:svc-1"]);
+  });
+
+  it("passes on the teardown's own reason when it refused rather than failed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    outside.removeProvisionedBot.mockRejectedValueOnce(new BotTeardownError("Your bot could not be identified for removal, so your account was kept."));
+    await expect(deleteAccount(TEST_OPERATOR)).rejects.toThrow("could not be identified");
+    expect(firestore.calls).not.toContain(FIRESTORE_STEPS[0]);
+  });
+
+  it("keeps the whole account when the pictures could not be deleted", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    outside.deleteWorkspacePictures.mockRejectedValueOnce(new Error("r2 down"));
+    await expect(deleteAccount(TEST_OPERATOR)).rejects.toThrow("Your stored pictures could not be deleted, so your account was kept.");
+    for (const step of FIRESTORE_STEPS) expect(firestore.calls).not.toContain(step);
+  });
+
+  it("waits for a bot that is being built this instant rather than leave what it builds behind", async () => {
+    outside.beginDeletion.mockRejectedValueOnce(new ProvisioningBusyError());
+    await expect(deleteAccount(TEST_OPERATOR)).rejects.toThrow("Your bot is still being set up. Try again in a minute.");
+    expect(firestore.calls).toEqual(["fence:test-workspace"]);
+  });
+
+  it("removes a bot it finds by name even when the run record could not be read", async () => {
+    outside.beginDeletion.mockResolvedValueOnce(null);
+    await deleteAccount(TEST_OPERATOR);
+    expect(firestore.calls).toContain("removeBot:test-workspace:-");
+    expect(firestore.calls.at(-1)).toBe("deleteUser:test-operator");
   });
 
   it("deletes nothing at all when the registry cannot say whose data this is", async () => {

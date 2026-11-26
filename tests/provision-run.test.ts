@@ -168,6 +168,53 @@ describe("the lease", () => {
   });
 });
 
+describe("deleting the account", () => {
+  it("hands back the run record and fences provisioning off", async () => {
+    const { startRun, beginDeletion, claimRun } = await store();
+    await startRun(WORKSPACE, NOW);
+    const run = await beginDeletion(WORKSPACE, NOW + 1_000);
+    expect(run).toMatchObject({ stage: "reserving", outcome: "running" });
+    expect(fake.read(PATH)?.deletingAt).toBe(new Date(NOW + 1_000).toISOString());
+    // A poll arriving now reports, and builds nothing.
+    expect((await claimRun(WORKSPACE, NOW + 2_000)).kind).toBe("busy");
+  });
+
+  it("refuses to start or re-arm a run while the account is being deleted", async () => {
+    const { beginDeletion, startRun } = await store();
+    await beginDeletion(WORKSPACE, NOW);
+    await expect(startRun(WORKSPACE, NOW + 1_000)).rejects.toMatchObject({ detail: expect.stringContaining("being deleted") });
+    expect(fake.read(PATH)?.provisioning).toBeUndefined();
+  });
+
+  it("waits for a step that holds the lease, which may be creating something this instant", async () => {
+    const { startRun, claimRun, beginDeletion, ProvisioningBusyError } = await store();
+    await startRun(WORKSPACE, NOW);
+    expect((await claimRun(WORKSPACE, NOW)).kind).toBe("claimed");
+    await expect(beginDeletion(WORKSPACE, NOW + 1_000)).rejects.toBeInstanceOf(ProvisioningBusyError);
+    expect(fake.read(PATH)?.deletingAt).toBeUndefined();
+  });
+
+  it("goes ahead once that lease has run out", async () => {
+    const { startRun, claimRun, beginDeletion } = await store();
+    const { LEASE_MS } = await domain();
+    await startRun(WORKSPACE, NOW);
+    await claimRun(WORKSPACE, NOW);
+    await expect(beginDeletion(WORKSPACE, NOW + LEASE_MS + 1)).resolves.toMatchObject({ outcome: "running" });
+  });
+
+  it("has no record to hand back for a workspace that never ran one", async () => {
+    const { beginDeletion } = await store();
+    expect(await beginDeletion(WORKSPACE, NOW)).toBeNull();
+  });
+
+  it("stops fencing once it is old, so an abandoned deletion does not freeze /setup", async () => {
+    const { beginDeletion, startRun } = await store();
+    const { DELETION_FENCE_MS } = await domain();
+    await beginDeletion(WORKSPACE, NOW);
+    await expect(startRun(WORKSPACE, NOW + DELETION_FENCE_MS + 1)).resolves.toMatchObject({ outcome: "running" });
+  });
+});
+
 describe("a record this console cannot read", () => {
   it("is not reported as no run at all: a live service may be behind it", async () => {
     const { claimRun } = await store();
