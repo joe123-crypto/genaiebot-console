@@ -194,6 +194,18 @@ describe("deleting the account", () => {
     expect(fake.read(PATH)?.deletingAt).toBeUndefined();
   });
 
+  it("waits for a release step that is changing this bot right now", async () => {
+    const { beginDeletion, ProvisioningBusyError } = await store();
+    fake.put(PATH, { ...fake.read(PATH), release: { image: "img", settingsGeneration: 0,
+      lease: { holder: "tick", until: new Date(NOW + 30_000).toISOString() } } });
+    const refused = await beginDeletion(WORKSPACE, NOW).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(ProvisioningBusyError);
+    expect((refused as { detail: string }).detail).toMatch(/being updated right now/);
+    expect(fake.read(PATH)?.deletingAt).toBeUndefined();
+    // A lease that has run out holds nothing.
+    await expect(beginDeletion(WORKSPACE, NOW + 31_000)).resolves.toBeNull();
+  });
+
   it("goes ahead once that lease has run out", async () => {
     const { startRun, claimRun, beginDeletion } = await store();
     const { LEASE_MS } = await domain();

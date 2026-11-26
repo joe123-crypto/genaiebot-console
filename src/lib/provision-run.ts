@@ -9,7 +9,10 @@ import {
   rearmRun,
   type ProvisionRun,
 } from "@/src/domains/provision-run";
+import { leaseHeld as releaseLeaseActive, parseBotRelease } from "@/src/domains/bot-release";
 import { firestoreAdmin } from "./firebase-admin";
+
+const releaseLeaseHeld = (value: unknown, now: number) => releaseLeaseActive(parseBotRelease(value).lease, now);
 import { WorkspaceUnavailableError, type Workspace } from "./workspace";
 
 /**
@@ -186,8 +189,8 @@ export async function saveRun(workspace: Workspace, run: ProvisionRun): Promise<
 /** A step holds the lease right now, so what it is building is not yet written
  *  down. Deleting the account in that moment could leave that one thing behind. */
 export class ProvisioningBusyError extends WorkspaceUnavailableError {
-  constructor() {
-    super("Your bot is still being set up. Try again in a minute.");
+  constructor(detail = "Your bot is still being set up. Try again in a minute.") {
+    super(detail);
     this.name = "ProvisioningBusyError";
   }
 }
@@ -214,6 +217,11 @@ export async function beginDeletion(workspace: Workspace, now = Date.now()): Pro
       if (!snapshot.exists) throw new WorkspaceUnavailableError("Your workspace could not be found.");
       const run = parseRun(snapshot.get("provisioning"));
       if (run?.outcome === "running" && leaseHeld(run, now)) throw new ProvisioningBusyError();
+      // A release step is changing this bot's image or settings right now; the
+      // teardown would race it. Its lease is a minute at most, like a run's.
+      if (releaseLeaseHeld(snapshot.get("release"), now)) {
+        throw new ProvisioningBusyError("Your bot is being updated right now. Try again in a minute.");
+      }
       transaction.update(reference_, { deletingAt: new Date(now).toISOString() });
       return run;
     });

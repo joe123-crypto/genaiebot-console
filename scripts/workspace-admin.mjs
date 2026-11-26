@@ -7,6 +7,11 @@
 //   node --env-file=.env.local scripts/workspace-admin.mjs show --email you@example.com
 //   node --env-file=.env.local scripts/workspace-admin.mjs link --email you@example.com --workspace <id>
 //   node --env-file=.env.local scripts/workspace-admin.mjs sweep-bots [--write]
+//   node --env-file=.env.local scripts/workspace-admin.mjs fleet status
+//   node --env-file=.env.local scripts/workspace-admin.mjs fleet pause --reason "<why>"
+//   node --env-file=.env.local scripts/workspace-admin.mjs fleet resume
+//   node --env-file=.env.local scripts/workspace-admin.mjs fleet promote --image ghcr.io/<owner>/genaebot:<sha>
+//   node --env-file=.env.local scripts/workspace-admin.mjs fleet sync-settings [--write]
 //
 // The registry is consoleUsers/{uid} -> workspaces/{id}. Not `users`: this
 // Firebase project and its uids are shared with agent_genaie, whose profiles
@@ -38,6 +43,17 @@
 // src/lib/account-deletion.ts gives. It needs BOT_RAILWAY_API_TOKEN,
 // BOT_RAILWAY_PROJECT_ID and BOT_RAILWAY_ENVIRONMENT_ID; BOT_TEMPLATE_SERVICE_ID
 // is never touched; R2_* is optional and without it pictures are not looked at.
+//
+// `fleet` drives the release rollout to workspace bots (src/lib/fleet-rollout.ts)
+// by writing its record, consoleFleet/release; the console's own tick does
+// every Railway call. `status` lists each console-built bot, its image and
+// where its rollout stands. `pause` stops new bots being started; `resume` lets
+// them go on, though the bot that failed stays on its old image until the next
+// release. `promote` sets the target by hand -- to roll the whole fleet back to
+// an older build, say. `sync-settings` has every bot re-copy the gateway's
+// shared values on its next quiet window; Railway keeps no history of a
+// variable, so a bot that then fails keeps the new values, and the command
+// says so and changes nothing without --write.
 import { createHmac, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
@@ -93,6 +109,85 @@ export async function checkBot(origin, workspaceId, { fetchImpl = fetch, secret 
     throw new Error(`${origin} serves ${reported ? `workspace ${reported}` : "no workspace"}, not ${workspaceId}: set its GENAIE_WORKSPACE_ID=${workspaceId} and redeploy it first`);
   }
   return body.writes;
+}
+
+const FLEET = ["consoleFleet", "release"];
+const IMAGE = /^([a-z0-9.-]+(?::[0-9]+)?\/[a-z0-9._/-]+):([0-9a-f]{40})$/;
+
+/** The fleet record, or null before the first release has been promoted. */
+async function readFleetRecord(db) {
+  const snapshot = await db.collection(FLEET[0]).doc(FLEET[1]).get();
+  return snapshot.exists ? snapshot.data() : null;
+}
+
+const shortImage = (image) => (typeof image === "string" ? image.replace(/:([0-9a-f]{7})[0-9a-f]{33}$/, ":$1") : "unknown");
+
+async function fleetStatus(db) {
+  const fleet = await readFleetRecord(db);
+  const lines = [];
+  if (!fleet) lines.push("No release has been promoted yet; new bots are created from BOT_IMAGE.");
+  else {
+    lines.push(`Target: ${fleet.image} (promoted ${fleet.promotedAt} by ${fleet.source ?? "unknown"})`,
+      `Settings generation: ${fleet.settingsGeneration ?? 0}`);
+    if (fleet.paused) lines.push(`PAUSED since ${fleet.paused.at}: ${fleet.paused.reason}`);
+  }
+  const ready = await db.collection("workspaces").where("provisioning.outcome", "==", "ready").get();
+  if (ready.empty) lines.push("No console-built bots.");
+  for (const document of ready.docs) {
+    const data = document.data();
+    const release = data.release ?? {};
+    const attempt = release.attempt;
+    const state = attempt ? `${attempt.stage}${attempt.stage === "failed" ? `: ${attempt.detail}` : ` to ${shortImage(attempt.target)}`}`
+      : fleet && release.image === fleet.image && (release.settingsGeneration ?? 0) >= (fleet.settingsGeneration ?? 0) ? "up to date"
+      : "behind; waits for its quiet window";
+    lines.push(`  ${document.id}  ${shortImage(release.image)}  settings ${release.settingsGeneration ?? 0}  ${state}`);
+  }
+  return lines.join("\n");
+}
+
+async function fleet(subcommand, options) {
+  const { db } = await admin();
+  const ref = db.collection(FLEET[0]).doc(FLEET[1]);
+  const now = new Date().toISOString();
+  if (subcommand === "status") return fleetStatus(db);
+  if (subcommand === "promote") {
+    const match = IMAGE.exec(options.image ?? "");
+    if (!match) throw new Error("promote needs --image <registry>/<owner>/genaebot:<40-character commit sha>");
+    // The same rule as the console's release route: a build of the repository
+    // bots are already created from, never another one.
+    const repository = process.env.BOT_IMAGE?.trim().replace(/:[^:/]+$/, "");
+    if (repository && repository !== match[1]) throw new Error(`${match[1]} is not the repository BOT_IMAGE names`);
+    return db.runTransaction(async (transaction) => {
+      const current = (await transaction.get(ref)).data() ?? null;
+      // The same image again changes nothing, pause included -- as the console's own promote.
+      if (current?.image === options.image) return `${options.image} is already the target; nothing changed.`;
+      transaction.set(ref, { image: options.image, promotedAt: now, source: "operator",
+        settingsGeneration: current?.settingsGeneration ?? 0, ...(current ? { previousImage: current.image } : {}),
+        paused: null, tickLease: current?.tickLease ?? null });
+      return `Target is now ${options.image}${current?.paused ? ", and the pause is cleared" : ""}. ` +
+        "The next tick starts the first bot that is quiet.";
+    });
+  }
+  if (subcommand === "pause" || subcommand === "resume" || subcommand === "sync-settings") {
+    if (subcommand === "pause" && !options.reason) throw new Error("pause needs --reason");
+    if (subcommand === "sync-settings" && !options.write) {
+      return "Every bot would re-copy the gateway's shared settings (keeping its own gateway password) and be " +
+        "redeployed, one at a time in its quiet window. Railway keeps no history of a variable, so a bot that " +
+        "then fails is put back on its image but KEEPS the new settings. Run again with --write to do it.";
+    }
+    return db.runTransaction(async (transaction) => {
+      const current = (await transaction.get(ref)).data();
+      if (!current) throw new Error("no release has been promoted yet");
+      const change = subcommand === "pause" ? { paused: { at: now, reason: String(options.reason).slice(0, 400) } }
+        : subcommand === "resume" ? { paused: null }
+        : { settingsGeneration: (current.settingsGeneration ?? 0) + 1 };
+      transaction.update(ref, change);
+      return subcommand === "pause" ? "Paused: no new bot will be started."
+        : subcommand === "resume" ? "Resumed. A bot that failed stays on its old image until the next release."
+        : `Settings generation is now ${change.settingsGeneration}; bots pick it up one at a time.`;
+    });
+  }
+  throw new Error("usage: workspace-admin.mjs fleet status|pause|resume|promote|sync-settings");
 }
 
 /** Switches that take no value. Everything else is `--name value`. */
@@ -342,6 +437,7 @@ async function sweepBots({ write }) {
 }
 
 export async function main(argv) {
+  if (argv[0] === "fleet") return fleet(argv[1], argsOf(["fleet", ...argv.slice(2)]).options);
   const { command, options } = argsOf(argv);
   if (command === "create") return create(options);
   if (command === "token") return deriveBotToken(options.workspace);
@@ -349,7 +445,7 @@ export async function main(argv) {
   if (command === "show") return show(options);
   if (command === "link") return link(options);
   if (command === "sweep-bots") return sweepBots(options);
-  throw new Error("usage: workspace-admin.mjs create|token|connect-bot|show|link|sweep-bots (see the top of this file)");
+  throw new Error("usage: workspace-admin.mjs create|token|connect-bot|show|link|sweep-bots|fleet (see the top of this file)");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

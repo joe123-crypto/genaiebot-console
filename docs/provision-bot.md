@@ -176,6 +176,76 @@ production. With `BOT_PROVISIONING_STUB_URL` set to a bot's origin, the run's
 last stage performs the real handshake and connects it, exactly as `connect-bot`
 does. Without it, the run finishes as simulated and the screen says so.
 
+## Releases reach every bot
+
+A genaebot release used to stop at your gateway: a workspace's bot got the image
+`BOT_IMAGE` named when `/setup` built it and never changed again. Now every
+console-built bot follows the gateway, one at a time.
+
+1. **genaebot releases the gateway**, as before. Only if that release passed its
+   startup check does the workflow's `promote-workspace-bots` job run. It waits
+   for the commit's image on GHCR, then calls `POST /api/internal/fleet/release`
+   with it. The image is accepted only if it is a 40-character commit build of
+   the repository `BOT_IMAGE` names. It becomes the target in
+   `consoleFleet/release`, and new bots are created from it too.
+2. **`.github/workflows/fleet-tick.yml` calls `POST /api/internal/fleet/tick`
+   every ten minutes.** Each tick moves the rollout on by at most one step
+   (`src/lib/fleet-rollout.ts`):
+   - **One bot at a time, fleet-wide.** The first bot to take a release is the
+     canary for the rest.
+   - **Only a quiet bot is started.** The console asks the bot's own
+     `GET /internal/console/release-window` (the same arithmetic as the gateway's
+     release gate). A bot that is sending waits. So does a bot that cannot answer
+     because it is down or predates the route, since a gate that cannot see does
+     not wave a restart through.
+   - **Starting:** note the connected WhatsApp accounts, set the image, and ask
+     for one deploy. Setting an image does not deploy by itself (measured
+     2026-11-26), so that explicit deploy is the only one.
+   - **Verifying:** the deployment must succeed within 15 minutes. Within 10 more,
+     the bot must answer for its workspace with every account that was connected
+     before connected again.
+   - **Failing:** the bot is put back on its previous image and redeployed, its
+     record says why, and the fleet **pauses**. No other bot gets that release.
+     The tick that paused it answers 409, so that one scheduled run fails and
+     GitHub emails you. Later runs pass with a warning while it stays paused.
+3. **The next release clears the pause**, because it is presumably the fix, and
+   the rollout starts again with the bot that failed. Promoting the same image
+   again (a re-run of the CI job) changes nothing, pause included.
+
+Only bots this console built are included: a workspace whose `provisioning`
+record is `ready` and names a service, the same rule account deletion follows.
+A workspace whose account is being deleted is skipped. Account deletion likewise
+waits while a rollout step holds the bot (`workspaces/{id}.release.lease`, a
+minute at most).
+
+The gateway's release-profile switches are never copied to a bot, at creation
+or since. These are `GENAIE_CAMPAIGN_TRANSPORT`, the idle-retirement,
+allocator and cache-cleanup trials, and `GENAIE_OVERNIGHT_STANDBY`. Absent, each
+is its baseline default, so an experiment on your gateway stays on your gateway.
+
+**Operator commands** (`scripts/workspace-admin.mjs fleet …`) write the record;
+the tick does the Railway work:
+
+| Command | What it does |
+| --- | --- |
+| `fleet status` | The target, whether it is paused and why, and each bot's image and stage |
+| `fleet pause --reason "…"` | Starts no new bot; one already in flight finishes |
+| `fleet resume` | Lets the others go on. The bot that failed stays on its old image until the next release |
+| `fleet promote --image <repo>:<sha>` | Sets the target by hand, e.g. to roll every bot back to an older build |
+| `fleet sync-settings --write` | Every bot re-copies the gateway's shared values (keeping its own gateway password) and is redeployed on its image, by the same one-at-a-time rules. Use it after rotating a key or when a release needs a new variable. Railway keeps no variable history, so a bot that then fails keeps the new values |
+
+**Set-up**, once:
+
+- **Vercel (console):** `FLEET_RELEASE_TOKEN` and `FLEET_TICK_TOKEN`, each at
+  least 32 characters and different from each other.
+- **genaebot repository:** the same `FLEET_RELEASE_TOKEN` as a secret, and
+  `CONSOLE_URL` as a variable.
+- **Console repository:** the same `FLEET_TICK_TOKEN` as a secret, and
+  `CONSOLE_URL` as a variable.
+
+Until a side is set, it is off: the promote job warns and succeeds, the tick
+workflow notices and exits, and both routes answer 401.
+
 ## A new user's bot, by hand
 
 This is what `BOT_PROVISIONING=railway` automates, and the fallback when it is

@@ -144,14 +144,34 @@ describe("a whole run", () => {
   });
 
   it("builds exactly one of everything", async () => {
+    // As Railway really behaves (measured 2026-11-26): setting the image
+    // deploys nothing, so no deployment is there to find afterwards.
+    railway.readLatestDeployment.mockResolvedValue(null);
     await (await provisioner()).startProvisioning(WORKSPACE);
     await drive();
     expect(railway.createService).toHaveBeenCalledTimes(1);
     expect(railway.createVolume).toHaveBeenCalledTimes(1);
     expect(railway.createDomain).toHaveBeenCalledTimes(1);
     expect(railway.setServiceSource).toHaveBeenCalledTimes(1);
-    // Setting the image IS the deploy on a first run, so nothing redeploys.
-    expect(railway.deployService).not.toHaveBeenCalled();
+    // So the one deploy is the one asked for.
+    expect(railway.deployService).toHaveBeenCalledTimes(1);
+    expect(railway.readDeploymentStatus).toHaveBeenCalledWith("dep-2");
+  });
+
+  it("starts a bot on the fleet's release target when there is one", async () => {
+    const target = `ghcr.io/joe123-crypto/genaebot:${"b".repeat(40)}`;
+    fake.put("consoleFleet/release", { image: target, promotedAt: new Date(NOW).toISOString(), source: "ci", settingsGeneration: 2 });
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    await drive();
+    expect(railway.setServiceSource).toHaveBeenCalledWith("svc-1", target);
+    // Recorded, so the rollout knows this bot is already on the target.
+    expect(fake.read(PATH)?.release).toEqual({ image: target, settingsGeneration: 2 });
+  });
+
+  it("falls back to BOT_IMAGE when no release has been promoted", async () => {
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    await drive();
+    expect(railway.setServiceSource).toHaveBeenCalledWith("svc-1", undefined);
   });
 
   it("gives the bot its image only once the volume, domain and config are there", async () => {
@@ -166,10 +186,11 @@ describe("a whole run", () => {
     expect(order(railway.writeVariables)).toBeLessThan(order(railway.setServiceSource));
   });
 
-  it("watches the deployment that setting the image started", async () => {
+  it("adopts a deployment that is already there rather than asking for a second", async () => {
     await (await provisioner()).startProvisioning(WORKSPACE);
     await drive();
     expect(railway.readDeploymentStatus).toHaveBeenCalledWith("dep-1");
+    expect(railway.deployService).not.toHaveBeenCalled();
   });
 
   it("keeps waiting when the deployment it started is not visible yet", async () => {

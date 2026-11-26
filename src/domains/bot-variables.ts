@@ -35,14 +35,29 @@ export const PER_BOT = [
  * * `SOURCE_COMMIT` -- described the template's uploaded build. A bot created
  *   from an image is whatever that image is; a stale commit here would misreport
  *   which code is running.
+ * * The gateway's release-profile switches (`RELEASE_PROFILE` below) -- trials
+ *   genaebot's release job turns on and off on your gateway alone
+ *   (`deploy/railway-release.py` OWNED). Absent, a bot runs exactly the baseline
+ *   profile: transport `cli` and every trial off, which is what each one's own
+ *   default is. Copying them would spread an experiment to every user's bot.
  *
  * `RAILWAY_`-prefixed names are dropped too: Railway injects its own into every
  * service, and copying them would hand a new bot the template's identity.
  */
+export const RELEASE_PROFILE = [
+  "GENAIE_CAMPAIGN_TRANSPORT",
+  "GENAIE_CATALOG_IDLE_RETIREMENT",
+  "GENAIE_HISTORY_IDLE_RETIREMENT",
+  "MALLOC_ARENA_MAX",
+  "GENAIE_WHATSAPP_CACHE_CLEANUP",
+  "GENAIE_OVERNIGHT_STANDBY",
+] as const;
+
 export const NOT_COPIED = [
   "GENAIE_ASSET_KEY_PREFIX",
   "CONSOLE_API_GATE_TOKEN",
   "SOURCE_COMMIT",
+  ...RELEASE_PROFILE,
 ] as const;
 
 /**
