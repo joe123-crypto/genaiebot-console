@@ -5,9 +5,11 @@ import { requireOperator, auditActor } from "@/src/lib/auth";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import {
+  THEME_COOKIE_MAX_AGE_SECONDS, THEME_COOKIE_NAME,
   TIMEZONE_COOKIE_MAX_AGE_SECONDS, TIMEZONE_COOKIE_NAME, WRITES_ENABLED,
 } from "@/src/config";
 import { isDisplayTimezone } from "@/src/lib/timezone";
+import { isTheme } from "@/src/lib/theme";
 import { getConfiguration, updateSettings } from "@/src/lib/bot-client";
 import {
   capChange, capDraftProblems, storedSettings, type CapChange, type CapDraft,
@@ -89,6 +91,26 @@ export async function setDisplayTimezoneAction(zone: string): Promise<WriteOutco
     path: "/",
   });
   // Times are server-rendered on every screen, so every screen re-reads.
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Pick whether the console is read light or dark.
+ *
+ * Like the clock, it does not gate on `WRITES_ENABLED`: nothing reaches the
+ * bot. It sets a cookie on the browser that asked, which the root layout reads
+ * so the next page paints in the chosen theme from its first frame.
+ */
+export async function setThemeAction(theme: string): Promise<WriteOutcome> {
+  await requireOperator();
+  if (!isTheme(theme)) return { ok: false, detail: "That is not one of the themes the console offers." };
+  (await cookies()).set(THEME_COOKIE_NAME, theme, {
+    maxAge: THEME_COOKIE_MAX_AGE_SECONDS,
+    sameSite: "lax",
+    path: "/",
+  });
+  // The theme is set on the root element, so the whole tree re-renders with it.
   revalidatePath("/", "layout");
   return { ok: true };
 }

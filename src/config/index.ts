@@ -150,4 +150,9 @@ export const SESSION_COOKIE_NAME = "genaie_console_session";
  *  state: it is held by the browser that chose it and never reaches the bot. */
 export const TIMEZONE_COOKIE_NAME = "genaie_console_timezone";
 export const TIMEZONE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+/** Whether this browser reads the console light or dark (see `src/lib/theme`).
+ *  Like the clock, a preference held by the browser that chose it: it never
+ *  reaches the bot, and an unset cookie is light. */
+export const THEME_COOKIE_NAME = "genaie_console_theme";
+export const THEME_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
