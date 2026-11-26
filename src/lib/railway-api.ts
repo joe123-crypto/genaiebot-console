@@ -19,7 +19,8 @@ const TIMEOUT_MS = 20_000;
 
 export class RailwayError extends Error {
   readonly detail: string;
-  /** Railway's own words. Logged, never sent to a browser. */
+  /** Railway's own words. Logged, never sent to a browser: the provisioner's
+   *  `logFailure` (`bot-provisioning-railway`) is what writes it down. */
   readonly upstream: string;
   constructor(detail: string, upstream = "") {
     super(detail);

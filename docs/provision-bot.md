@@ -65,6 +65,26 @@ only after the bot has answered for that workspace. To see where a run got to,
 read `provisioning` on `workspaces/{id}` -- it names the Railway service. The
 steps below are still the fallback for anything the console cannot finish.
 
+**Why it failed is recorded, so nobody has to read Railway's logs to guess.**
+Two places say it, and neither is the screen -- what the user reads is always
+one sentence this console wrote, never Railway's words:
+
+* `provisioning.railway.deploymentStatus` holds Railway's own last word on the
+  deployment that ended the run: `CRASHED` is a bot that would not boot,
+  `FAILED` a build that did not, `REMOVED` or `SKIPPED` a deployment that never
+  ran, `NEEDS_APPROVAL` one nobody approved. **Open
+  `provisioning.railway.deploymentId` in Railway** for that deployment's own
+  build and deploy log. The field is written only by the verdict that ends a
+  run, and **Try again** clears it, so it is never the previous attempt's.
+* The console's own server log carries the same verdict with those ids under
+  `[provisioning]`, and it is also the only place a Railway API error's own
+  words (`RailwayError.upstream`) are written down.
+
+The first real run, on 2026-11-26, failed exactly here: Railway marked the
+deployment `CRASHED`, which was true -- the bot image's entrypoint could not
+boot on a brand new, root-owned volume -- but the console had kept no record of
+the verdict, so finding that out meant reading Railway's deploy log by hand.
+
 The service is the only resource looked up before it is created, so there is a
 narrow window -- a crash between `volumeCreate` returning and the id being
 written down -- in which a retry asks for a second volume and fails. If a run

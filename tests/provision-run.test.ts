@@ -63,6 +63,12 @@ describe("reading a stored run", () => {
                                                 deploymentAttempt: 2, variablesAt: new Date(NOW).toISOString() } };
     expect(parseRun(stored)?.railway).toMatchObject({ serviceId: "svc", volumeId: "vol", deploymentAttempt: 2 });
   });
+
+  it("keeps the verdict a lost deployment left, which is what says why a run failed", async () => {
+    const { parseRun, newRun } = await domain();
+    const stored = { ...newRun(NOW), railway: { deploymentId: "dep-1", deploymentStatus: "CRASHED" } };
+    expect(parseRun(stored)?.railway).toMatchObject({ deploymentId: "dep-1", deploymentStatus: "CRASHED" });
+  });
 });
 
 describe("starting a run", () => {
@@ -84,6 +90,25 @@ describe("starting a run", () => {
     expect(again).toMatchObject({ outcome: "running", stage: "starting", attempt: 2 });
     expect(again.railway.serviceId).toBe("svc");
     expect(again.detail).toBeUndefined();
+  });
+
+  it("stores a lost deployment's verdict, and does not carry it into the next attempt", async () => {
+    const { startRun, saveRun } = await store();
+    const { failedRun, withResources } = await domain();
+    const opened = await startRun(WORKSPACE, NOW);
+    const lost = withResources({ ...opened, stage: "starting" },
+                               { serviceId: "svc", deploymentId: "dep-1", deploymentStatus: "CRASHED" }, NOW);
+    await saveRun(WORKSPACE, failedRun(lost, "would not start", NOW));
+    const failed = fake.read(PATH)?.provisioning as { railway?: Record<string, unknown> } | undefined;
+    expect(failed?.railway).toMatchObject({ deploymentId: "dep-1", deploymentStatus: "CRASHED" });
+
+    const again = await startRun(WORKSPACE, NOW + 60_000);
+    expect(again.railway.serviceId).toBe("svc");
+    expect(again.railway.deploymentStatus).toBeUndefined();
+    // Absent, not present and undefined: Firestore refuses an undefined value,
+    // so a verdict that is dropped has to be dropped from the document too.
+    const rearmed = fake.read(PATH)?.provisioning as { railway?: Record<string, unknown> } | undefined;
+    expect(rearmed?.railway && "deploymentStatus" in rearmed.railway).toBe(false);
   });
 });
 
