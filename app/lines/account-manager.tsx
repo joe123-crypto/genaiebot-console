@@ -11,13 +11,14 @@ import { displayStamp } from '@/src/lib/timezone';
 import { useDisplayTimezone } from '@/app/_components/timezone-context';
 import { ConfirmDialog } from '@/app/_components/confirm-dialog';
 import { usePolling } from '@/app/_components/use-polling';
-import { setContactLineAction, syncLineNumberAction } from '@/app/lines/actions';
-import { linkedNumberChange } from '@/src/domains/line-edit';
-import { canWrite } from '@/src/lib/write-capabilities';
+import { createLineAction, setContactLineAction, syncLineNumberAction } from '@/app/lines/actions';
+import { FIRST_LINE_ID, lineRows, linkedNumberChange } from '@/src/domains/line-edit';
+import { canCreateLine, canWrite } from '@/src/lib/write-capabilities';
 import type { WriteCapabilities } from '@/src/lib/types';
 
 /** A change to the line's configuration, waiting for the operator's yes. */
 type LineChange =
+  | { kind: 'create'; id: string; number: string }
   | { kind: 'number'; id: string; from: string; to: string }
   | { kind: 'contact'; id: string; number: string }
   | { kind: 'no-contact'; id: string };
@@ -87,6 +88,10 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
   const [busy, setBusy] = useState<string | null>(null);
   const actionRunning = useRef(false);
   const reading = useRef<Promise<void> | null>(null);
+  // One line is configured once. The status poll runs every 5 seconds and a
+  // pairing poll every 2, so without this a slow write would be started again
+  // underneath itself.
+  const configuring = useRef(new Set<string>());
   const [available, setAvailable] = useState(true);
   const [adding, setAdding] = useState(false);
   const [newId, setNewId] = useState('');
@@ -114,6 +119,24 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
     }
     catch { setMembershipError(true); }
   }, []);
+  /**
+   * Give a line that has just been linked its configuration document. Done for
+   * the operator rather than asked about: they have just scanned a QR code for
+   * this very line, and a line the bot does not know is one nothing can use.
+   */
+  const ensureLineConfig = useCallback(async (id: string) => {
+    const gate = canCreateLine(configWrites, configCapabilities);
+    // Not an error: the line is linked either way, and the screen says beside
+    // the card what the bot would have to accept before it can be used.
+    if (!gate.allowed) return;
+    if (configuring.current.has(id)) return;
+    configuring.current.add(id);
+    try {
+      const outcome = await createLineAction(id);
+      if (outcome.ok) { setNotice(`${id}: linked and added to the bot's configuration.`); await refreshMembership(); }
+      else setActionError(outcome.detail);
+    } finally { configuring.current.delete(id); }
+  }, [configWrites, configCapabilities, refreshMembership]);
   const pollSession = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -121,6 +144,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
       setSession((current) => current?.id === sessionId ? next : current);
       setPairingError(null);
       if (next.state !== 'waiting') await refresh();
+      if (next.state === 'connected') void ensureLineConfig(next.accountId);
     } catch (error) {
       // Status and QR polling share a serialized gateway bridge. A busy read
       // was not executed; keep the existing QR and retry the status read.
@@ -129,7 +153,7 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
       // A timed-out poll may have activated the account; reconcile live state.
       await refresh();
     }
-  }, [sessionId, refresh]);
+  }, [sessionId, refresh, ensureLineConfig]);
   usePolling(refresh, 5000, !busy);
   usePolling(refreshMembership, 60_000);
   usePolling(pollSession, 2000, Boolean(sessionWaiting && !pairingError));
@@ -213,36 +237,52 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
   function add(event: FormEvent) {
     event.preventDefault();
     if (!ACCOUNT_ID.test(newId)) { setActionError('Use 1–64 lowercase letters, digits, underscores or hyphens.'); return; }
+    if (ids.includes(newId)) { setActionError('That line already exists. Link it from its card.'); return; }
     void act(newId, 'link', true);
+  }
+  /** Add a line: the first one is called `default` and is not asked about. */
+  function addLine() {
+    setActionError(null);
+    if (firstLine) void act(FIRST_LINE_ID, 'link', true);
+    else setAdding(true);
   }
   function closeLineChange() { setLineChange(null); setLineError(null); }
   function applyLineChange() {
     if (!lineChange) return;
     const change = lineChange;
     startLineChange(async () => {
-      const outcome = change.kind === 'number' ? await syncLineNumberAction(change.id)
-        : await setContactLineAction(change.kind === 'contact' ? change.id : null);
+      const outcome = change.kind === 'create' ? await createLineAction(change.id)
+        : change.kind === 'number' ? await syncLineNumberAction(change.id)
+          : await setContactLineAction(change.kind === 'contact' ? change.id : null);
       if (!outcome.ok) { setLineError({ detail: outcome.detail, problems: outcome.problems }); return; }
       closeLineChange();
-      setNotice(change.kind === 'number' ? `${change.id}: adverts now give ${change.to}, from each campaign's next run.`
-        : change.kind === 'contact' ? `${change.id} is now the contact line, from each campaign's next run.`
-          : 'No contact line: each advert gives the number of the line that posts it, from its next run.');
+      setNotice(change.kind === 'create' ? `${change.id}: added to the bot's configuration with ${change.number}.`
+        : change.kind === 'number' ? `${change.id}: adverts now give ${change.to}, from each campaign's next run.`
+          : change.kind === 'contact' ? `${change.id} is now the contact line, from each campaign's next run.`
+            : 'No contact line: each advert gives the number of the line that posts it, from its next run.');
       await refreshMembership();
     });
   }
   const numberGate = canWrite(configWrites, configCapabilities, 'lines', 'number');
   const contactGate = canWrite(configWrites, configCapabilities, 'settings', 'contact_account');
-  const lineChangeGate = lineChange?.kind === 'number' ? numberGate : contactGate;
+  const createGate = canCreateLine(configWrites, configCapabilities);
+  const lineChangeGate = lineChange?.kind === 'create' ? createGate
+    : lineChange?.kind === 'number' ? numberGate : contactGate;
   const unavailable = Boolean(readError || !available);
   const disabled = !writesEnabled || unavailable || Boolean(busy) || !data;
   const configured = new Map(membership?.map((line) => [line.id, line]));
-  // Retain configured lines when unavailable, but never imply live state.
-  const ids = [...new Set([...(data?.accounts.map((a) => a.id) ?? []), ...(membership?.map((a) => a.id) ?? [])])];
+  // Retain configured lines when unavailable, but never imply live state. A
+  // line the gateway invented for a workspace that has made none is held back:
+  // see `lineRows`.
+  const { ids, hidden } = lineRows(data?.accounts, membership ?? undefined);
+  const firstLine = Boolean(data) && ids.length === 0;
+  // The only place a held-back line's reason can still be read.
+  const blockedReason = hidden.map((account) => account.startBlockedReason).find(Boolean) ?? null;
 
   return (
     <>
       <PageHead title="WhatsApp lines" subtitle="Connect WhatsApp accounts and control when each line runs."
-        actions={<button className="account-button account-button-primary" disabled={disabled} onClick={() => { setAdding(true); setActionError(null); }}><Plus size={16} /> Add account</button>} />
+        actions={<button className="account-button account-button-primary" disabled={disabled} onClick={addLine}><Plus size={16} /> Add line</button>} />
       <div className="account-toolbar">
         <span role="status">{!available ? 'Updates paused while hidden or offline.' : readError ? 'Live status unavailable.' : data ? 'Live status · checks every 5 seconds' : 'Loading live status…'}
           {data ? <span className="account-observed">Last observed: <time dateTime={data.observedAt}>{displayStamp(data.observedAt, displayZone)}</time></span> : null}
@@ -278,6 +318,16 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
                 {line?.promos.length ? <div className="tag-row">{line.promos.map((promo) => <span className={`tag${promo.off ? ' tag-off' : ''}`} key={promo.slug}>{campaignTitle(promo.slug)} · {promo.count}</span>)}</div> : null}
                 <p className="card-note">Counts show configured assignments; deliveries depend on connection and account state.</p>
                 {account?.startBlockedReason ? <p className="card-note">{account.startBlockedReason}</p> : null}
+                {configWrites && !line && account?.linked === true && account.number ? (
+                  <div className="account-config">
+                    <p className="card-note">This line is linked, but it is not in the bot&apos;s configuration yet, so no group or campaign can use it.</p>
+                    <div className="account-actions">
+                      <button className="account-button" disabled={!createGate.allowed || linePending}
+                        title={createGate.allowed ? undefined : createGate.reason}
+                        onClick={() => setLineChange({ kind: 'create', id, number: account.number! })}>Add this line to the configuration</button>
+                    </div>
+                  </div>
+                ) : null}
                 {configWrites && line ? (() => {
                   const linked = account ? linkedNumberChange(line.number, account.number) : null;
                   return (
@@ -312,30 +362,47 @@ export function AccountManager({ writesEnabled = false, configWrites = false }: 
           );
         })}
       </div>
-      {data && ids.length === 0 ? <p className="empty">No accounts configured. Add an account to connect WhatsApp.</p> : null}
+      {firstLine ? (
+        <div className="card card-pad empty">
+          <h2 className="card-title">No WhatsApp lines yet</h2>
+          <p>A line is one WhatsApp number this bot posts from. Add your first line and scan the QR code
+            with the phone that holds the number. It is called <strong>default</strong>; you name the ones
+            you add after it.</p>
+          {blockedReason ? <p className="card-note">{blockedReason}</p> : null}
+          {!blockedReason && !createGate.allowed
+            ? <p className="card-note">{createGate.reason} The line will link, but nothing can be assigned to it until then.</p>
+            : null}
+          <button className="account-button account-button-primary" disabled={disabled || Boolean(blockedReason)}
+            onClick={addLine}><Plus size={16} /> Add your first line</button>
+        </div>
+      ) : null}
       {lineChange ? (
         <ConfirmDialog
-          title={lineChange.kind === 'number' ? `Use the linked number for ${lineChange.id}?`
-            : lineChange.kind === 'contact' ? `Make ${lineChange.id} the contact line?` : `Stop using ${lineChange.id} as the contact line?`}
-          confirmLabel={lineChange.kind === 'number' ? 'Use the linked number' : lineChange.kind === 'contact' ? 'Make contact line' : 'Stop using it'}
+          title={lineChange.kind === 'create' ? `Add ${lineChange.id} to the bot's configuration?`
+            : lineChange.kind === 'number' ? `Use the linked number for ${lineChange.id}?`
+              : lineChange.kind === 'contact' ? `Make ${lineChange.id} the contact line?` : `Stop using ${lineChange.id} as the contact line?`}
+          confirmLabel={lineChange.kind === 'create' ? 'Add the line'
+            : lineChange.kind === 'number' ? 'Use the linked number' : lineChange.kind === 'contact' ? 'Make contact line' : 'Stop using it'}
           warning={lineChangeGate.allowed ? lineChangeGate.warning : undefined}
           pending={linePending}
           error={lineError}
           onConfirm={applyLineChange}
           onClose={closeLineChange}
         >
-          {lineChange.kind === 'number'
+          {lineChange.kind === 'create'
+            ? <p>Groups and campaigns can then be assigned to this line, and adverts it posts will give <strong>{lineChange.number}</strong> as the number to contact.</p>
+            : lineChange.kind === 'number'
             ? <p>Adverts on this line will send customers to <strong>{lineChange.to}</strong> instead of {lineChange.from}, from each campaign&apos;s next run.</p>
             : lineChange.kind === 'contact'
               ? <p>Every advert will give <strong>{lineChange.number}</strong> as the number to contact, whichever line posts it, from each campaign&apos;s next run.</p>
               : <p>Each advert will give the number of the line that posts it, from each campaign&apos;s next run.</p>}
         </ConfirmDialog>
       ) : null}
-      {adding ? <Modal title="Add WhatsApp account" close={() => !busy && setAdding(false)}>
+      {adding ? <Modal title="Add another line" close={() => !busy && setAdding(false)}>
         <form onSubmit={add} className="account-form">
-          <label htmlFor="account-id">Account ID</label>
+          <label htmlFor="account-id">Line name</label>
           <input id="account-id" autoFocus value={newId} disabled={Boolean(busy)} maxLength={64} required pattern="[a-z0-9][a-z0-9_-]{0,63}" onChange={(event) => setNewId(event.target.value)} placeholder="e.g. sales" />
-          <p className="card-note">Use lowercase letters, digits, underscores or hyphens. New accounts have automated replies disabled and no group assignments.</p>
+          <p className="card-note">Use lowercase letters, digits, underscores or hyphens. This names the line throughout the console; customers never see it. New lines have automated replies disabled and no group assignments.</p>
           {actionError ? <p role="alert">{actionError}</p> : null}
           <button className="account-button account-button-primary" disabled={disabled || !newId}>Generate QR code</button>
         </form>

@@ -4,6 +4,7 @@ import {
   NO_WRITE_KEY_REASON,
   NOT_LIVE_WARNING,
   READ_ONLY_REASON,
+  canCreateLine,
   canDelete,
   canEditSchedule,
   canEditScheduleEntries,
@@ -183,5 +184,32 @@ describe("the schedule gates", () => {
   it("allows both once the bot advertises entry support", () => {
     expect(canEditSchedule(true, live({ edit: true, entries: true })).allowed).toBe(true);
     expect(canEditScheduleEntries(true, live({ edit: true, entries: true })).allowed).toBe(true);
+  });
+});
+
+describe("adding a linked line to the configuration", () => {
+  const able: WriteCapabilities = { ...LIVE, fields: { lines: ["number"] }, lineCreation: { create: true } };
+  const why = (gate: WriteGate) => (gate.allowed ? undefined : gate.reason);
+
+  it("needs the console's switch, a write key and live configuration", () => {
+    expect(why(canCreateLine(false, able))).toBe(READ_ONLY_REASON);
+    expect(why(canCreateLine(true, undefined))).toBe(BOT_TOO_OLD_REASON);
+    expect(why(canCreateLine(true, { ...able, enabled: false }))).toBe(NO_WRITE_KEY_REASON);
+    expect(why(canCreateLine(true, { ...able, affectsProduction: false })))
+      .toBe("Adding a line requires live Firestore configuration.");
+  });
+
+  it("is refused by a bot whose writer will not create a line", () => {
+    const { lineCreation: _absent, ...older } = able;
+    expect(why(canCreateLine(true, older)))
+      .toBe("Deploy the companion bot update so a linked line can be added to the configuration.");
+    expect(why(canCreateLine(true, { ...able, lineCreation: { create: false, reason: "Writer is read-only." } })))
+      .toBe("Writer is read-only.");
+  });
+
+  it("also needs the number field the document is created from", () => {
+    expect(why(canCreateLine(true, { ...able, fields: { lines: [] } })))
+      .toBe("The bot does not accept changes to number yet.");
+    expect(canCreateLine(true, able).allowed).toBe(true);
   });
 });

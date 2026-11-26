@@ -8,8 +8,10 @@
  * This is what genaebot's `deploy/init-workspace.py` does, minus the lines.
  *
  * No line is seeded. A line is a WhatsApp account somebody logs into, not a
- * field to type in -- genaebot's own writer refuses to create one -- and
- * `/setup` asks for no number. The user links WhatsApp on `/lines` afterwards.
+ * field to type in, and `/setup` asks for no number. The user links WhatsApp on
+ * `/lines` afterwards, where the first line is called `default` and is given
+ * its configuration document from the number that linked account reports
+ * (`app/lines/actions:createLineAction`).
  *
  * Pure: the copy and every rule about it, with the Firestore reading and
  * writing in `src/lib/workspace-seed`.

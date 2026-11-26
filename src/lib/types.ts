@@ -198,6 +198,9 @@ export type WriteCapabilities = {
   campaignCreation?: { create: boolean; images: boolean; scheduling: boolean; keyPrefix?: string | null };
   campaignDeletion?: { delete: boolean; reason?: string };
   scheduleEditing?: { edit: boolean; entries?: boolean; reason?: string };
+  /** Whether the bot's writer will CREATE a `lines` document. Absent from a bot
+   *  whose writer still refuses to, which is read as "cannot". */
+  lineCreation?: { create: boolean; reason?: string };
 };
 
 export type ScheduleEdit = {

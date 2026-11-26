@@ -7,6 +7,11 @@ export type WhatsAppAccount = {
   running: boolean | null;
   connected: boolean | null;
   repliesEnabled: boolean;
+  /** Whether the gateway's configuration actually has an account for this line,
+   *  as opposed to the implicit `default` it reports when none is configured.
+   *  Absent from an older bot, which is read as "cannot tell" -- never as
+   *  "not configured", so no line disappears from a console reading one. */
+  configured?: boolean;
   startBlockedReason: string | null;
   hasError: boolean;
   pairingSessionId: string | null;

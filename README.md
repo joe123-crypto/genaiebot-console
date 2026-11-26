@@ -105,7 +105,7 @@ npm run build
 | Campaign preview | Live. Campaign Details shows estimated link clicks as a total and by group. Caption templates can be added, edited and deleted when writes are enabled; saved previews include per-group refs and links. Pictures are shown from the bot's asset index; adding and removing them is not wired up. |
 | Customer Bot | Publish reply instructions and review the live data sources used for customer answers. Requires the companion bot API update. |
 | Schedule | Live. Drag start times and save recurring schedule changes when the companion bot support is deployed; pending gateway updates and per-line overlaps are shown. |
-| WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. |
+| WhatsApp lines | Live account status, QR linking, unlinking, pause and start through the gateway API. A workspace starts with no lines: the first one it adds is called `default` and is not asked about, later ones are named by the operator, and each is given its configuration document once WhatsApp reports its number. |
 | Setup | Where a workspace with no bot lands. With `BOT_PROVISIONING=railway` it creates the bot for real -- its own Railway service, volume, domain and config -- and reports each stage, then sends the user to WhatsApp lines to link a number; `stub` walks the same screen without building anything. Otherwise it shows the workspace ID for [the manual runbook](docs/provision-bot.md). |
 
 Overview's total and a campaign's own total are not the same measure and will not

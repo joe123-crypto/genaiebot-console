@@ -56,3 +56,19 @@ describe('account HTTP boundary', () => {
     expect((await post(['ads', 'link'])).status).toBe(502);
   });
 });
+
+describe('the account payload contract', () => {
+  const row = payload.accounts[0];
+  it('accepts a bot that says whether a line is configured, and one that does not', async () => {
+    for (const accounts of [[row], [{ ...row, configured: true }], [{ ...row, configured: false }]]) {
+      mockRequest.mockResolvedValue({ ...payload, accounts });
+      expect((await GET(new Request('http://localhost:3000/api/accounts'), context())).status).toBe(200);
+    }
+  });
+  it('refuses a payload whose configured flag is not a boolean', async () => {
+    mockRequest.mockResolvedValue({ ...payload, accounts: [{ ...row, configured: 'yes' }] });
+    const response = await GET(new Request('http://localhost:3000/api/accounts'), context());
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toMatch(/Update the gateway API/);
+  });
+});

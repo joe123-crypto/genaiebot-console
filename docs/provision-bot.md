@@ -148,9 +148,12 @@ off or a run could not finish.
    domain. Leave `GENAIE_ASSET_KEY_PREFIX` unset: the bot then keeps its
    pictures under `w/<id>/ads/`.
 3. **Seed its config.** From a genaebot checkout:
-   `deploy/init-workspace.py --workspace <id> --line default=+<number> --write`.
-   This writes `settings/defaults` and the bot's line. Without them every send
-   fails closed.
+   `deploy/init-workspace.py --workspace <id> --write`.
+   This writes `settings/defaults`. Without it every send fails closed. A line
+   is no longer seeded here: the user adds theirs on the Lines page, and the
+   console writes its document from the number the linked account reports. Pass
+   `--line default=+<number>` only to hand over a workspace with its line
+   already made.
 4. **Connect it:** `wsadmin connect-bot --workspace <id> --url https://<bot domain>`.
    This asks the bot first. It must accept the workspace's token and report
    `GENAIE_WORKSPACE_ID=<id>`, or nothing is saved. The user's console switches
