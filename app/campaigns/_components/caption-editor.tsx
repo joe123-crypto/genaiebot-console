@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
-import { ArrowLeft, Eye, Pencil, RotateCcw, Save } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { Eye, Pencil, RotateCcw, Save } from "lucide-react";
 import { PageHead } from "@/app/_components/ui";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import { SyncNotice } from "@/app/_components/live-page";
@@ -54,12 +54,34 @@ export function CaptionEditorScreen({ slug, variant, detail, writable, saveUnava
 
 /** The writing surface itself: text, its live preview, and the AI assistant.
  *  Undo and the assistant's revision guard are its own; remount it to reset. */
-export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus, aiUnavailableReason, images, slug, tracking = {}, trackingUnavailableReason, onTracking, onText }: {
+export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus, aiUnavailableReason, images, slug, tracking = {}, trackingUnavailableReason, footer, onTracking, onText }: {
   name: string; variantLabel: string; text: string; disabled: boolean; autoFocus?: boolean;
-  aiUnavailableReason?: string; images?: string[]; slug?: string; tracking?: Tracking; trackingUnavailableReason?: string; onTracking?: (tracking: Tracking) => void; onText: (text: string) => void;
+  aiUnavailableReason?: string; images?: string[]; slug?: string; tracking?: Tracking; trackingUnavailableReason?: string;
+  /** More for the surface's own last line, after its placeholder help: the
+   *  editor's Reset to latest. The wizard has nothing to add. */
+  footer?: ReactNode;
+  onTracking?: (tracking: Tracking) => void; onText: (text: string) => void;
 }) {
+  const [view, setView] = useState<"write" | "preview">("write");
   const [revision, setRevision] = useState(0);
   const [undo, setUndo] = useState<{ text: string; tracking: Tracking } | null>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+
+  // The box grows with the caption, so the whole of it can be read without
+  // a second scrollbar inside the page's own. Measured, because Firefox does
+  // not size a textarea to its content; again whenever the width it wraps at
+  // changes. A hidden panel measures as nothing, so only the visible one.
+  useLayoutEffect(() => {
+    const element = input.current;
+    if (!element || view !== "write") return;
+    const fit = () => {
+      element.style.height = "auto";
+      element.style.height = `${element.scrollHeight}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [text, view]);
 
   function change(next: string) {
     onText(next);
@@ -67,28 +89,45 @@ export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus
     setUndo(null);
   }
 
-  return <>
-    <div className="caption-editor-workspace">
-      <section className="card caption-writing" aria-labelledby="caption-writing-title">
-        <div className="card-head"><h2 className="card-title caption-section-title" id="caption-writing-title"><Pencil size={16} aria-hidden /> Your caption</h2>
-          <span className="card-note">{Array.from(text).length.toLocaleString()} characters</span></div>
-        <div className="card-pad">
-          <label className="sr-only" htmlFor="caption-editor-text">Caption text</label>
-          <textarea id="caption-editor-text" className="caption-editor-input" rows={15} value={text} disabled={disabled} autoFocus={autoFocus}
-            placeholder="Write your caption here…" aria-describedby="caption-template-help" onChange={(event) => change(event.target.value)} />
-          <div className="caption-template-help" id="caption-template-help">Keep template placeholders such as <code>{"{bot_number}"}</code> and <code>{"{ref_link}"}</code>.
-            Group references and WhatsApp links are filled in when sent.</div>
-          {undo !== null ? <button type="button" className="btn caption-undo" disabled={disabled} onClick={() => { onTracking?.(undo.tracking); change(undo.text); }}><RotateCcw size={14} aria-hidden /> Undo AI edit</button> : null}
+  return <div className="caption-editor-split">
+    {/* One writing surface, two views of it: the column beside it goes to
+        the assistant, so a conversation about the caption can be had while
+        looking at it. */}
+    <div className="card caption-surface">
+      <div className="card-head section-head">
+        <div className="seg caption-surface-tabs" role="group" aria-label="Caption view">
+          {([["write", "Write", Pencil], ["preview", "Preview", Eye]] as const).map(([value, label, Icon]) =>
+            <button type="button" key={value} id={`caption-tab-${value}`} className="caption-section-title"
+              aria-current={view === value} onClick={() => setView(value)}>
+              <Icon size={15} aria-hidden /> {label}
+            </button>)}
+        </div>
+        <span className="card-note section-actions">{Array.from(text).length.toLocaleString()} characters</span>
+      </div>
+      {/* Both panels stay mounted: toggling the view must not cost the
+          caret, the scroll position or an in-progress selection. */}
+      <section className="caption-surface-panel caption-surface-write" aria-labelledby="caption-tab-write" hidden={view !== "write"}>
+        <label className="sr-only" htmlFor="caption-editor-text">Caption text</label>
+        <textarea ref={input} id="caption-editor-text" className="caption-editor-input" rows={15} value={text} disabled={disabled} autoFocus={autoFocus}
+          placeholder="Write your caption here…" aria-describedby="caption-template-help" onChange={(event) => change(event.target.value)} />
+      </section>
+      {/* What a group will see: the message as WhatsApp lays it out, with
+          the campaign's first picture above it when there is one. */}
+      <section className="caption-surface-panel caption-surface-preview" aria-labelledby="caption-tab-preview" hidden={view !== "preview"}>
+        <div className="caption-bubble">
+          {images?.[0] ? <img className="caption-bubble-image" src={images[0]} alt="" /> : null}
+          <pre className={`caption-editor-preview${text ? "" : " is-empty"}`}>{text || "Your caption preview will appear here."}</pre>
+          <span className="caption-bubble-meta">{name} · Variant {variantLabel}</span>
         </div>
       </section>
-      <section className="card caption-live-preview" aria-labelledby="caption-preview-title">
-        <div className="card-head"><h2 className="card-title caption-section-title" id="caption-preview-title"><Eye size={17} aria-hidden /> Preview</h2>
-          <span className="pill">Template</span></div>
-        <div className="card-pad"><div className="caption-preview-paper">
-          <span className="caption-preview-eyebrow">{name} · Variant {variantLabel}</span>
-          <pre className={`caption-editor-preview${text ? "" : " is-empty"}`}>{text || "Your caption preview will appear here."}</pre>
-        </div><p className="card-note caption-preview-note">Template preview. Each group’s reference and contact link are added when sent.</p></div>
-      </section>
+      <div className="section-foot caption-surface-foot">
+        <span className="caption-template-help" id="caption-template-help">Keep placeholders such as <code>{"{bot_number}"}</code> and <code>{"{ref_link}"}</code>.
+          Each group&rsquo;s reference and WhatsApp link are filled in when sent.</span>
+        {undo !== null || footer ? <span className="caption-surface-foot-actions">
+          {undo !== null ? <button type="button" className="btn btn-sm caption-undo" disabled={disabled} onClick={() => { onTracking?.(undo.tracking); change(undo.text); }}><RotateCcw size={14} aria-hidden /> Undo AI edit</button> : null}
+          {footer}
+        </span> : null}
+      </div>
     </div>
     <CaptionAssistant text={text} revision={revision} disabled={disabled} unavailableReason={aiUnavailableReason} images={images}
       linkContext={slug && onTracking ? { slug, name, tracking, unavailableReason: trackingUnavailableReason } : undefined}
@@ -99,7 +138,7 @@ export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus
         change(suggestion);
         setUndo(previous);
       }} />
-  </>;
+  </div>;
 }
 
 export function CaptionEditor({ slug, variant, name, captions, writable, saveUnavailableReason, aiUnavailableReason, images, tracking = {}, trackingUnavailableReason }: {
@@ -205,16 +244,18 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
     <p>This variant does not exist in the loaded campaign. Return to the campaign to choose another.</p>
     <Link prefetch={false} className="link" href={back}>Back to campaign</Link></section>;
 
-  return <div className="caption-editor-page" aria-busy={pending}>
-    <Link prefetch={false} className="caption-back link" href={back}><ArrowLeft size={16} aria-hidden /> Back to campaign</Link>
-    <PageHead title={variant === "new" ? "Create a caption" : `Edit caption · Variant ${variant}`} subtitle={name}
-      actions={<div className="caption-actions">
+  return <div className="caption-editor-page page-stack" aria-busy={pending}>
+    <PageHead back={{ href: back, label: "Back to campaign" }}
+      title={variant === "new" ? "Create a caption" : `Edit caption · Variant ${variant}`}
+      subtitle={`${name} · Saved changes apply to future posts`}
+      actions={<>
+        <span className="page-action-note" role="status">{pending ? "Saving caption…" : dirty ? "Unsaved changes" : ""}</span>
         <button type="button" className="btn" disabled={pending} onClick={() => dirty ? setCancelOpen(true) : clearAndLeave()}>Cancel</button>
         <button type="button" className="btn btn-primary caption-save" onClick={save}
           disabled={locked || !dirty || !draft.text.trim() || stale || tooLarge || Boolean(saveUnavailableReason) || (trackingDirty && Boolean(trackingUnavailableReason))}>
           <Save size={16} aria-hidden />{pending ? "Saving…" : "Save caption"}
-        </button></div>} />
-    <div className="caption-editor-feedback">
+        </button></>} />
+    <div className="page-notices">
       {saveUnavailableReason ? <p className="card-note">{saveUnavailableReason}</p> : null}
       {error || stale ? <p className="caption-error" role="alert">{error ?? (trackingStale ? "Campaign tracking changed since this draft was started. Your draft is kept. Reset to latest before saving." : "Captions changed since this draft was started. Your draft is kept. Reset to latest before saving.")}</p> : null}
       {storageNotice ? <p className="card-note" role="status">{storageNotice}</p> : null}
@@ -223,10 +264,9 @@ export function CaptionEditor({ slug, variant, name, captions, writable, saveUna
         <button type="button" className="caption-reset link" disabled={locked} onClick={reset}>Load the saved caption</button>
       </p> : null}
       {tooLarge ? <p className="caption-error" role="alert">The captions are too large to save. Shorten them and try again.</p> : null}
-      <span className="card-note" role="status">{pending ? "Saving caption…" : dirty ? "Unsaved changes · Changes apply to future posts after saving." : "Changes apply to future posts after saving."}</span>
-      {dirty || stale ? <button type="button" className="caption-reset link" disabled={locked} onClick={reset}><RotateCcw size={14} aria-hidden /> Reset to latest</button> : null}
     </div>
     <CaptionWorkspace key={resetCount} name={name} variantLabel={variant === "new" ? String(draft.base.length + 1) : variant}
+      footer={dirty || stale ? <button type="button" className="caption-reset link" disabled={locked} onClick={reset}><RotateCcw size={14} aria-hidden /> Reset to latest</button> : null}
       slug={slug} tracking={draft.tracking} trackingUnavailableReason={trackingUnavailableReason}
       onTracking={(next) => setDraft((previous) => ({ ...previous, tracking: next }))}
       text={draft.text} disabled={locked} autoFocus={variant === "new"} aiUnavailableReason={aiUnavailableReason} images={images} onText={updateText} />

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { setEnabled } = vi.hoisted(() => ({ setEnabled: vi.fn() }));
 vi.mock("@/app/campaigns/actions", () => ({ setCampaignEnabledAction: setEnabled }));
 
-import { CampaignSwitch, NO_CRON_NOTE } from "@/app/campaigns/_components/campaign-switch";
+import { CampaignStatus, CampaignSwitch, NO_CRON_NOTE, NoCronNotice } from "@/app/campaigns/_components/campaign-switch";
 import { campaignOffLabel } from "@/src/lib/format";
 
 function mount(props: Partial<Parameters<typeof CampaignSwitch>[0]> = {}) {
@@ -70,8 +70,10 @@ describe("CampaignSwitch", () => {
   });
 
   it("says plainly that the switch cannot make a campaign without a cron post", () => {
-    mount({ cronEnabled: false });
-    expect(screen.getByText("Switched on, but not posting.")).toBeTruthy();
+    render(createElement("div", null,
+      createElement(CampaignStatus, { storeEnabled: true, cronEnabled: false, offLabel: "no cron registered" }),
+      createElement(NoCronNotice)));
+    expect(screen.getByText("Switched on, but not posting")).toBeTruthy();
     expect(screen.getByText(NO_CRON_NOTE)).toBeTruthy();
   });
 
@@ -80,6 +82,19 @@ describe("CampaignSwitch", () => {
     const button = screen.getByRole("button", { name: "Turn off" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.title).toMatch(/does not accept changes to enabled/);
+  });
+});
+
+describe("CampaignStatus", () => {
+  it.each([
+    [{ storeEnabled: true, cronEnabled: true, offLabel: null }, "Posting"],
+    [{ storeEnabled: false, cronEnabled: true, offLabel: "switched off" }, "Switched off"],
+    [{ storeEnabled: false, cronEnabled: false, offLabel: "switched off · no cron" }, "Switched off"],
+    [{ storeEnabled: true, cronEnabled: false, offLabel: "no cron registered" }, "Switched on, but not posting"],
+    [{ storeEnabled: true, cronEnabled: true, offLabel: "scheduling pending" }, "Not posting · scheduling pending"],
+  ])("names the first thing stopping %j", (props, label) => {
+    const { container } = render(createElement(CampaignStatus, props));
+    expect(container.textContent).toBe(label);
   });
 });
 

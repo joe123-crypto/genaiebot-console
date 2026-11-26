@@ -4,9 +4,10 @@ import { authFetch } from "@/src/lib/auth-browser";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { PageHead } from "@/app/_components/ui";
 import { CaptionWorkspace } from "@/app/campaigns/_components/caption-editor";
+import { CaptionText } from "@/app/campaigns/_components/caption-variants";
 import { createCampaignAction } from "@/app/campaigns/new/actions";
 import { campaignCreateError, type CampaignDraft, type NewCampaign } from "@/src/domains/campaign-create";
 import { CAMPAIGN_CAPTIONS_KEY, CAMPAIGN_DRAFT_KEY, parseCampaignCaptions, parseCampaignDraft } from "@/src/lib/campaign-draft";
@@ -159,9 +160,9 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
     <Link prefetch={false} className="link" href={DETAILS}>Back to campaign details</Link></section>;
 
   const locked = busy || Boolean(saved) || Boolean(recovery);
-  return <div className="caption-editor-page" aria-busy={busy}>
-    <Link prefetch={false} className="caption-back link" href={DETAILS}><ArrowLeft size={16} aria-hidden /> Back to campaign details</Link>
-    <PageHead title="Captions" subtitle={`${draft.name} · Write at least one caption to create this campaign.`}
+  return <div className="caption-editor-page page-stack" aria-busy={busy}>
+    <PageHead back={{ href: DETAILS, label: "Back to campaign details" }}
+      title="Captions" subtitle={`${draft.name} · Write at least one caption to create this campaign.`}
       actions={<div className="caption-actions">
         <button type="button" className="btn" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button>
         <button type="button" className="btn btn-primary" onClick={create}
@@ -202,15 +203,15 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
       <div className="card-pad grid caption-grid">
         {variants.map((item, index) => <div className="caption-variant" key={item.id}>
           <div className="caption-variant-head">
-            <span className="pill pill-info" id={`campaign-caption-${item.id}-label`}>Variant {index + 1}</span>
+            <span className="caption-variant-label" id={`campaign-caption-${item.id}-label`}>Variant {index + 1}</span>
             <div className="caption-variant-actions">
-              <button type="button" className="row-action" aria-label={`Edit variant ${index + 1}`} title={`Edit variant ${index + 1}`}
-                disabled={locked} onClick={() => setEditing({ id: item.id, text: item.text })}><Pencil size={16} aria-hidden /></button>
+              <button type="button" className="btn btn-sm caption-edit" aria-label={`Edit variant ${index + 1}`}
+                disabled={locked} onClick={() => setEditing({ id: item.id, text: item.text })}><Pencil size={14} aria-hidden /> Edit</button>
               <button type="button" className="row-action row-action-danger" aria-label={`Delete variant ${index + 1}`} title={`Delete variant ${index + 1}`}
                 disabled={locked} onClick={() => setVariants((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={16} aria-hidden /></button>
             </div>
           </div>
-          <pre className="caption-box caption-card-text" aria-labelledby={`campaign-caption-${item.id}-label`}>{item.text}</pre>
+          <CaptionText labelledBy={`campaign-caption-${item.id}-label`} text={item.text} />
         </div>)}
         {!variants.length ? <p className="card-note">No caption variants yet. Add a variant to get started.</p> : null}
       </div>

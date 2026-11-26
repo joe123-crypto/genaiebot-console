@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { liveFetch, useLivePoll } from "@/app/_components/use-live";
+import { Section, Stat } from "@/app/_components/ui";
 
 type ClickReport = {
   totalClicks: number;
@@ -32,17 +33,15 @@ export function CampaignClicks({ slug }: { slug: string }) {
   }, [read, attempt]);
   useLivePoll(read);
 
-  return <section className="card card-pad" aria-labelledby="campaign-clicks-title">
-    <h2 className="card-title" id="campaign-clicks-title">Estimated link clicks</h2>
-    {unavailable ? <>
-      <p className="card-note" role="status">
-        {report ? "Click counts could not refresh. Showing the last available counts." : "Click counts are unavailable."}
-      </p>
-      <button type="button" className="btn" onClick={() => setAttempt(count => count + 1)}>Retry click counts</button>
-    </> : null}
-    {!report && !unavailable ? <p className="card-note" role="status">Loading click counts…</p> : null}
+  return <Section id="campaign-clicks" title="Estimated link clicks"
+    actions={unavailable ? <button type="button" className="btn btn-sm" onClick={() => setAttempt(count => count + 1)}>Retry click counts</button> : null}>
+    {unavailable || !report ? <p className="card-note campaign-clicks-status" role="status">
+      {unavailable
+        ? report ? "Click counts could not refresh. Showing the last available counts." : "Click counts are unavailable."
+        : "Loading click counts…"}
+    </p> : null}
     {report ? <>
-      <p><strong>{formatCount.format(report.totalClicks)}</strong> total clicks</p>
+      <Stat plain label="Total clicks" value={formatCount.format(report.totalClicks)} />
       {report.groups.length ? <details className="campaign-clicks-groups">
         <summary>Clicks by group <span className="card-note">
           {report.groups.length} {report.groups.length === 1 ? "group" : "groups"}
@@ -57,5 +56,5 @@ export function CampaignClicks({ slug }: { slug: string }) {
         </div>
       </details> : null}
     </> : null}
-  </section>;
+  </Section>;
 }

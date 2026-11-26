@@ -16,16 +16,17 @@ export default async function CustomerBotPage() {
   const target = draftScope(workspace);
   return (
     <Shell live>
-      <PageHead title="Customer Bot" subtitle="Manage how Genaie replies on WhatsApp and review the data sources it uses for current answers." />
+      {/* The editor draws its own heading: its status and its actions live there. */}
       {result.kind === "live" ? (
         <CustomerBotEditor key={target} initial={result.live} writable={ACCOUNT_WRITES_ENABLED} draftKey={`genaie:customer-bot:v2:${target}`} />
-      ) : (
+      ) : (<>
+        <PageHead title="Customer Bot" subtitle="How Genaie replies to customers on WhatsApp." />
         <section className="card card-pad">
           <h2 className="card-title">Customer Bot unavailable</h2>
           <p className="card-note">{result.kind === "error" ? result.detail : "The live content could not be loaded."}</p>
           <a className="btn" href="/customer-bot">Try again</a>
         </section>
-      )}
+      </>)}
     </Shell>
   );
 }
