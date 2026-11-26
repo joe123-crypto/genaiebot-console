@@ -38,6 +38,8 @@ vi.mock("@/src/lib/bot-connect", async (original) => ({
   ...bot,
 }));
 
+const logged = vi.hoisted(() => ({ error: vi.fn() }));
+
 const seeded = vi.hoisted(() => vi.fn(async () => "written" as const));
 vi.mock("@/src/lib/workspace-seed", async (original) => ({
   ...await original<typeof import("@/src/lib/workspace-seed")>(),
@@ -89,9 +91,15 @@ const mutations = () =>
   railway.createDomain.mock.calls.length + railway.writeVariables.mock.calls.length +
   railway.setServiceSource.mock.calls.length + railway.deployService.mock.calls.length;
 
+/** Everything the server log was told, as one string to search. */
+const serverLog = () => JSON.stringify(logged.error.mock.calls);
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
+  // The provisioner's own log. Stubbed rather than left alone: the tests below
+  // read it, and a failing run would otherwise print through the test output.
+  vi.spyOn(console, "error").mockImplementation(logged.error);
   vi.stubEnv("BOT_TOKEN_SECRET", "a-secret-long-enough-for-the-hmac-rule");
   fake.reset();
   fake.put(PATH, { name: "Test workspace", ownerUid: WORKSPACE.ownerUid, bot: null });
@@ -113,7 +121,7 @@ beforeEach(() => {
     fake.put(PATH, { ...fake.read(PATH), bot: { baseUrl: ORIGIN } });
   });
 });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe("a whole run", () => {
   it("is idle until something starts it", async () => {
@@ -310,6 +318,84 @@ describe("a run that goes wrong", () => {
     if (last?.status !== "failed") throw new Error("expected a failure");
     expect(last.detail).not.toContain("a-shared-secret-nobody-should-see");
     expect(last.detail).not.toMatch(/CRASHED|railway/i);
+  });
+});
+
+/**
+ * The first real run, on 2026-11-26, failed with a true verdict -- Railway said
+ * CRASHED and it had -- that the console then threw away, so the only way to
+ * find out why was Railway's deploy log. These are about the record and the
+ * server log that failure should have left, and about the user's sentence being
+ * no different for them.
+ */
+describe("a failed run saying why", () => {
+  it("writes Railway's verdict on a lost deployment down where the runbook looks", async () => {
+    railway.readDeploymentStatus.mockResolvedValue("CRASHED");
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    expect((await drive()).pop()).toMatchObject({ status: "failed", stage: "starting" });
+    const stored = fake.read(PATH)?.provisioning as { railway?: Record<string, unknown> } | undefined;
+    expect(stored?.railway).toMatchObject({ deploymentStatus: "CRASHED", deploymentId: "dep-1" });
+    // The deployment id is what an operator opens in Railway, so it must have
+    // survived alongside the verdict rather than been failed away.
+    expect(stored?.railway?.serviceId).toBe("svc-1");
+  });
+
+  it("records the verdict for a deployment waiting to be approved too", async () => {
+    railway.readDeploymentStatus.mockResolvedValue("NEEDS_APPROVAL");
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    await drive();
+    const stored = fake.read(PATH)?.provisioning as { railway?: Record<string, unknown> } | undefined;
+    expect(stored?.railway?.deploymentStatus).toBe("NEEDS_APPROVAL");
+  });
+
+  it("logs the verdict with the ids needed to open that deployment in Railway", async () => {
+    railway.readDeploymentStatus.mockResolvedValue("CRASHED");
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    await drive();
+    const log = serverLog();
+    for (const wanted of ["CRASHED", "dep-1", "svc-1", WORKSPACE.id]) expect(log).toContain(wanted);
+  });
+
+  it("leaves the sentence the user reads exactly as it was", async () => {
+    railway.readDeploymentStatus.mockResolvedValue("CRASHED");
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    const last = (await drive()).pop();
+    if (last?.status !== "failed") throw new Error("expected a failure");
+    // Byte for byte. Recording the verdict is for the operator; nothing about
+    // what the browser is handed changes, including that it holds no status.
+    expect(last.detail).toBe(
+      "Your bot was created but would not start. Nothing was connected to your workspace.");
+    expect(JSON.stringify(last)).not.toContain("CRASHED");
+  });
+
+  it("logs what Railway said when a call is refused, and tells the browser none of it", async () => {
+    const { RailwayError } = await import("@/src/lib/railway-api");
+    railway.createVolume.mockRejectedValue(
+      new RailwayError("Your bot's hosting refused a step of the setup.",
+                       "Volume quota exceeded for project prj-7"));
+    await (await provisioner()).startProvisioning(WORKSPACE);
+    const last = (await drive()).pop();
+    if (last?.status !== "failed") throw new Error("expected a failure");
+    // The field railway-api documents as logged and never sent to a browser,
+    // now actually logged.
+    expect(serverLog()).toContain("Volume quota exceeded for project prj-7");
+    expect(JSON.stringify(last)).not.toContain("quota");
+    expect(last.detail).toBe("Your bot's hosting refused a step of the setup.");
+  });
+
+  it("drops the last attempt's verdict when the run is tried again", async () => {
+    const { startProvisioning } = await provisioner();
+    railway.readDeploymentStatus.mockResolvedValue("CRASHED");
+    await startProvisioning(WORKSPACE);
+    await drive();
+
+    // A retry replaces the dead deployment, so its verdict must not linger and
+    // send somebody after a deployment that is no longer the run's.
+    railway.readDeploymentStatus.mockResolvedValue("SUCCESS");
+    await startProvisioning(WORKSPACE);
+    expect((await drive()).pop()).toMatchObject({ status: "ready" });
+    const stored = fake.read(PATH)?.provisioning as { railway?: Record<string, unknown> } | undefined;
+    expect(stored?.railway?.deploymentStatus).toBeUndefined();
   });
 });
 

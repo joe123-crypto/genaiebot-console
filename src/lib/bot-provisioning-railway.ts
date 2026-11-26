@@ -82,6 +82,34 @@ function detailOf(error: unknown): string {
 }
 
 /**
+ * The other half of a failure: the half nobody shows the user.
+ *
+ * `detailOf` above is deliberately one sentence of this console's own, which
+ * means everything that would let somebody diagnose the run -- which Railway
+ * service, which deployment, and above all what Railway actually said -- is
+ * thrown away unless it is written down here. `RailwayError` carries its
+ * `upstream` for exactly this, and until this existed that field was documented
+ * as logged and never logged by anything.
+ *
+ * It goes to the console's own server log, so a failed run can be read there
+ * beside the `provisioning` record the runbook already sends an operator to.
+ * The browser is never told any of it.
+ */
+function logFailure(workspace: Workspace, run: ProvisionRun, error: unknown): void {
+  const where = {
+    workspace: workspace.id, stage: run.stage, attempt: run.attempt,
+    service: run.railway.serviceId, deployment: run.railway.deploymentId,
+  };
+  if (error instanceof RailwayError) {
+    // `upstream` is already stripped to Railway's messages and capped, because
+    // a GraphQL error can quote the request and the request can hold a token.
+    console.error("[provisioning] Railway refused a step", { ...where, upstream: error.upstream });
+    return;
+  }
+  console.error("[provisioning] a step failed", { ...where, error });
+}
+
+/**
  * Checked before a run opens, so a console that cannot copy what a bot needs
  * refuses rather than building one that can serve nothing. One Railway read and
  * one Firestore read, with no mutation yet, so there is nothing to clean up.
@@ -137,6 +165,7 @@ async function advance(workspace: Workspace, run: ProvisionRun): Promise<Provisi
   try {
     next = await step(workspace, run, now);
   } catch (error) {
+    logFailure(workspace, run, error);
     // Fail from what is STORED, not from the run this step began with: a step
     // writes each id down as it goes, and failing from the older value would
     // throw those ids away -- leaving a service nobody has a record of, and a
@@ -245,6 +274,25 @@ async function start(workspace: Workspace, run: ProvisionRun, now: number): Prom
     return current;
   }
   const status = await readDeploymentStatus(current.railway.deploymentId);
+  if (DEPLOY_LOST.has(status) || status === "NEEDS_APPROVAL") {
+    // The one failure that arrives as a perfectly successful read: Railway
+    // answered, and its answer was that the bot is not coming up. Nothing threw,
+    // so `logFailure` above never sees this, and the sentence below -- which is
+    // all the browser gets -- says nothing about which verdict it was. So the
+    // verdict is kept on the run, where the runbook already sends an operator,
+    // and logged with the ids needed to open that deployment in Railway.
+    //
+    // It rides along on `railway` with the ids rather than taking a write of its
+    // own: this step is ending the run, and the save that writes the failure
+    // writes the whole record, so a second round trip would only be one more
+    // thing to fail -- and a failed write here would replace the user's sentence
+    // with one about Firestore.
+    current = withResources(current, { deploymentStatus: status }, now);
+    console.error("[provisioning] deployment did not come up", {
+      workspace: workspace.id, stage: current.stage, attempt: current.attempt,
+      service: current.railway.serviceId, deployment: current.railway.deploymentId, status,
+    });
+  }
   if (DEPLOY_LOST.has(status)) {
     return failedRun(current,
       "Your bot was created but would not start. Nothing was connected to your workspace.", now);

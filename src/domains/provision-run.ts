@@ -33,6 +33,13 @@ export type RailwayResources = {
   /** Which attempt triggered that deployment. A retry after a failed deploy must
    *  start a new one rather than poll the old one's verdict for ever. */
   deploymentAttempt?: number;
+  /** Railway's own last word on that deployment, written down only when it is
+   *  the word that ended the run -- `CRASHED` for a bot that would not boot,
+   *  `FAILED` for a build that did not, `NEEDS_APPROVAL` for one nobody
+   *  approved. It is here for whoever has to find out why, which the runbook
+   *  sends to this record; it is never what the user reads. `detail` is the
+   *  sentence for that, and it is this console's own. */
+  deploymentStatus?: string;
   /** When the bot first answered for this workspace. */
   servingAt?: string;
 };
@@ -75,7 +82,7 @@ const isId = (value: unknown): value is string =>
 function resources(value: unknown): RailwayResources {
   const data = (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
   const kept: RailwayResources = {};
-  for (const key of ["serviceId", "volumeId", "domainId", "domain", "deploymentId"] as const) {
+  for (const key of ["serviceId", "volumeId", "domainId", "domain", "deploymentId", "deploymentStatus"] as const) {
     if (isId(data[key])) kept[key] = data[key] as string;
   }
   for (const key of ["variablesAt", "sourceSetAt", "servingAt"] as const) {
@@ -150,8 +157,14 @@ export function newRun(now: number): ProvisionRun {
  */
 export function rearmRun(run: ProvisionRun, now: number): ProvisionRun {
   const at = new Date(now).toISOString();
+  // The last attempt's verdict is not kept: this attempt replaces the
+  // deployment it was about, and a stale `CRASHED` sitting on a run that then
+  // succeeded would send whoever reads it after the wrong deployment. Deleted
+  // rather than set to undefined, which Firestore refuses.
+  const railway = { ...run.railway };
+  delete railway.deploymentStatus;
   return { stage: run.stage, outcome: "running", startedAt: at, updatedAt: at,
-           attempt: run.attempt + 1, railway: { ...run.railway } };
+           attempt: run.attempt + 1, railway };
 }
 
 export function atStage(run: ProvisionRun, stage: ProvisionStage, now: number): ProvisionRun {
