@@ -122,6 +122,25 @@ export function canDelete(
   return gate;
 }
 
+/**
+ * Whether a linked line can be given the configuration document that makes it
+ * usable. Separate from linking itself, which is the gateway's business and is
+ * gated only on the console's own switch: against a bot that cannot create the
+ * document, the operator can still link a line -- the screen just says why
+ * nothing can be assigned to it yet.
+ */
+export function canCreateLine(consoleWrites: boolean, writes: WriteCapabilities | undefined): WriteGate {
+  const gate = botGate(consoleWrites, writes);
+  if (!gate.allowed) return gate;
+  if (!writes?.affectsProduction) return { allowed: false, reason: "Adding a line requires live Firestore configuration." };
+  if (!writes.lineCreation?.create) {
+    return { allowed: false, reason: writes.lineCreation?.reason ??
+      "Deploy the companion bot update so a linked line can be added to the configuration." };
+  }
+  // The document is created from its number, so that field has to be accepted.
+  return canWrite(consoleWrites, writes, "lines", "number");
+}
+
 /** Creation must reach live config, assets and a registered schedule together. */
 export function canCreateCampaign(consoleWrites: boolean, writes: WriteCapabilities | undefined): WriteGate {
   const gate = botGate(consoleWrites, writes);

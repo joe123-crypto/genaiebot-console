@@ -281,7 +281,7 @@ describe('WhatsApp account management', () => {
     expect(screen.getByText('Connected')).toBeTruthy();
     expect(screen.getByText(/Account actions are read-only/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Pause' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Add account' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Add line' }) as HTMLButtonElement).disabled).toBe(true);
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
   });
   it('keeps account controls usable when membership reads fail; pause and start need no QR', async () => {
@@ -323,8 +323,8 @@ describe('WhatsApp account management', () => {
   });
   it('adds an account, polls its existing QR session and stops checks after the dialog closes', async () => {
     render(createElement(AccountManager, { writesEnabled: true })); await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
-    fireEvent.change(screen.getByLabelText('Account ID'), { target: { value: 'sales' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line name'), { target: { value: 'sales' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate QR code' })); await settle();
     expect(screen.getByRole('img', { name: /pairing QR code for sales/ })).toBeTruthy();
     await advance(2000);
@@ -336,8 +336,8 @@ describe('WhatsApp account management', () => {
   });
   it('keeps the QR and retries status when another read temporarily owns the bridge', async () => {
     render(createElement(AccountManager, { writesEnabled: true })); await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
-    fireEvent.change(screen.getByLabelText('Account ID'), { target: { value: 'sales' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line name'), { target: { value: 'sales' } });
     pairingBusy = true;
     fireEvent.click(screen.getByRole('button', { name: 'Generate QR code' })); await settle();
     expect(screen.getByRole('img', { name: /pairing QR code for sales/ })).toBeTruthy();
@@ -350,8 +350,8 @@ describe('WhatsApp account management', () => {
   });
   it('clears the QR and reports successful activation after a scan', async () => {
     render(createElement(AccountManager, { writesEnabled: true })); await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
-    fireEvent.change(screen.getByLabelText('Account ID'), { target: { value: 'sales' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    fireEvent.change(screen.getByLabelText('Line name'), { target: { value: 'sales' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate QR code' })); await settle();
     scans = true; await advance(2000);
     expect(screen.queryByRole('img')).toBeNull();

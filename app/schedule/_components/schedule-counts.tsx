@@ -4,6 +4,7 @@ import { authFetch } from "@/src/lib/auth-browser";
 import { useEffect, useState } from "react";
 import { LiveError, liveFetch, useLivePoll } from "@/app/_components/use-live";
 import { plural } from "@/src/lib/format";
+import { lineRows } from "@/src/domains/line-edit";
 import type { LineSummary } from "@/src/domains/console";
 import type { AccountsPayload } from "@/src/lib/account-types";
 
@@ -50,18 +51,22 @@ export function ScheduleCounts({ campaignsToday }: { campaignsToday: number }) {
       groups: lines.value.lines.reduce((total, line) => total + line.groupCount, 0),
       lines: lines.value.lines.length,
     });
-    if (accounts.status === "fulfilled") setLinked({
-      connected: accounts.value.accounts.filter((account) => account.connected === true).length,
-      total: accounts.value.accounts.length,
-    });
+    if (accounts.status === "fulfilled") {
+      // Counted the same way the Lines page lists them, so the two agree: the
+      // `default` a gateway invents for a workspace that has made no lines is
+      // not a line, and counting it would report one that is not there.
+      const { ids } = lineRows(accounts.value.accounts, lines.status === "fulfilled" ? lines.value.lines : undefined);
+      setLinked({
+        connected: accounts.value.accounts.filter((account) => account.connected === true && ids.includes(account.id)).length,
+        total: ids.length,
+      });
+    }
     await readClicks;
   }
 
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, []);
   useLivePoll(load);
 
-  /** A line whose status never arrived is not a disconnected line. */
-  const unknown = linked !== null && linked.total === 0;
   /** Totals are the one read a bot can refuse outright: a companion predating them
    *  rejects the slugless form rather than failing. That is a missing update, not an
    *  outage, and the card says so instead of reading as dead. */
@@ -80,8 +85,8 @@ export function ScheduleCounts({ campaignsToday }: { campaignsToday: number }) {
     </div>
     <div className="card card-pad schedule-count">
       <div className="stat-label">Lines connected</div>
-      <div className="stat-value">{linked && !unknown ? `${linked.connected} of ${linked.total}` : "—"}</div>
-      <div className="stat-note">{linked && !unknown ? "WhatsApp linked" : "Status unavailable"}</div>
+      <div className="stat-value">{linked ? `${linked.connected} of ${linked.total}` : "—"}</div>
+      <div className="stat-note">{!linked ? "Status unavailable" : linked.total === 0 ? "No lines yet" : "WhatsApp linked"}</div>
     </div>
     <div className="card card-pad schedule-count">
       <div className="stat-label">Total link clicks</div>

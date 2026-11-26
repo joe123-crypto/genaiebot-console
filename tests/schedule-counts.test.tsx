@@ -40,6 +40,18 @@ describe("the counts beside the overlap card", () => {
     expect(screen.getByText("3 today")).toBeDefined();
   });
 
+  it("counts no lines for a workspace that has made none", async () => {
+    // The gateway invents a `default` account for a bot with none configured.
+    // Counting it would report a line that is not there, and the old "total 0
+    // means the read failed" rule would then call a true zero unavailable.
+    vi.stubGlobal("fetch", vi.fn((path: string) => path === "/api/account-membership"
+      ? reply({ lines: [] })
+      : reply({ observedAt: "now", accounts: [{ id: "default", connected: false, configured: false, linked: false, number: null, pairingSessionId: null }] })));
+    render(<ScheduleCounts campaignsToday={0} />);
+    await waitFor(() => expect(value("Lines connected")).toBe("0 of 0"));
+    expect(screen.getByText("No lines yet")).toBeDefined();
+  });
+
   it("shows every source it did reach when one fails", async () => {
     mock.live.mockRejectedValue(new Error("Live updates unavailable."));
     serve({ gateway: false });

@@ -49,6 +49,7 @@ export function checkAccounts(value: unknown): AccountsPayload {
         typeof a.repliesEnabled !== 'boolean' || typeof a.hasError !== 'boolean' ||
         ![null, true, false].includes(a.linked) || ![null, true, false].includes(a.running) || ![null, true, false].includes(a.connected) ||
         !(a.number === null || typeof a.number === 'string') ||
+        !(a.configured === undefined || typeof a.configured === 'boolean') ||
         !(a.startBlockedReason === null || typeof a.startBlockedReason === 'string') ||
         !(a.pairingSessionId === null || typeof a.pairingSessionId === 'string'))) {
     throw new AccountApiError(502, 'The gateway returned incomplete account status. Update the gateway API.');

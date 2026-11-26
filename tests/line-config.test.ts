@@ -3,10 +3,12 @@ import { TEST_ACTOR } from "./auth-fixture";
 import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { linkedNumberChange, normalizeNumber, sameNumber } from '@/src/domains/line-edit';
+import { FIRST_LINE_ID, isPhantomLine, lineRows, linkedNumberChange, normalizeNumber, sameNumber } from '@/src/domains/line-edit';
 
-const { syncNumber, setContact } = vi.hoisted(() => ({ syncNumber: vi.fn(), setContact: vi.fn() }));
-vi.mock('@/app/lines/actions', () => ({ syncLineNumberAction: syncNumber, setContactLineAction: setContact }));
+const { syncNumber, setContact, createLine } = vi.hoisted(() => ({ syncNumber: vi.fn(), setContact: vi.fn(), createLine: vi.fn() }));
+vi.mock('@/app/lines/actions', () => ({
+  syncLineNumberAction: syncNumber, setContactLineAction: setContact, createLineAction: createLine,
+}));
 
 import { AccountManager } from '@/app/lines/account-manager';
 
@@ -39,7 +41,7 @@ beforeEach(() => {
     return new Response(JSON.stringify(data), { status: 200 });
   }));
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); syncNumber.mockReset(); setContact.mockReset(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); syncNumber.mockReset(); setContact.mockReset(); createLine.mockReset(); });
 
 describe('line numbers', () => {
   it('compare by digits, the way WhatsApp and the bot write them differently', () => {
@@ -187,5 +189,39 @@ describe('line actions', () => {
     updateSettings.mockClear();
     expect(await setContactLineAction('default')).toEqual({ ok: true });
     expect(updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe('which lines a workspace has', () => {
+  const phantom = { id: FIRST_LINE_ID, configured: false, linked: false, number: null, pairingSessionId: null };
+  const none = new Set<string>();
+
+  it('holds back the line the gateway invents for a workspace that has made none', () => {
+    expect(isPhantomLine(phantom, none)).toBe(true);
+    expect(lineRows([phantom], [])).toEqual({ ids: [], hidden: [phantom] });
+  });
+
+  it('shows every line on a bot that does not say whether one is configured', () => {
+    // The field is absent from an older bot, and absent is "cannot tell".
+    const older = { ...phantom, configured: undefined };
+    expect(isPhantomLine(older, none)).toBe(false);
+    expect(lineRows([older], []).ids).toEqual([FIRST_LINE_ID]);
+  });
+
+  it('shows a line the moment anything says it is real', () => {
+    expect(isPhantomLine({ ...phantom, configured: true }, none)).toBe(false);
+    expect(isPhantomLine({ ...phantom, linked: true }, none)).toBe(false);
+    // A failed read of the saved login is not the absence of one.
+    expect(isPhantomLine({ ...phantom, linked: null }, none)).toBe(false);
+    expect(isPhantomLine({ ...phantom, number: '+263785632943' }, none)).toBe(false);
+    expect(isPhantomLine({ ...phantom, pairingSessionId: 'session' }, none)).toBe(false);
+    expect(isPhantomLine(phantom, new Set([FIRST_LINE_ID]))).toBe(false);
+  });
+
+  it('keeps the gateway order, then the lines only the configuration knows', () => {
+    const sales = { id: 'sales', configured: true, linked: true, number: '+263790000000', pairingSessionId: null };
+    expect(lineRows([sales, phantom], [{ id: 'retired' }, { id: 'sales' }]).ids)
+      .toEqual(['sales', 'retired']);
+    expect(lineRows(undefined, undefined)).toEqual({ ids: [], hidden: [] });
   });
 });
