@@ -409,7 +409,7 @@ describe("tracked links in saved campaign captions", () => {
   });
 
   it("handles AI requests with a missing number, validates it and undoes tracking with the text", async () => {
-    mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Which number should the tracked link open?", trackedLink: {} } });
+    mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Which number should the tracked link open?", trackedLink: { kind: "tracked" } } });
     mount({ captions: ["Offer"], tracking: {} });
     const composer = screen.getByRole("textbox", { name: "Message the caption assistant" });
     fireEvent.change(composer, { target: { value: "Add a tracked WhatsApp link" } });
@@ -424,6 +424,36 @@ describe("tracked links in saved campaign captions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Undo AI edit" }));
     expect(text().value).toBe("Offer");
     expect((screen.getByRole("button", { name: "Save caption" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("replaces a pasted link with a direct ref link that keeps the tracked one beside it", async () => {
+    const original = ["Tap {ref_link}\nOrder here on WhatsApp: https://wa.me/263783496308", "Other caption"];
+    mount({ captions: original, tracking: { prefix: "KEEP" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add ref link (works without data)" })));
+    expect(screen.getByRole("form", { name: "Ref link" }).textContent).toContain("without data");
+    fireEvent.change(screen.getByLabelText("Destination WhatsApp number"), { target: { value: "+263783496308" } });
+    fireEvent.change(screen.getByLabelText("Existing WhatsApp links"), { target: { value: "https://wa.me/263783496308" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview ref link" }));
+    expect(screen.getByText("Review your ref link.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+    expect(text().value).toBe("Tap {ref_link}\nOrder here on WhatsApp: {direct_ref_link}");
+    await save();
+    expect(mocks.save).toHaveBeenCalledWith(props.slug, ["Tap {ref_link}\nOrder here on WhatsApp: {direct_ref_link}", "Other caption"], original, {
+      tracking: { prefix: "KEEP", label: props.name, number: "+263783496308" },
+      expectedTracking: { prefix: "KEEP" },
+    });
+  });
+
+  it("opens the ref link form when the AI is asked for one", async () => {
+    mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Which number should it open?", trackedLink: { kind: "direct", number: "+26370000003" } } });
+    mount({ captions: ["Offer"], tracking: {} });
+    const composer = screen.getByRole("textbox", { name: "Message the caption assistant" });
+    fireEvent.change(composer, { target: { value: "Add a ref link" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send message" })));
+    expect((screen.getByLabelText("Destination WhatsApp number") as HTMLInputElement).value).toBe("+26370000003");
+    fireEvent.click(screen.getByRole("button", { name: "Preview ref link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+    expect(text().value).toBe("Offer\n\n📲 No data? Chat on WhatsApp: {direct_ref_link}");
   });
 
   it("blocks a tracked-link proposal after typing and keeps the draft through remounts", async () => {

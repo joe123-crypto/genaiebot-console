@@ -184,9 +184,26 @@ describe("structured tracked-link requests", () => {
     fetchMock.mockResolvedValue(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
       message: "Choose the destination", suggestion: null, append: null, trackedLink: { number },
     }) } }] }));
-    expect(await generateCaptionReply({ ...input, prompt: "Add a tracked WhatsApp link" })).toEqual({ message: "Choose the destination", trackedLink: number ? { number } : {} });
+    expect(await generateCaptionReply({ ...input, prompt: "Add a tracked WhatsApp link" })).toEqual({ message: "Choose the destination", trackedLink: { kind: "tracked", ...(number ? { number } : {}) } });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.response_format.json_schema.schema.properties.trackedLink).toBeDefined();
+  });
+
+  it("passes on a request for a direct ref link", async () => {
+    fetchMock.mockResolvedValue(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+      message: "Which number should it open?", suggestion: null, append: null, trackedLink: { kind: "direct", number: null },
+    }) } }] }));
+    expect(await generateCaptionReply({ ...input, prompt: "Add a ref link that works without data" }))
+      .toEqual({ message: "Which number should it open?", trackedLink: { kind: "direct" } });
+    const schema = JSON.parse(fetchMock.mock.calls[0][1].body).response_format.json_schema.schema.properties.trackedLink.anyOf[1];
+    expect(schema.properties.kind.enum).toEqual(["tracked", "direct"]);
+  });
+
+  it("rejects an unknown link kind", async () => {
+    fetchMock.mockResolvedValue(Response.json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+      message: "Done", suggestion: null, append: null, trackedLink: { kind: "short", number: null },
+    }) } }] }));
+    await expect(generateCaptionReply(input)).rejects.toThrow("invalid suggestion");
   });
 
   it("rejects a tracked action mixed with caption edits", async () => {
