@@ -1,4 +1,4 @@
-import { campaignDraftError, type CampaignDraft } from "@/src/domains/campaign-create";
+import { CAMPAIGN_REQUIRES_NONE, campaignDraftError, type CampaignDraft } from "@/src/domains/campaign-create";
 
 /** The campaign details waiting for their captions, kept between the two steps. */
 export const CAMPAIGN_DRAFT_KEY = "genaie:campaign-create:v1";
@@ -13,7 +13,9 @@ export function parseCampaignDraft(raw: string): { draft: CampaignDraft; groupNa
   if (stash.version !== 1) throw new Error("Invalid campaign draft");
   // The details were valid when stashed; a draft that no longer passes has been
   // tampered with or outlived its format, and the operator must fill it again.
-  if (campaignDraftError(stash.draft)) throw new Error("Invalid campaign draft");
+  // Its shape only: whether this bot needs pictures or groups is the create
+  // step's to check, against what the bot says now.
+  if (campaignDraftError(stash.draft, undefined, CAMPAIGN_REQUIRES_NONE)) throw new Error("Invalid campaign draft");
   const names = stash.groupNames;
   const groupNames = names && typeof names === "object" && !Array.isArray(names)
     ? Object.fromEntries(Object.entries(names as Record<string, unknown>).filter(([, name]) => typeof name === "string")) as Record<string, string>

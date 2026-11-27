@@ -7,7 +7,7 @@ import { NewCampaignForm } from "@/app/campaigns/_components/new-campaign-form";
 import { WRITES_ENABLED } from "@/src/config";
 import { getCapabilities, BotUnavailableError } from "@/src/lib/bot-client";
 import { canCreateInWorkspace } from "@/src/lib/write-capabilities";
-import { keyPrefixOf } from "@/src/domains/campaign-create";
+import { campaignRequirements, keyPrefixOf } from "@/src/domains/campaign-create";
 import { imageUploadConfigured } from "@/src/lib/campaign-upload";
 export const dynamic = "force-dynamic";
 export default async function NewCampaignPage() {
@@ -19,7 +19,7 @@ export default async function NewCampaignPage() {
     if (gate.allowed && !imageUploadConfigured()) gate = { allowed: false, reason: "Picture upload storage is not configured on the console." };
     return <Shell live><PageHead title="New campaign" subtitle="Create an advert and choose when and where it runs."
       actions={<Link prefetch={false} className="link" href="/campaigns">All campaigns</Link>} />
-      <NewCampaignForm groups={[]} paginated gate={gate} keyPrefix={keyPrefixOf(writes)} />
+      <NewCampaignForm groups={[]} paginated gate={gate} keyPrefix={keyPrefixOf(writes)} requirements={campaignRequirements(writes)} />
     </Shell>;
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;

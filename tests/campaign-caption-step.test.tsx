@@ -149,6 +149,23 @@ describe("campaign caption step", () => {
       expect(mocks.push).not.toHaveBeenCalled();
     }
   });
+  it("creates a campaign with no pictures or groups, uploading nothing, when the bot takes one", async () => {
+    stash({ version: 1, draft: { ...draft, images: [], groups: [] } });
+    render(<CampaignCaptionStep {...props} requirements={{ pictures: false, groups: false }} />);
+    write("Our latest sale"); await keep();
+    await create();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.create).toHaveBeenCalledWith({ ...draft, images: [], groups: [], captions: ["Our latest sale"] });
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/campaigns/sale"));
+  });
+  it("still refuses a campaign with no pictures for a bot that needs them", async () => {
+    stash({ version: 1, draft: { ...draft, images: [] } });
+    render(<CampaignCaptionStep {...props} />);
+    write("Our latest sale"); await keep();
+    await create();
+    expect(await screen.findByText("Choose between 1 and 20 pictures.")).toBeTruthy();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
   it("lets a read-only operator write captions but not create", async () => {
     stash();
     render(<CampaignCaptionStep gate={{ allowed: false, reason: "The console is in read-only mode." }} />);

@@ -91,22 +91,42 @@ export function uploadError(value: unknown, slug: string, keyPrefix?: string): s
   const prefix = image.key.slice(0, image.key.length - tail.length) + "ads/";
   if (!KEY_PREFIX.test(prefix) || (keyPrefix !== undefined && prefix !== keyPrefix)) return "The picture does not belong to this campaign.";
 }
+/** Whether a new campaign must have pictures and groups. */
+export type CampaignRequirements = { pictures: boolean; groups: boolean };
+/** What an older bot needs: both. */
+export const CAMPAIGN_REQUIRES_ALL: CampaignRequirements = { pictures: true, groups: true };
+/** The shape alone, for a stashed draft; the create step checks the bot's rule. */
+export const CAMPAIGN_REQUIRES_NONE: CampaignRequirements = { pictures: false, groups: false };
+
+/**
+ * What this bot needs a new campaign to have. A bot saves one without pictures
+ * (it posts the caption as text) or groups (added from the campaign's page)
+ * only once it says so; one that says nothing is read as needing both.
+ */
+export function campaignRequirements(writes: { campaignCreation?: { picturesOptional?: boolean; groupsOptional?: boolean } } | undefined): CampaignRequirements {
+  return { pictures: writes?.campaignCreation?.picturesOptional !== true, groups: writes?.campaignCreation?.groupsOptional !== true };
+}
+
 /** Everything but the captions, which the create form collects on its own. */
-export function campaignDraftError(value: unknown, keyPrefix?: string): string | undefined {
+export function campaignDraftError(value: unknown, keyPrefix?: string, required: CampaignRequirements = CAMPAIGN_REQUIRES_ALL): string | undefined {
   if (!value || typeof value !== "object") return "The campaign could not be read.";
   const campaign = value as CampaignDraft;
   if (typeof campaign.requestId !== "string" || !/^[a-f0-9-]{36}$/.test(campaign.requestId)) return "The creation request ID is invalid.";
   if (typeof campaign.slug !== "string" || (!CAMPAIGN_SLUG.test(campaign.slug) || campaign.slug === "new")) return "Enter a name containing letters or numbers (campaign IDs have at most 64 characters).";
   if (typeof campaign.name !== "string" || !campaign.name.trim() || campaign.name.length > 120) return "Enter a campaign name of at most 120 characters.";
   if (typeof campaign.enabled !== "boolean") return "Enabled must be on or off.";
-  if (!Array.isArray(campaign.images) || !campaign.images.length || campaign.images.length > 20) return "Choose between 1 and 20 pictures.";
+  if (!Array.isArray(campaign.images) || campaign.images.length > 20 || (required.pictures && !campaign.images.length)) {
+    return required.pictures ? "Choose between 1 and 20 pictures." : "Choose at most 20 pictures.";
+  }
   for (const image of campaign.images) { const error = uploadError(image, campaign.slug, keyPrefix); if (error) return error; }
   if (new Set(campaign.images.map((image) => image.filename)).size !== campaign.images.length || new Set(campaign.images.map((image) => image.key)).size !== campaign.images.length) return "Remove duplicate pictures or filenames.";
   if (!campaign.schedule || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(campaign.schedule.time) || !weekdays(campaign.schedule.weekdays)) return "Choose a posting time and at least one weekday.";
   try { if (!campaign.schedule.timezone) return "Choose a timezone."; new Intl.DateTimeFormat("en", { timeZone: campaign.schedule.timezone }); } catch { return "Enter a valid timezone, such as Africa/Harare."; }
   // No upper bound: the bot gives a bigger campaign a longer run rather than a
   // ceiling. The 60 KiB request cap below still bounds one request.
-  if (!Array.isArray(campaign.groups) || !campaign.groups.length || new Set(campaign.groups.map((group) => group?.jid)).size !== campaign.groups.length) return "Select at least one active group, each only once.";
+  if (!Array.isArray(campaign.groups) || (required.groups && !campaign.groups.length) || new Set(campaign.groups.map((group) => group?.jid)).size !== campaign.groups.length) {
+    return required.groups ? "Select at least one active group, each only once." : "Select each group only once.";
+  }
   for (const group of campaign.groups) {
     if (!group || typeof group.jid !== "string" || !/^[0-9-]+@g\.us$/.test(group.jid)) return "A selected group ID is invalid.";
     if (group.paused !== undefined && typeof group.paused !== "boolean") return "A group pause must be on or off.";
@@ -121,8 +141,8 @@ export function campaignDraftError(value: unknown, keyPrefix?: string): string |
   for (const field of ["comment", "weeklyComment"] as const) if (campaign[field] !== undefined && (typeof campaign[field] !== "string" || campaign[field]!.length > 2000)) return "Notes must be at most 2000 characters.";
 }
 /** The same checks run in the form and on the server; the bot checks again. */
-export function campaignCreateError(value: unknown, keyPrefix?: string): string | undefined {
-  const invalid = campaignDraftError(value, keyPrefix);
+export function campaignCreateError(value: unknown, keyPrefix?: string, required: CampaignRequirements = CAMPAIGN_REQUIRES_ALL): string | undefined {
+  const invalid = campaignDraftError(value, keyPrefix, required);
   if (invalid) return invalid;
   const campaign = value as NewCampaign;
   if (!Array.isArray(campaign.captions) || !campaign.captions.length || campaign.captions.some((caption) => typeof caption !== "string" || !caption.trim())) return "Enter text for every caption and keep at least one variant.";

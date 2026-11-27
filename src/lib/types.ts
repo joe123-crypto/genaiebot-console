@@ -195,7 +195,10 @@ export type WriteCapabilities = {
   workspace?: string | null;
   /** keyPrefix: where this bot's new pictures go (`ads/` or `w/<id>/ads/`);
    *  null when misconfigured, absent from an older bot (which used `ads/`). */
-  campaignCreation?: { create: boolean; images: boolean; scheduling: boolean; keyPrefix?: string | null };
+  /** `picturesOptional` / `groupsOptional`: the bot saves a campaign without
+   *  them (no pictures posts the caption as text). Absent means required. */
+  campaignCreation?: { create: boolean; images: boolean; scheduling: boolean; keyPrefix?: string | null;
+    picturesOptional?: boolean; groupsOptional?: boolean };
   campaignDeletion?: { delete: boolean; reason?: string };
   scheduleEditing?: { edit: boolean; entries?: boolean; reason?: string };
   /** Whether the bot's writer will CREATE a `lines` document. Absent from a bot

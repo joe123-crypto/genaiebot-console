@@ -18,6 +18,15 @@ describe("create campaign action", () => {
     expect(await createCampaignAction(validCampaign())).toEqual({ ok: true, slug: "demo", scheduling: "ready" });
     expect(mock.create).toHaveBeenCalledWith(validCampaign(), { by: TEST_ACTOR }); expect(mock.revalidate).toHaveBeenCalledWith("/schedule");
   });
+  it("saves a campaign with no pictures or groups only on a bot that takes one", async () => {
+    const bare = { ...validCampaign(), images: [], groups: [] };
+    expect(await createCampaignAction(bare)).toMatchObject({ ok: false, detail: "Choose between 1 and 20 pictures.", outcome: "not-created" });
+    expect(mock.create).not.toHaveBeenCalled();
+    mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [],
+      campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "ads/", picturesOptional: true, groupsOptional: true } } });
+    expect(await createCampaignAction(bare)).toEqual({ ok: true, slug: "demo", scheduling: "ready" });
+    expect(mock.create).toHaveBeenCalledWith(bare, { by: TEST_ACTOR });
+  });
   it("refuses read-only mode before reads", async () => { mock.writable = false; expect((await createCampaignAction(validCampaign())).ok).toBe(false); expect(mock.overview).not.toHaveBeenCalled(); });
   it("shows the bot's transactional membership refusal", async () => { mock.create.mockRejectedValue(new WriteRefusedError("Group is no longer active", [], 409)); expect(await createCampaignAction(validCampaign())).toMatchObject({ ok: false, detail: "Group is no longer active", outcome: "not-created" }); });
   it("refuses older bots", async () => { mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, fields: {}, delete: [] } }); expect((await createCampaignAction(validCampaign())).ok).toBe(false); expect(mock.create).not.toHaveBeenCalled(); });
