@@ -2,6 +2,7 @@
 
 import { useState, useId } from "react";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { Section } from "@/app/_components/ui";
 import { announceSignOut, authMutation } from "@/src/lib/auth-browser";
 import type { BotRemoval } from "@/src/domains/bot-provisioning";
 
@@ -52,20 +53,23 @@ export function DeleteAccountCard({ email, bot }: { email: string; bot: BotRemov
   }
 
   return (
-    <section className="card card-pad settings-danger" aria-labelledby="delete-account-title">
-      <h2 className="card-title" id="delete-account-title">Delete account</h2>
-      <p className="card-note">{DELETE_ACCOUNT_EXPLAINER}</p>
-      <ul>
-        <li>Your groups, campaigns, schedule, lines and cap settings</li>
-        <li>The pictures stored for your campaigns</li>
-        {bot === "removed" ? <li>Your bot, and the WhatsApp connection it holds</li> : null}
-        <li>The workspace itself</li>
-        <li>Your sign-in to this console</li>
-      </ul>
-      {note ? <p className="card-note">{note}</p> : null}
-
-      <div className="modal-actions">
-        <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)}>Delete account</button>
+    <Section className="settings-card settings-danger">
+      <div className="setting-row">
+        <div className="setting-label">
+          <h3 className="setting-name" id="delete-account-title">Delete account</h3>
+          <span className="setting-hint">{DELETE_ACCOUNT_EXPLAINER}</span>
+          <ul className="settings-danger-list">
+            <li>Your groups, campaigns, schedule, lines and cap settings</li>
+            <li>The pictures stored for your campaigns</li>
+            {bot === "removed" ? <li>Your bot, and the WhatsApp connection it holds</li> : null}
+            <li>The workspace itself</li>
+            <li>Your sign-in to this console</li>
+          </ul>
+          {note ? <span className="setting-hint">{note}</span> : null}
+        </div>
+        <div className="setting-control">
+          <button type="button" className="btn btn-danger" onClick={() => setConfirming(true)}>Delete account</button>
+        </div>
       </div>
 
       {confirming ? (
@@ -84,6 +88,6 @@ export function DeleteAccountCard({ email, bot }: { email: string; bot: BotRemov
           </div>
         </ConfirmDialog>
       ) : null}
-    </section>
+    </Section>
   );
 }

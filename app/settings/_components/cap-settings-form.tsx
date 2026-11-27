@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { Section } from "@/app/_components/ui";
 import { saveCapSettingsAction } from "@/app/settings/actions";
 import {
   MAX_DAILY_CAP, capChange, capDraftProblems, describeCapChange, draftFromSettings, storedSettings,
@@ -10,8 +11,6 @@ import {
 import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { CapSettings } from "@/src/lib/types";
 
-export const CAPS_EXPLAINER =
-  "Every group gets a daily allowance of adverts. Its tier picks a band, and replies to its adverts move the allowance inside that band. When a group's allowance is smaller than the number of campaigns that target it, the campaigns take turns.";
 export const ROTATION_OFF_NOTE =
   "With turns off, the same campaigns are held back every day — and they stop posting to that group until this is switched back on.";
 export const NEXT_RUN_NOTE = "Changes apply from each campaign's next run.";
@@ -73,74 +72,30 @@ export function CapSettingsForm({ settings, gate, rotationGate }: {
     });
   }
 
-  return (
-    <section className="card card-pad cap-settings" aria-labelledby="cap-settings-title">
-      <h2 className="card-title" id="cap-settings-title">Daily caps</h2>
-      <p className="card-note">{CAPS_EXPLAINER}</p>
-      {!gate.allowed ? <p className="card-note">{gate.reason}</p> : null}
+  const tiers = Object.keys(settings.bands);
+  const dirty = changes.length > 0 || problems.length > 0;
+  // The bars under each tier share one scale -- the largest "at most" -- so
+  // busy reads as busier than quiet at a glance, not only in its numbers.
+  const number = (value: string) => Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0);
+  const scale = Math.max(1, ...tiers.map((tier) => number(draft.bands[tier][1])));
+  const bandInput = (tier: string, end: 0 | 1) => (
+    <input className="modal-input" inputMode="numeric" type="number" min={0} max={MAX_DAILY_CAP} step={1}
+      aria-label={`${tier} ${end === 0 ? "at least" : "at most"}`}
+      value={draft.bands[tier][end]}
+      onChange={(event) => setBand(tier, end, event.target.value)} />
+  );
 
-      <fieldset className="cap-settings-fields" disabled={!editable}>
-        <label className="cap-settings-switch">
-          <input type="checkbox" checked={draft.enabled}
-            onChange={(event) => update({ enabled: event.target.checked })} />
-          Cap how many adverts each group gets a day
-        </label>
-        {!draft.enabled ? (
-          <p className="card-note">With caps off, every campaign that targets a group posts there every day.</p>
-        ) : (
-          <>
-            {/* Only while caps are on: with them off nothing is ever held back,
-                so there are no turns to take and the control would be inert. */}
-            <label className="cap-settings-switch">
-              <input type="checkbox" checked={draft.rotation} disabled={!rotationEditable}
-                onChange={(event) => update({ rotation: event.target.checked })} />
-              Let a capped group&apos;s campaigns take turns
-            </label>
-            {/* Only when this one field is the thing standing in the way. A
-                form that is read-only altogether has already said so once, and
-                saying it again beside one checkbox suggests a second cause. */}
-            {gate.allowed && rotationGate && !rotationGate.allowed ? (
-              <p className="card-note">{rotationGate.reason}</p>
-            ) : null}
-            {!draft.rotation ? <p className="card-note">{ROTATION_OFF_NOTE}</p> : null}
-          </>
-        )}
-
-        <div className="form-field">
-          <label className="modal-label" htmlFor="cap-default-tier">Tier for groups without one</label>
-          <select id="cap-default-tier" className="modal-input" value={draft.defaultActivity}
-            onChange={(event) => update({ defaultActivity: event.target.value })}>
-            {Object.keys(settings.bands).map((tier) => <option key={tier} value={tier}>{tier}</option>)}
-          </select>
-        </div>
-
-        <table className="data cap-settings-bands">
-          <caption className="card-note">Adverts a day, for each tier</caption>
-          <thead><tr><th scope="col">Tier</th><th scope="col">At least</th><th scope="col">At most</th></tr></thead>
-          <tbody>
-            {Object.keys(settings.bands).map((tier) => (
-              <tr key={tier}>
-                <th scope="row">{tier}</th>
-                {([0, 1] as const).map((end) => (
-                  <td key={end}>
-                    <input className="modal-input" inputMode="numeric" type="number" min={0} max={MAX_DAILY_CAP} step={1}
-                      aria-label={`${tier} ${end === 0 ? "at least" : "at most"}`}
-                      value={draft.bands[tier][end]}
-                      onChange={(event) => setBand(tier, end, event.target.value)} />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </fieldset>
-
-      {problems.length > 0 ? (
-        <ul className="modal-error" role="alert">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
-      ) : null}
-      {saved ? <p className="card-note" role="status">Saved. {NEXT_RUN_NOTE}</p> : null}
-
-      <div className="modal-actions">
+  const footer = (
+    <>
+      <div className={dirty ? "setting-foot-text is-dirty" : "setting-foot-text"}>
+        {problems.length > 0 ? (
+          <ul className="modal-error" role="alert">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
+        ) : !gate.allowed ? <p>{gate.reason}</p>
+          : dirty ? <p className="setting-unsaved">Unsaved changes</p>
+          : saved ? null : <p>{NEXT_RUN_NOTE}</p>}
+        <p className="setting-status" role="status">{saved ? `Saved. ${NEXT_RUN_NOTE}` : ""}</p>
+      </div>
+      <div className="section-foot-end setting-foot-actions">
         <button type="button" className="btn" disabled={!editable || changes.length === 0}
           onClick={() => { setDraft(draftFromSettings(settings)); setError(null); }}>Reset</button>
         <button type="button" className="btn btn-primary"
@@ -148,6 +103,94 @@ export function CapSettingsForm({ settings, gate, rotationGate }: {
           title={gate.allowed ? undefined : gate.reason}
           onClick={() => setConfirming(true)}>Save changes</button>
       </div>
+    </>
+  );
+
+  return (
+    <Section className="settings-card cap-settings" busy={pending} footer={footer}>
+      <fieldset className="setting-fields" disabled={!editable}>
+        <label className="setting-row is-toggle">
+          <span className="setting-label">
+            <span className="setting-name">Cap how many adverts each group gets a day</span>
+            <span className="setting-hint">{draft.enabled
+              ? "Each group posts within its tier's range below."
+              : "With caps off, every campaign that targets a group posts there every day."}</span>
+          </span>
+          <span className="setting-control">
+            <input type="checkbox" className="setting-switch" checked={draft.enabled}
+              onChange={(event) => update({ enabled: event.target.checked })} />
+          </span>
+        </label>
+
+        <div className={draft.enabled ? "cap-detail" : "cap-detail is-off"}>
+          <div className="setting-row is-stacked">
+            <div className="setting-label">
+              <span className="setting-name" id="cap-bands-title">Adverts a day, for each tier</span>
+              <span className="setting-hint">Replies to a group&apos;s adverts move its allowance within its range.</span>
+            </div>
+            <div className="cap-tiers" role="list" aria-labelledby="cap-bands-title">
+              {tiers.map((tier) => {
+                const low = Math.min(number(draft.bands[tier][0]), scale);
+                const high = Math.min(Math.max(number(draft.bands[tier][1]), low), scale);
+                const isDefault = draft.defaultActivity === tier;
+                return (
+                  <div role="listitem" key={tier} className={isDefault ? "cap-tier-card is-default" : "cap-tier-card"}>
+                    <div className="cap-tier-head">
+                      <span className="cap-tier">{tier}</span>
+                      {isDefault ? <span className="cap-tier-badge">Default</span> : null}
+                    </div>
+                    <div className="cap-tier-range">
+                      <span className="cap-tier-field"><span aria-hidden="true">At least</span>{bandInput(tier, 0)}</span>
+                      <span className="cap-tier-dash" aria-hidden="true">–</span>
+                      <span className="cap-tier-field"><span aria-hidden="true">At most</span>{bandInput(tier, 1)}</span>
+                    </div>
+                    <span className="cap-tier-bar" aria-hidden="true">
+                      <span style={{ left: `${(low / scale) * 100}%`, width: `${Math.max(((high - low) / scale) * 100, 2)}%` }} />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="setting-row">
+            <div className="setting-label">
+              <label className="setting-name" htmlFor="cap-default-tier">Tier for groups without one</label>
+              <span className="setting-hint">Which range a group you haven&apos;t tiered falls in.</span>
+            </div>
+            <div className="setting-control">
+              <select id="cap-default-tier" className="modal-input" value={draft.defaultActivity}
+                onChange={(event) => update({ defaultActivity: event.target.value })}>
+                {tiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Only while caps are on: with them off nothing is ever held back,
+              so there are no turns to take and the control would be inert. */}
+          {draft.enabled ? (
+            <>
+              <label className="setting-row is-toggle">
+                <span className="setting-label">
+                  <span className="setting-name">Let a capped group&apos;s campaigns take turns</span>
+                  <span className="setting-hint">So a full group still sees every campaign over a few days.</span>
+                </span>
+                <span className="setting-control">
+                  <input type="checkbox" className="setting-switch" checked={draft.rotation} disabled={!rotationEditable}
+                    onChange={(event) => update({ rotation: event.target.checked })} />
+                </span>
+              </label>
+              {/* Only when this one field is the thing standing in the way. A
+                  form that is read-only altogether has already said so once, and
+                  saying it again beside one checkbox suggests a second cause. */}
+              {gate.allowed && rotationGate && !rotationGate.allowed ? (
+                <p className="setting-callout">{rotationGate.reason}</p>
+              ) : null}
+              {!draft.rotation ? <p className="setting-callout is-warning">{ROTATION_OFF_NOTE}</p> : null}
+            </>
+          ) : null}
+        </div>
+      </fieldset>
 
       {confirming && gate.allowed ? (
         <ConfirmDialog title="Save cap settings?" confirmLabel="Save" warning={gate.warning}
@@ -157,6 +200,6 @@ export function CapSettingsForm({ settings, gate, rotationGate }: {
           <p>These decide what every campaign sends. {NEXT_RUN_NOTE}</p>
         </ConfirmDialog>
       ) : null}
-    </section>
+    </Section>
   );
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { THEME_COOKIE_MAX_AGE_SECONDS, THEME_COOKIE_NAME } from "@/src/config";
 import { DEFAULT_THEME, isTheme, themeAttribute } from "@/src/lib/theme";
@@ -99,8 +99,9 @@ describe("saving the choice", () => {
 });
 
 describe("the Appearance card", () => {
+  const radio = (name: string) => screen.getByRole("radio", { name }) as HTMLInputElement;
   function pick(value: string) {
-    fireEvent.change(screen.getByLabelText("Theme"), { target: { value } });
+    fireEvent.click(radio(value === "dark" ? "Dark" : "Light"));
   }
 
   it("turns dark at once, before the save comes back", async () => {
@@ -133,7 +134,8 @@ describe("the Appearance card", () => {
     pick("dark");
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("That is not one of the themes the console offers."));
     expect(root().hasAttribute("data-theme")).toBe(false);
-    expect((screen.getByLabelText("Theme") as HTMLSelectElement).value).toBe("light");
+    expect(radio("Light").checked).toBe(true);
+    expect(within(screen.getByRole("group", { name: "Theme" })).getAllByRole("radio")).toHaveLength(2);
   });
 
   it("goes back to the old theme when the save never arrives", async () => {
