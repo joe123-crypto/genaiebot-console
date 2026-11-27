@@ -163,6 +163,12 @@ export function canCreateInWorkspace(consoleWrites: boolean, writes: WriteCapabi
   if (writes?.workspace !== workspaceId) {
     return { allowed: false, reason: "This bot is not set up for your workspace. Check its GENAIE_WORKSPACE_ID before creating campaigns." };
   }
-  if (!keyPrefixOf(writes)) return { allowed: false, reason: "The bot reports no usable picture location. Check its GENAIE_ASSET_KEY_PREFIX." };
+  const prefix = keyPrefixOf(writes);
+  if (!prefix) return { allowed: false, reason: "The bot reports no usable picture location. Check its GENAIE_WORKSPACE_ID." };
+  // A workspace-scoped prefix must be this workspace's own; only the shared
+  // legacy `ads/` names no workspace at all.
+  if (prefix !== "ads/" && prefix !== `workspaces/${workspaceId}/campaigns/` && prefix !== `w/${workspaceId}/ads/`) {
+    return { allowed: false, reason: "The bot would put pictures in another workspace's folder. Check its GENAIE_WORKSPACE_ID." };
+  }
   return gate;
 }

@@ -28,7 +28,7 @@ describe("workspace-admin", () => {
   it("connects a bot only when it accepts the workspace's token and serves that workspace", async () => {
     const answer = (status: number, body: unknown) =>
       vi.fn(async (_url: string, _init: { headers: Record<string, string> }) => Response.json(body, { status }));
-    const serving = answer(200, { writes: { workspace: "wk-alice1", campaignCreation: { keyPrefix: "ads/" } } });
+    const serving = answer(200, { writes: { workspace: "wk-alice1", campaignCreation: { keyPrefix: "workspaces/wk-alice1/campaigns/" } } });
     await expect(checkBot("https://bot.example", "wk-alice1", { fetchImpl: serving, secret: SECRET }))
       .resolves.toMatchObject({ workspace: "wk-alice1" });
     expect(serving.mock.calls[0][1].headers.authorization).toBe(`Bearer ${deriveBotToken("wk-alice1", SECRET)}`);

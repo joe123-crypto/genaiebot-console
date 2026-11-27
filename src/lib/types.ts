@@ -193,8 +193,9 @@ export type WriteCapabilities = {
   /** The workspace this bot is pinned to (GENAIE_WORKSPACE_ID); null when it
    *  is not pinned, absent from a bot older than workspaces. */
   workspace?: string | null;
-  /** keyPrefix: where this bot's new pictures go (`ads/` or `w/<id>/ads/`);
-   *  null when misconfigured, absent from an older bot (which used `ads/`). */
+  /** keyPrefix: where this bot's new pictures go in R2,
+   *  `workspaces/<id>/campaigns/` (older bots: `ads/` or `w/<id>/ads/`); null or
+   *  absent means it has nowhere to put them, and creating with pictures is off. */
   /** `picturesOptional` / `groupsOptional`: the bot saves a campaign without
    *  them (no pictures posts the caption as text). Absent means required. */
   campaignCreation?: { create: boolean; images: boolean; scheduling: boolean; keyPrefix?: string | null;

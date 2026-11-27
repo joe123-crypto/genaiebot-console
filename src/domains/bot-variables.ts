@@ -27,9 +27,11 @@ export const PER_BOT = [
 /**
  * Dropped, each for its own reason:
  *
- * * `GENAIE_ASSET_KEY_PREFIX` -- unset is what puts this bot's pictures under
- *   `w/<id>/ads/` instead of the shared `ads/` (`docs/provision-bot.md`).
- *   Absent is the setting, which is why the upsert replaces rather than merges.
+ * * `GENAIE_ASSET_KEY_PREFIX` -- a current bot ignores it and keeps pictures
+ *   under `workspaces/<id>/campaigns/`, but an image older than that would read
+ *   a copied `ads/` and put a user's pictures in the shared folder
+ *   (`docs/provision-bot.md`). Absent is the setting, which is why the upsert
+ *   replaces rather than merges.
  * * `CONSOLE_API_GATE_TOKEN` -- the read-scoped bearer the release gates hold.
  *   A per-user bot has no business accepting CI's token.
  * * `SOURCE_COMMIT` -- described the template's uploaded build. A bot created

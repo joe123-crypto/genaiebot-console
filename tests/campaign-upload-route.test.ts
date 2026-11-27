@@ -12,7 +12,7 @@ beforeEach(() => {
   mock.writable = true;
   mock.configured = true;
   mock.sign.mockResolvedValue({ url: "https://storage.example/upload", headers: {} });
-  mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "ads/" } } });
+  mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "workspaces/test-workspace/campaigns/" } } });
 });
 
 function request(headers: Record<string, string>, url = "http://localhost:3000/api/campaigns/uploads") {
