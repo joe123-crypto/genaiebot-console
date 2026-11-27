@@ -54,31 +54,41 @@ describe("picture keys", () => {
   const sha256 = "b".repeat(64);
   const image = (key: string) => ({ filename: "a.jpg", contentType: "image/jpeg", bytes: 10, sha256, key });
 
-  it("accept either shape in a browser draft, and only the bot's prefix on the server", () => {
+  const home = "workspaces/wk-alice1/campaigns/";
+
+  it("accept any shape the bot names in a browser draft, and only the bot's prefix on the server", () => {
+    const current = image(`${home}demo/${sha256}.jpg`);
     const legacy = image(`ads/demo/${sha256}.jpg`);
     const scoped = image(`w/wk-alice1/ads/demo/${sha256}.jpg`);
-    expect(uploadError(legacy, "demo")).toBeUndefined();
-    expect(uploadError(scoped, "demo")).toBeUndefined();
+    for (const key of [current, legacy, scoped]) expect(uploadError(key, "demo")).toBeUndefined();
+    expect(uploadError(current, "demo", home)).toBeUndefined();
     expect(uploadError(scoped, "demo", "w/wk-alice1/ads/")).toBeUndefined();
-    expect(uploadError(scoped, "demo", "ads/")).toBeTruthy();
-    expect(uploadError(legacy, "demo", "w/wk-alice1/ads/")).toBeTruthy();
-    expect(uploadError(image(`w/wk-bobbb1/ads/demo/${sha256}.jpg`), "demo", "w/wk-alice1/ads/")).toBeTruthy();
+    expect(uploadError(legacy, "demo", home)).toBeTruthy();
+    expect(uploadError(scoped, "demo", home)).toBeTruthy();
+    expect(uploadError(current, "demo", "ads/")).toBeTruthy();
+    expect(uploadError(image(`workspaces/wk-bobbb1/campaigns/demo/${sha256}.jpg`), "demo", home)).toBeTruthy();
   });
 
   it.each([`evil/ads/demo/${"b".repeat(64)}.jpg`, `w/../ads/demo/${"b".repeat(64)}.jpg`,
-           `xads/demo/${"b".repeat(64)}.jpg`, `w/wk-alice1/ads/other/${"b".repeat(64)}.jpg`])(
+           `xads/demo/${"b".repeat(64)}.jpg`, `w/wk-alice1/ads/other/${"b".repeat(64)}.jpg`,
+           `workspaces/../campaigns/demo/${"b".repeat(64)}.jpg`, `workspaces/wk-alice1/demo/${"b".repeat(64)}.jpg`,
+           `workspaces/wk-alice1/campaigns/other-demo/${"b".repeat(64)}.jpg`,
+           `workspaces/wk-alice1/campaigns/x/demo/${"b".repeat(64)}.jpg`])(
     "refuse %s", (key) => { expect(uploadError(image(key), "demo")).toBeTruthy(); });
 
-  it("take the prefix a bot reports, ads/ from an older bot, and nothing from a misconfigured one", () => {
+  it("take the prefix a bot reports, and nothing from a bot that reports none or a misconfigured one", () => {
+    expect(keyPrefixOf({ campaignCreation: { keyPrefix: home } })).toBe(home);
     expect(keyPrefixOf({ campaignCreation: { keyPrefix: "w/wk-alice1/ads/" } })).toBe("w/wk-alice1/ads/");
-    expect(keyPrefixOf({ campaignCreation: {} })).toBe("ads/");
+    expect(keyPrefixOf({ campaignCreation: {} })).toBeUndefined();
     expect(keyPrefixOf({ campaignCreation: { keyPrefix: null } })).toBeUndefined();
-    expect(keyPrefixOf({ campaignCreation: { keyPrefix: "pictures/" } })).toBeUndefined();
+    for (const bad of ["pictures/", "workspaces/wk-alice1/", "workspaces/wk-alice1/campaigns", "workspaces/../campaigns/"]) {
+      expect(keyPrefixOf({ campaignCreation: { keyPrefix: bad } })).toBeUndefined();
+    }
   });
 });
 
 describe("creating on a workspace's bot", () => {
-  const writes = (workspace: string | null | undefined, keyPrefix: string | null = "ads/"): WriteCapabilities => ({
+  const writes = (workspace: string | null | undefined, keyPrefix: string | null = "workspaces/wk-alice1/campaigns/"): WriteCapabilities => ({
     enabled: true, affectsProduction: true, fields: {}, delete: [], workspace,
     campaignCreation: { create: true, images: true, scheduling: true, keyPrefix },
   });
@@ -94,5 +104,14 @@ describe("creating on a workspace's bot", () => {
 
   it("requires a usable picture location", () => {
     expect(canCreateInWorkspace(true, writes("wk-alice1", null), "wk-alice1").allowed).toBe(false);
+  });
+
+  it("requires the picture location to be this workspace's own", () => {
+    for (const own of ["workspaces/wk-alice1/campaigns/", "w/wk-alice1/ads/", "ads/"]) {
+      expect(canCreateInWorkspace(true, writes("wk-alice1", own), "wk-alice1")).toEqual({ allowed: true });
+    }
+    for (const foreign of ["workspaces/wk-bobbb1/campaigns/", "w/wk-bobbb1/ads/"]) {
+      expect(canCreateInWorkspace(true, writes("wk-alice1", foreign), "wk-alice1").allowed).toBe(false);
+    }
   });
 });

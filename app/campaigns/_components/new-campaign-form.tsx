@@ -15,7 +15,7 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type GroupChoice = Pick<Group, "jid" | "name" | "account" | "status">;
 type Picture = { id: string; file: File; preview: string; uploaded?: CampaignImageUpload };
-export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix = "ads/",
+export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix,
   nextHref = "/campaigns/new/caption", cancelHref = "/campaigns", requirements = CAMPAIGN_REQUIRES_ALL }: {
   groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean; keyPrefix?: string;
   /** Whether this bot needs pictures and groups (`campaignRequirements`). */
@@ -102,6 +102,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
   }
   async function describe(picture: Picture): Promise<CampaignImageUpload> {
     // The bot names where its workspace's pictures go; a key elsewhere is refused.
+    if (!keyPrefix) throw new Error("The bot reports no usable picture location, so pictures cannot be added yet.");
     if (picture.uploaded?.key.startsWith(`${keyPrefix}${slug}/`)) return picture.uploaded;
     const digest = await crypto.subtle.digest("SHA-256", await picture.file.arrayBuffer());
     const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");

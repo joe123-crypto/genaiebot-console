@@ -433,7 +433,11 @@ loads that URL directly. Picture previews use public URLs and never proxy the by
 uses a server-side bucket-scoped upload token to sign direct browser uploads: the URL is composed on the bot from one
 environment variable, so putting a custom domain in front of the bucket moves the
 console with it and changes nothing here. The keys are content-addressed, so a URL
-never changes meaning and the browser can cache it indefinitely.
+never changes meaning and the browser can cache it indefinitely. Each
+workspace's pictures sit under `workspaces/<id>/campaigns/<slug>/` in the bucket,
+the same tree its documents have in Firestore; deleting the account deletes that
+prefix. (Older bots used `ads/` and `w/<id>/ads/`; that `ads` was a folder name,
+not the WhatsApp line called `ads`.)
 
 Two lists meet on that screen and are reported separately rather than merged,
 because they are two different claims and the day they disagree is worth seeing:

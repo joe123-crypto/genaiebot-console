@@ -5,7 +5,8 @@ import "./auth-fixture";
 /**
  * Deleting a workspace's pictures with its account. The bucket is shared by
  * every bot, so what matters is what is NOT deleted: nothing outside
- * `w/<id>/`, and above all not the shared `ads/` the original install uses.
+ * `workspaces/<id>/` and the older `w/<id>/`, and above all not the shared
+ * `ads/` the original install used.
  */
 
 const bucket = vi.hoisted(() => ({
@@ -55,6 +56,10 @@ beforeEach(() => {
     "w/wTestWorkspace1/ads/borehole/cccc.jpg",
     "w/wTestWorkspace1/ads/borehole/dddd.jpg",
     "w/wTestWorkspace1/ads/cv/eeee.png",
+    "workspaces/wTestWorkspace1/campaigns/borehole/1111.jpg",
+    "workspaces/wTestWorkspace1/campaigns/cv/2222.png",
+    "workspaces/wOtherWorkspace1/campaigns/cv/3333.png",
+    "workspaces/wTestWorkspace12/campaigns/cv/4444.png",
     // A sibling whose id begins with this one's: a prefix without its slash
     // would have taken it too.
     "w/wTestWorkspace12/ads/cv/ffff.png",
@@ -62,24 +67,27 @@ beforeEach(() => {
 });
 
 describe("deleting a workspace's pictures", () => {
-  it("deletes everything under the workspace's own prefix, across pages, and nothing else", async () => {
+  it("deletes everything under the workspace's own prefixes, across pages, and nothing else", async () => {
     const { deleteWorkspacePictures } = await pictures();
-    expect(await deleteWorkspacePictures("wTestWorkspace1")).toBe(3);
+    expect(await deleteWorkspacePictures("wTestWorkspace1")).toBe(5);
     expect(bucket.objects).toEqual([
       "ads/borehole/aaaa.jpg",
       "w/wOtherWorkspace1/ads/cv/bbbb.png",
+      "workspaces/wOtherWorkspace1/campaigns/cv/3333.png",
+      "workspaces/wTestWorkspace12/campaigns/cv/4444.png",
       "w/wTestWorkspace12/ads/cv/ffff.png",
     ]);
-    expect(bucket.sent.filter((call) => call.kind === "list").every((call) => call.input.Prefix === "w/wTestWorkspace1/")).toBe(true);
+    const listed = new Set(bucket.sent.filter((call) => call.kind === "list").map((call) => call.input.Prefix));
+    expect(listed).toEqual(new Set(["workspaces/wTestWorkspace1/", "w/wTestWorkspace1/"]));
     expect(bucket.sent.every((call) => call.input.Bucket === "genaie-bucket")).toBe(true);
   });
 
   it("refuses an id that is not one, before it can become a prefix", async () => {
-    const { deleteWorkspacePictures, picturePrefix } = await pictures();
+    const { deleteWorkspacePictures, picturePrefixes } = await pictures();
     for (const bad of ["", "..", "a/b", "short", "x".repeat(41)]) {
       await expect(deleteWorkspacePictures(bad)).rejects.toThrow("invalid");
     }
-    expect(() => picturePrefix("")).toThrow();
+    expect(() => picturePrefixes("")).toThrow();
     expect(bucket.sent).toEqual([]);
     expect(bucket.objects).toContain("ads/borehole/aaaa.jpg");
   });
@@ -96,6 +104,6 @@ describe("deleting a workspace's pictures", () => {
     await deleteWorkspacePictures("wTestWorkspace1");
     bucket.sent = [];
     expect(await deleteWorkspacePictures("wTestWorkspace1")).toBe(0);
-    expect(bucket.sent.map((call) => call.kind)).toEqual(["list"]);
+    expect(bucket.sent.map((call) => call.kind)).toEqual(["list", "list"]);
   });
 });

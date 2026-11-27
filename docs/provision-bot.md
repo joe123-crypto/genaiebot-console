@@ -96,7 +96,8 @@ over, for the same reason: it may name resources that exist.
 **Deleting an account deletes its bot.** `DELETE /api/workspace`
 (`src/lib/account-deletion.ts`) removes the bot this console built before it
 touches any data: the `bot-<id>` service, then the volume that was mounted on
-it, then the workspace's pictures under `w/<id>/` in R2, and only then
+it, then the workspace's pictures under `workspaces/<id>/` (and the older
+`w/<id>/`) in R2, and only then
 `workspaces/{id}`, `consoleUsers/{uid}` and the sign-in. If Railway or R2
 refuses, the account is kept and the user is told to try again; every step
 reads before it acts, so asking again carries on. Provisioning is fenced off
@@ -154,9 +155,12 @@ against the live Railway API:
   Keep anything a bot cannot work without unsealed, or a shared project variable.
   As of 2026-11-25 none of the `gateway` service's variables are sealed and all
   seven a bot cannot work without are readable.
-* **`GENAIE_ASSET_KEY_PREFIX` is deliberately left unset** on a new bot, which
-  is what puts its pictures under `w/<id>/ads/`. The variable write replaces
-  rather than merges, so it cannot survive from the template.
+* **`GENAIE_ASSET_KEY_PREFIX` is deliberately not copied** from the template.
+  A current bot ignores it and keeps its pictures under
+  `workspaces/<id>/campaigns/`, beside the workspace's Firestore tree; an older
+  image would have read a copied `ads/` and used the shared folder. The
+  variable write replaces rather than merges, so it cannot survive from the
+  template.
 * **The `variables` query also returns the fourteen names Railway injects**
   (`RAILWAY_SERVICE_ID`, `RAILWAY_VOLUME_ID`, `RAILWAY_PUBLIC_DOMAIN` and the
   rest). They are dropped rather than copied: a new bot given the template's
@@ -263,8 +267,8 @@ off or a run could not finish.
 
    Also set the shared Firestore read and write keys and the R2 variables, as on
    the first bot, and `GENAIE_CAMPAIGN_CLICK_BASE_URL` to the new bot's own
-   domain. Leave `GENAIE_ASSET_KEY_PREFIX` unset: the bot then keeps its
-   pictures under `w/<id>/ads/`.
+   domain. The bot keeps its pictures under `workspaces/<id>/campaigns/`;
+   there is no variable for that.
 3. **Seed its config.** From a genaebot checkout:
    `deploy/init-workspace.py --workspace <id> --write`.
    This writes `settings/defaults`. Without it every send fails closed. A line
@@ -295,7 +299,7 @@ with workspaces is deployed. Otherwise their first request creates an empty one.
    3. Set the bot's variables and redeploy it:
 
       ```sh
-      railway variable set GENAIE_WORKSPACE_ID=<id> GENAIE_ASSET_KEY_PREFIX=ads/ --skip-deploys
+      railway variable set GENAIE_WORKSPACE_ID=<id> --skip-deploys
       wsadmin token --workspace <id> | railway variable set CONSOLE_API_TOKEN --stdin --skip-deploys
       railway redeploy --yes
       ```
@@ -307,10 +311,14 @@ with workspaces is deployed. Otherwise their first request creates an empty one.
 
    Between the bot redeploy and the console deploy, the old console's token is
    refused, so it shows the bot as unavailable. Nothing is written in that gap.
+4. Move the pictures into the workspace's own prefix with genaebot's
+   `deploy/move-pictures-to-workspace-layout.py` (plan, `--write`, `--verify`,
+   and after 48 hours `--delete-old`). Until then the copied index still names
+   the old `ads/` keys, which the bot still reads.
 
 ## Rolling back the move
 
-1. Delete `GENAIE_WORKSPACE_ID` and `GENAIE_ASSET_KEY_PREFIX` on the bot.
+1. Delete `GENAIE_WORKSPACE_ID` on the bot.
 2. Restore its previous `CONSOLE_API_TOKEN` and redeploy it.
 3. Redeploy the previous console version.
 

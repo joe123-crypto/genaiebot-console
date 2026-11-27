@@ -38,7 +38,7 @@
 // account deletion removes the bot itself, these are what an older console
 // version left behind, or a teardown that failed and was never asked again. It
 // is a dry run unless given `--write`, and then deletes each orphan's service,
-// its volume, its pictures under `w/<id>/` and anything the still-running bot
+// its volume, its pictures under `workspaces/<id>/` (or the older `w/<id>/`) and anything the still-running bot
 // wrote back under `workspaces/{id}` -- in that order, for the same reasons
 // src/lib/account-deletion.ts gives. It needs BOT_RAILWAY_API_TOKEN,
 // BOT_RAILWAY_PROJECT_ID and BOT_RAILWAY_ENVIRONMENT_ID; BOT_TEMPLATE_SERVICE_ID
@@ -378,17 +378,19 @@ async function bucket() {
   });
   const Bucket = process.env.R2_BUCKET;
   return {
-    /** Every key under the workspace's own prefix, and only there. */
+    /** Every key under the workspace's own prefixes, and only there:
+     *  `workspaces/<id>/`, and `w/<id>/` from bots older than that layout. */
     async keys(workspaceId) {
       if (!WORKSPACE_ID.test(workspaceId)) throw new Error("the workspace id is invalid");
-      const prefix = `w/${workspaceId}/`;
       const keys = [];
-      let token;
-      do {
-        const page = await client.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token }));
-        for (const object of page.Contents ?? []) if (object.Key?.startsWith(prefix)) keys.push(object.Key);
-        token = page.IsTruncated ? page.NextContinuationToken : undefined;
-      } while (token);
+      for (const prefix of [`workspaces/${workspaceId}/`, `w/${workspaceId}/`]) {
+        let token;
+        do {
+          const page = await client.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token }));
+          for (const object of page.Contents ?? []) if (object.Key?.startsWith(prefix)) keys.push(object.Key);
+          token = page.IsTruncated ? page.NextContinuationToken : undefined;
+        } while (token);
+      }
       return keys;
     },
     async remove(key) { await client.send(new DeleteObjectCommand({ Bucket, Key: key })); },
@@ -414,7 +416,7 @@ async function sweepBots({ write }) {
     const keys = pictures ? await pictures.keys(orphan.workspaceId) : null;
     lines.push(`orphan ${orphan.service.name} (service ${orphan.service.id}): workspaces/${orphan.workspaceId} does not exist`,
       `  volumes: ${orphan.volumes.join(", ") || "none mounted"}`,
-      `  pictures under w/${orphan.workspaceId}/: ${keys ? keys.length : "not checked (R2_* unset)"}`,
+      `  pictures under workspaces/${orphan.workspaceId}/ and w/${orphan.workspaceId}/: ${keys ? keys.length : "not checked (R2_* unset)"}`,
       `  written back under workspaces/${orphan.workspaceId}: ${leftovers.join(", ") || "nothing"}`);
     if (!write) continue;
     // The service first, so the bot stops writing; the volumes it had, which

@@ -317,7 +317,7 @@ describe("editor resource resilience", () => {
 });
 
 describe("campaign pictures in the assistant", () => {
-  const images = ["https://pub-abc.r2.dev/ads/borehole-drilling/a.jpg", "https://pub-abc.r2.dev/ads/borehole-drilling/b.jpg"];
+  const images = ["https://pub-abc.r2.dev/workspaces/wk-alice1/campaigns/borehole-drilling/a.jpg", "https://pub-abc.r2.dev/workspaces/wk-alice1/campaigns/borehole-drilling/b.jpg"];
   function picture() { return screen.getByRole("checkbox", { name: /campaign pictures|campaign’s picture/ }) as HTMLInputElement; }
 
   it("offers the pictures, ticked, and sends them with the request", async () => {

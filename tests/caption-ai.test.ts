@@ -133,7 +133,7 @@ describe("caption AI request validation", () => {
 
 describe("campaign pictures as caption context", () => {
   const data = `data:image/jpeg;base64,${"A".repeat(80)}`;
-  const remote = "https://pub-abc.r2.dev/ads/sale/deadbeef.jpg";
+  const remote = "https://pub-abc.r2.dev/workspaces/wk-alice1/campaigns/sale/deadbeef.jpg";
   beforeEach(() => { vi.stubEnv("GENAIE_AD_ASSETS_BASE_URL", "https://pub-abc.r2.dev"); });
 
   it("sends the pictures beside the caption as a multipart user turn", async () => {

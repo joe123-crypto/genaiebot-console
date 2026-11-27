@@ -3,8 +3,8 @@ import { PER_BOT, RELEASE_PROFILE, botVariables, unreadableShared } from "@/src/
 
 /**
  * What a new bot ends up holding. The interesting half is what must be ABSENT:
- * an asset prefix it inherited would put a user's pictures in the shared folder,
- * and CI's read-scoped token on a per-user bot would be a credential nobody
+ * an asset prefix it inherited would put a user's pictures in the shared folder
+ * on a bot image older than the workspace layout, and CI's read-scoped token on a per-user bot would be a credential nobody
  * meant to hand out.
  */
 

@@ -59,15 +59,17 @@ function weekdays(value: unknown): value is number[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 7 &&
     new Set(value).size === value.length && value.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
 }
-/** The two key shapes the bot accepts: `ads/` for the install that predates
- *  workspaces, `w/<workspace>/ads/` for every other workspace. */
-export const KEY_PREFIX = /^(?:w\/[A-Za-z0-9_-]{6,40}\/)?ads\/$/;
+/** Where a workspace's pictures sit in R2: `workspaces/<workspace>/campaigns/`,
+ *  the same tree its documents have in Firestore. The bot also still names two
+ *  older shapes, `ads/` and `w/<workspace>/ads/`, until it has moved its
+ *  pictures; they stay accepted here so an older bot keeps working meanwhile.
+ *  (That `ads` was a folder name, never the WhatsApp line called `ads`.) */
+export const KEY_PREFIX = /^(?:workspaces\/[A-Za-z0-9_-]{6,40}\/campaigns\/|(?:w\/[A-Za-z0-9_-]{6,40}\/)?ads\/)$/;
 
-/** The prefix a bot will accept new pictures under: its reported one, `ads/`
- *  for a bot older than workspaces, undefined when it reports none it can use. */
+/** The prefix a bot will accept new pictures under: the one it reports, or
+ *  undefined when it reports none this console can use. */
 export function keyPrefixOf(writes: { campaignCreation?: { keyPrefix?: string | null } } | undefined): string | undefined {
   const reported = writes?.campaignCreation?.keyPrefix;
-  if (reported === undefined) return "ads/";
   return typeof reported === "string" && KEY_PREFIX.test(reported) ? reported : undefined;
 }
 
@@ -86,9 +88,9 @@ export function uploadError(value: unknown, slug: string, keyPrefix?: string): s
   if (image.filename.length > CAMPAIGN_IMAGE_NAME_MAX) return `Picture filenames must be at most ${CAMPAIGN_IMAGE_NAME_MAX} characters, so the bot can cache the picture.`;
   if (!/^[a-f0-9]{64}$/.test(image.sha256)) return "The picture checksum is invalid.";
   const extension = image.contentType === "image/png" ? "png" : "jpg";
-  const tail = `ads/${slug}/${image.sha256}.${extension}`;
+  const tail = `${slug}/${image.sha256}.${extension}`;
   if (typeof image.key !== "string" || !image.key.endsWith(tail)) return "The picture does not belong to this campaign.";
-  const prefix = image.key.slice(0, image.key.length - tail.length) + "ads/";
+  const prefix = image.key.slice(0, image.key.length - tail.length);
   if (!KEY_PREFIX.test(prefix) || (keyPrefix !== undefined && prefix !== keyPrefix)) return "The picture does not belong to this campaign.";
 }
 /** Whether a new campaign must have pictures and groups. */

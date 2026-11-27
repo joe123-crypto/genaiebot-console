@@ -9,7 +9,7 @@ import { BotUnavailableError, WriteRefusedError } from "@/src/lib/bot-client";
 import { createCampaignAction } from "@/app/campaigns/new/actions";
 beforeEach(() => {
   vi.clearAllMocks(); mock.writable = true;
-  mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "ads/" } } });
+  mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [], campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "workspaces/test-workspace/campaigns/" } } });
   mock.groups.mockResolvedValue({ groups: [{ jid: "1@g.us", status: "active" }] });
   mock.create.mockResolvedValue({ slug: "demo", scheduling: "ready" });
 });
@@ -23,7 +23,7 @@ describe("create campaign action", () => {
     expect(await createCampaignAction(bare)).toMatchObject({ ok: false, detail: "Choose between 1 and 20 pictures.", outcome: "not-created" });
     expect(mock.create).not.toHaveBeenCalled();
     mock.overview.mockResolvedValue({ writes: { enabled: true, affectsProduction: true, workspace: "test-workspace", fields: {}, delete: [],
-      campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "ads/", picturesOptional: true, groupsOptional: true } } });
+      campaignCreation: { create: true, images: true, scheduling: true, keyPrefix: "workspaces/test-workspace/campaigns/", picturesOptional: true, groupsOptional: true } } });
     expect(await createCampaignAction(bare)).toEqual({ ok: true, slug: "demo", scheduling: "ready" });
     expect(mock.create).toHaveBeenCalledWith(bare, { by: TEST_ACTOR });
   });

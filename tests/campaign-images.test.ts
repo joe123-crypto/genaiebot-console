@@ -15,7 +15,7 @@ import {
 import type { AdAssets, CampaignAsset } from "@/src/lib/types";
 
 const REASON = "Picture changes need the companion bot update.";
-const BUCKET = "https://pub-example.r2.dev/ads/borehole-drilling";
+const BUCKET = "https://pub-example.r2.dev/workspaces/wk-alice1/campaigns/borehole-drilling";
 
 function asset(filename: string, digest: string, rank: number): CampaignAsset {
   return { filename, url: `${BUCKET}/${digest}.jpg`, sha256: digest.repeat(32),

@@ -8,7 +8,7 @@ export const campaign: Campaign = {
   cron: "0 9 * * *", hour: 9, minute: 0, timezone: "Africa/Harare", installer: "install",
   script: "/campaigns/borehole/post_ad.py", failureAlertTo: "operator", legacyNames: [], timeoutSeconds: 60,
   captions: ["Water for {ref}"], tracking: { prefix: "BH", label: "Borehole" }, images: ["borehole.jpg"],
-  assets: [{ filename: "borehole.jpg", url: "https://ads.example.test/ads/borehole-drilling/aa.jpg",
+  assets: [{ filename: "borehole.jpg", url: "https://ads.example.test/workspaces/wk-alice1/campaigns/borehole-drilling/aa.jpg",
              sha256: "a".repeat(64), bytes: 243016, contentType: "image/jpeg", rank: 10 }],
   targetCount: 1, weeklyCount: 0, accounts: { default: 1 }, source: "git", error: null,
 };

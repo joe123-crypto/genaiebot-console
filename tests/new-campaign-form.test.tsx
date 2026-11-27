@@ -9,7 +9,7 @@ vi.mock("@/src/lib/campaign-files", () => ({ keepDraftFiles: mock.keep, draftFil
 const groups = [{ jid: "1@g.us", name: "Market One", account: "default", status: "active" as const },
   { jid: "2@g.us", name: "Market Two", account: "ads", status: "active" as const },
   { jid: "3@g.us", name: "Paused", account: "ads", status: "on-hold" as const }];
-const props = { groups, gate: { allowed: true as const } };
+const props = { groups, gate: { allowed: true as const }, keyPrefix: "workspaces/test-workspace/campaigns/" };
 const sha = "a".repeat(64);
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,11 +96,11 @@ describe("new campaign form", () => {
   it("refills every detail when the operator steps back from the captions", async () => {
     sessionStorage.setItem(CAMPAIGN_DRAFT_KEY, JSON.stringify({ version: 1, groupNames: { "1@g.us": "Market One" }, draft: {
       requestId: "12345678-1234-1234-1234-123456789abc", slug: "sale", name: "Sale", enabled: true,
-      images: [{ filename: "sale.png", key: `ads/sale/${sha}.png`, sha256: sha, bytes: 3, contentType: "image/png" }],
+      images: [{ filename: "sale.png", key: `workspaces/test-workspace/campaigns/sale/${sha}.png`, sha256: sha, bytes: 3, contentType: "image/png" }],
       schedule: { time: "10:00", timezone: "Africa/Harare", weekdays: [0, 1, 2, 3, 4, 5, 6] },
       groups: [{ jid: "1@g.us" }], comment: "Kept note" } }));
     const kept = new File([new Uint8Array([1, 2, 3])], "sale.png", { type: "image/png" });
-    mock.files.mockResolvedValue(new Map([[`ads/sale/${sha}.png`, kept]]));
+    mock.files.mockResolvedValue(new Map([[`workspaces/test-workspace/campaigns/sale/${sha}.png`, kept]]));
     render(<NewCampaignForm {...props} paginated />);
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Sale");
     expect((screen.getByLabelText("Enabled") as HTMLInputElement).checked).toBe(true);

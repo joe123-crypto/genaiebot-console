@@ -146,7 +146,7 @@ describe("paid and storage calls need a connected bot", () => {
     const response = await POST(new Request("http://localhost:3000/api/campaigns/uploads", {
       method: "POST", headers: { origin: "http://localhost:3000", host: "localhost:3000", "content-type": "application/json" },
       body: JSON.stringify({ slug: "demo", image: { filename: "a.jpg", contentType: "image/jpeg", bytes: 10, sha256,
-                                                    key: `ads/demo/${sha256}.jpg` } }),
+                                                    key: `workspaces/wk-alice1/campaigns/demo/${sha256}.jpg` } }),
     }));
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: "No bot is connected to your workspace yet." });

@@ -22,7 +22,7 @@ import { deleteWorkspacePictures } from "./workspace-pictures";
  *      then its volume (`./bot-teardown`). Railway keeps a deleted volume for a
  *      few days before erasing it. A bot connected by hand is not this
  *      console's to delete, and the screen says so.
- *   3. The workspace's pictures in R2, under `w/<id>/` (`./workspace-pictures`).
+ *   3. The workspace's pictures in R2, under `workspaces/<id>/` (and the older `w/<id>/`) (`./workspace-pictures`).
  *   4. `workspaces/{id}` and everything beneath it -- the registry entry, the
  *      run record and the workspace's own data: groups, campaigns, lines,
  *      settings, audit.

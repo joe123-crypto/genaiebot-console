@@ -140,12 +140,15 @@ including local development origins when needed:
 ```
 
 Each JPEG/PNG is at most 6 MiB; at most 20 pictures and 100 groups are accepted
-per campaign. Files go directly to `ads/<slug>/<sha256>.<ext>`. Before creating
+per campaign. Files go directly to
+`workspaces/<workspace>/campaigns/<slug>/<sha256>.<ext>`, the prefix the bot
+reports as `keyPrefix`. Before creating
 an index entry, the bot downloads from its configured asset origin and checks
 magic bytes, length and SHA-256. An interrupted upload creates no campaign or
 index entry. Unreferenced immutable objects from abandoned forms are harmless
 and may be removed manually after confirming no asset document references them;
-do not apply a blanket expiry to the `ads/` prefix.
+do not apply a blanket expiry to the `workspaces/` prefix (or the older `ads/`
+and `w/` ones).
 
 The console API reconciles desired gateway schedules at startup and every
 minute. Job names are stable (`console-<slug>-promo`), a volume lock serializes

@@ -13,7 +13,7 @@ import { CAMPAIGN_CAPTIONS_KEY, CAMPAIGN_DRAFT_KEY } from "@/src/lib/campaign-dr
 const sha = "a".repeat(64);
 const draft = {
   requestId: "12345678-1234-1234-1234-123456789abc", slug: "sale", name: "Sale", enabled: false,
-  images: [{ filename: "sale.png", key: `ads/sale/${sha}.png`, sha256: sha, bytes: 3, contentType: "image/png" }],
+  images: [{ filename: "sale.png", key: `workspaces/test-workspace/campaigns/sale/${sha}.png`, sha256: sha, bytes: 3, contentType: "image/png" }],
   schedule: { time: "10:00", timezone: "Africa/Harare", weekdays: [0, 1, 2, 3, 4, 5, 6] },
   groups: [{ jid: "1@g.us" }],
 };
@@ -31,7 +31,7 @@ beforeEach(() => {
   mocks.create.mockResolvedValue({ ok: true, slug: "sale", scheduling: "ready" });
   mocks.reply.mockResolvedValue({ ok: true, reply: { message: "Shorter", suggestion: "Shorter caption" } });
   mocks.shrink.mockResolvedValue([]);
-  mocks.files.mockResolvedValue(new Map([[`ads/sale/${sha}.png`, new File([new Uint8Array([1, 2, 3])], "sale.png", { type: "image/png" })]]));
+  mocks.files.mockResolvedValue(new Map([[`workspaces/test-workspace/campaigns/sale/${sha}.png`, new File([new Uint8Array([1, 2, 3])], "sale.png", { type: "image/png" })]]));
   vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ url: "https://r2.example/put", headers: {} }) }).mockResolvedValue({ ok: true }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
