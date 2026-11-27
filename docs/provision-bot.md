@@ -93,6 +93,34 @@ clear the field, and either start again or follow the steps below. A
 `provisioning` record the console cannot read is refused rather than started
 over, for the same reason: it may name resources that exist.
 
+**Deleting an account deletes its bot.** `DELETE /api/workspace`
+(`src/lib/account-deletion.ts`) removes the bot this console built before it
+touches any data: the `bot-<id>` service, then the volume that was mounted on
+it, then the workspace's pictures under `w/<id>/` in R2, and only then
+`workspaces/{id}`, `consoleUsers/{uid}` and the sign-in. If Railway or R2
+refuses, the account is kept and the user is told to try again; every step
+reads before it acts, so asking again carries on. Provisioning is fenced off
+for the duration (`workspaces/{id}.deletingAt`, ten minutes), so no poll can
+build a service behind the teardown. What is deleted is decided by name: a
+service called `bot-<workspace id>` that is not `BOT_TEMPLATE_SERVICE_ID`. That
+name is the provisioner's, so **do not give a hand-made bot that name** --
+a bot set up by hand is otherwise left running when its account goes, and the
+Settings card says so.
+
+**Bots left behind** -- by a console older than this, or a teardown nobody
+asked to finish -- are found by `sweep-bots`, which lists each `bot-<id>`
+service with no `workspaces/{id}` behind it, with its volume, its pictures and
+whatever the still-running bot wrote back into Firestore. It deletes nothing
+without `--write`:
+
+```sh
+BOT_RAILWAY_API_TOKEN=... BOT_RAILWAY_PROJECT_ID=... BOT_RAILWAY_ENVIRONMENT_ID=... \
+  node --env-file=.env.local scripts/workspace-admin.mjs sweep-bots [--write]
+```
+
+A volume mounted on nothing is reported and not deleted: once its service is
+gone nothing says whose it was. The two calls below are the manual fallback.
+
 **Deleting a service does not delete its volume.** A `serviceDelete` leaves the
 volume behind, unmounted and still billed, so cleaning up a stray bot is two
 calls:

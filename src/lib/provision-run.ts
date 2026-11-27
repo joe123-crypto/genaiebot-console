@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import {
   LEASE_MS,
+  deletionFenced,
   leaseHeld,
   newRun,
   parseRun,
@@ -82,6 +83,11 @@ export async function startRun(workspace: Workspace, now = Date.now()): Promise<
     return await firestoreAdmin().runTransaction(async (transaction) => {
       const snapshot = await transaction.get(reference_);
       if (!snapshot.exists) throw new WorkspaceUnavailableError("Your workspace could not be found.");
+      // The account is being deleted, and its bot with it: a run started now
+      // could build a service after the teardown had already looked.
+      if (deletionFenced(snapshot.get("deletingAt"), now)) {
+        throw new WorkspaceUnavailableError("Your account is being deleted, so no bot can be created.");
+      }
       const stored = snapshot.get("provisioning");
       const existing = parseRun(stored);
       // A record we cannot read is not a blank slate. It may name a service, a
@@ -118,7 +124,10 @@ export async function claimRun(workspace: Workspace, now = Date.now()): Promise<
       const stored = snapshot.get("provisioning");
       const run = parseRun(stored);
       if (!run) return { kind: stored === undefined ? "none" : "broken" } as RunClaim;
-      if (run.outcome !== "running" || leaseHeld(run, now)) return { kind: "busy", run } as RunClaim;
+      // A deletion in progress is reported like a held lease: nothing moves.
+      if (run.outcome !== "running" || leaseHeld(run, now) || deletionFenced(snapshot.get("deletingAt"), now)) {
+        return { kind: "busy", run } as RunClaim;
+      }
       const claimed: ProvisionRun = {
         ...run,
         lease: { holder: randomUUID(), until: new Date(now + LEASE_MS).toISOString() },
@@ -172,6 +181,46 @@ export async function recordRun(workspace: Workspace, run: ProvisionRun): Promis
 /** The step is over: write where it got to and release the lease. */
 export async function saveRun(workspace: Workspace, run: ProvisionRun): Promise<void> {
   await writeRun(workspace, run, true);
+}
+
+/** A step holds the lease right now, so what it is building is not yet written
+ *  down. Deleting the account in that moment could leave that one thing behind. */
+export class ProvisioningBusyError extends WorkspaceUnavailableError {
+  constructor() {
+    super("Your bot is still being set up. Try again in a minute.");
+    this.name = "ProvisioningBusyError";
+  }
+}
+
+/**
+ * The first step of deleting an account: fence provisioning off, and hand back
+ * the run record so the teardown knows which Railway resources are this
+ * workspace's.
+ *
+ * One transaction, so no poll can claim the run between the lease being read
+ * and the fence going up. A held lease refuses outright: that step may be
+ * creating something this instant that the record does not name yet. A lease
+ * lasts at most `LEASE_MS`, so trying again a minute later succeeds.
+ *
+ * A record this console cannot read comes back as null. That is safe here,
+ * unlike in `startRun`: the teardown also looks the bot's service up by its
+ * name, which finds it whatever the record says.
+ */
+export async function beginDeletion(workspace: Workspace, now = Date.now()): Promise<ProvisionRun | null> {
+  const reference_ = reference(workspace);
+  try {
+    return await firestoreAdmin().runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference_);
+      if (!snapshot.exists) throw new WorkspaceUnavailableError("Your workspace could not be found.");
+      const run = parseRun(snapshot.get("provisioning"));
+      if (run?.outcome === "running" && leaseHeld(run, now)) throw new ProvisioningBusyError();
+      transaction.update(reference_, { deletingAt: new Date(now).toISOString() });
+      return run;
+    });
+  } catch (error) {
+    if (error instanceof WorkspaceUnavailableError) throw error;
+    throw new WorkspaceUnavailableError("Your account could not be deleted. Try again shortly.");
+  }
 }
 
 /**

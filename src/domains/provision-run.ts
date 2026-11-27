@@ -72,6 +72,24 @@ export const LEASE_MS = 60_000;
  *  and boot is well inside this; a wedged one must not poll for ever. */
 export const RUN_DEADLINE_MS = 15 * 60_000;
 
+/**
+ * How long an account deletion holds provisioning off.
+ *
+ * Deleting an account removes the bot and only then the workspace, and in that
+ * gap another tab's poll could otherwise claim the run and build a service
+ * nobody would ever delete. `workspaces/{id}.deletingAt` fences it. It expires
+ * rather than standing for ever, so a deletion that failed and was never tried
+ * again does not leave `/setup` unable to create a bot.
+ */
+export const DELETION_FENCE_MS = 10 * 60_000;
+
+/** Whether `deletingAt`, as stored, still holds provisioning off at `now`. */
+export function deletionFenced(deletingAt: unknown, now: number): boolean {
+  if (typeof deletingAt !== "string") return false;
+  const at = Date.parse(deletingAt);
+  return !Number.isNaN(at) && now - at < DELETION_FENCE_MS;
+}
+
 const isStage = (value: unknown): value is ProvisionStage =>
   typeof value === "string" && (PROVISION_STAGES as readonly string[]).includes(value);
 const isStamp = (value: unknown): value is string =>
