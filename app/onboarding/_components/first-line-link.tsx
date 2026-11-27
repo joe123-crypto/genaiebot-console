@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { usePolling } from '@/app/_components/use-polling';
 import { createLineAction } from '@/app/lines/actions';
 import { AccountRequestError, message, request } from '@/app/lines/account-request';
@@ -15,6 +15,11 @@ import { canCreateLine } from '@/src/lib/write-capabilities';
  * The wizard's WhatsApp step: link the workspace's first line, and nothing
  * else. Every other line control -- more lines, relinking, pausing, the
  * contact line -- stays on the Lines page, which this uses the same API as.
+ *
+ * The QR code is asked for as soon as the step opens, so the first thing on
+ * screen is the code to scan rather than a button that fetches it. Only once:
+ * a code that expires or fails waits for a click before another is made, so an
+ * unattended tab does not keep opening pairing sessions.
  *
  * Once the scan connects, the line gets its configuration document straight
  * away, as the Lines page does, so the campaign step after it has a line that
@@ -39,6 +44,8 @@ export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [config, setConfig] = useState<Config>({ state: 'idle' });
+  /** The one QR code fetched without a click has been asked for. */
+  const [autoTried, setAutoTried] = useState(false);
   const starting = useRef(false);
   const configuring = useRef(false);
 
@@ -111,6 +118,20 @@ export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
     finally { starting.current = false; setBusy(false); }
   }
 
+  const blocked = first?.startBlockedReason ?? null;
+  const connecting = first?.configured !== false && first?.linked === true;
+  /** Nothing stands between opening the step and its QR code. */
+  const canAutoStart = writesEnabled && !blocked && !connecting;
+  const autoStart = !autoTried && Boolean(accounts) && !connected && !session && canAutoStart;
+  useEffect(() => {
+    if (!autoStart) return;
+    setAutoTried(true);
+    void link();
+  });
+  /** Still on the way to the first code: the read, or the request for it. */
+  const preparing = !session && !error && !readError && (accounts === null ? writesEnabled : busy || autoStart);
+  const pairing = preparing || session?.state === 'waiting';
+
   if (connected) {
     return (
       <section className="card card-pad">
@@ -136,21 +157,19 @@ export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
     );
   }
 
-  const blocked = first?.startBlockedReason ?? null;
-  const connecting = first?.configured !== false && first?.linked === true;
   return (
     <>
       {error || readError ? <div className="banner" role="alert"><AlertTriangle size={17} aria-hidden /><span>{error ?? readError}</span></div> : null}
       <section className="card card-pad">
-        {session && session.state === 'waiting' ? (
+        {pairing ? (
           <div className="account-pairing" role="status">
             <h2 className="card-title">Scan this code with WhatsApp</h2>
             <p className="card-note">On your phone, open WhatsApp → Linked devices → Link a device, then scan this code.</p>
             {/* Gateway-provided PNG data only; never persist or optimize pairing QR codes. */}
-            {session.qrDataUrl
+            {session?.qrDataUrl
               ? <img src={session.qrDataUrl} width={280} height={280} alt="WhatsApp pairing QR code" />
-              : <p className="card-note">Waiting for the QR code…</p>}
-            <p className="card-note">Waiting for your scan.</p>
+              : <div className="account-pairing-placeholder"><Loader2 size={20} aria-hidden className="setup-spinner" />Preparing your QR code…</div>}
+            <p className="card-note">{session?.qrDataUrl ? 'Waiting for your scan.' : '\u00a0'}</p>
           </div>
         ) : (
           <>
