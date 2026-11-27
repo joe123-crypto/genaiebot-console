@@ -54,6 +54,14 @@ describe("creating a bot", () => {
     expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("method");
   });
 
+  it("offers the one button and nothing about the workspace itself", async () => {
+    setup();
+    await settled();
+    expect(screen.getByRole("button", { name: "Create my bot" })).toBeTruthy();
+    expect(screen.queryByText(WORKSPACE.id)).toBeNull();
+    expect(screen.queryByText(WORKSPACE.name)).toBeNull();
+  });
+
   it("starts exactly one run however fast the button is clicked", async () => {
     setup();
     await settled();
