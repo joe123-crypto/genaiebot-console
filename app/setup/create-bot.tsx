@@ -191,14 +191,6 @@ export function CreateBot({ workspace, enabled, next = { href: "/lines", label: 
           </>
         )}
       </section>
-
-      <section className="card card-pad">
-        <h2 className="card-title">Your workspace</h2>
-        <dl className="card-note">
-          <dt>Workspace</dt><dd>{workspace.name}</dd>
-          <dt>Workspace ID</dt><dd><code>{workspace.id}</code></dd>
-        </dl>
-      </section>
     </>
   );
 }
