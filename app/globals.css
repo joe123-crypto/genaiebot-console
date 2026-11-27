@@ -1945,32 +1945,127 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 
 /* ---------------------------------------------------------- onboarding ----- */
-/* Where the first-run wizard stands: sign up, then the three steps after it. */
-.onboarding-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 12px; margin: 0 0 18px;
+/* The first-run wizard is a screen of its own, apart from the console: the
+   brand and sign-out across the top, the setup timeline, and the step centered
+   beneath it, under the same sky the console's page heads carry. */
+.onboarding-app {
+  position: relative;
+  isolation: isolate;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
-.onboarding-steps {
+.onboarding-app::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 420px;
+  background: var(--page-wash);
+  pointer-events: none;
+}
+@media (forced-colors: active) { .onboarding-app::before { display: none; } }
+
+.onboarding-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 18px 28px;
+}
+.onboarding-brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.onboarding-brand-mark { width: auto; height: 34px; flex: 0 0 auto; filter: var(--logo-filter); }
+.onboarding-account { display: flex; align-items: center; gap: 10px; }
+.onboarding-avatar {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--accent-strong); color: var(--text-inverse); font-size: 13px; font-weight: 600;
+}
+.onboarding-sign-out { display: flex; align-items: center; gap: 8px; }
+.onboarding-sign-out .btn { padding: 5px 12px; font-size: 12.5px; background: transparent; }
+.onboarding-sign-out .btn:hover:not(:disabled) { background: var(--surface); }
+.onboarding-sign-out p { margin: 0; color: var(--danger-ink); font-size: 12px; }
+
+.onboarding-body {
+  flex: 1 0 auto;
+  display: flex; flex-direction: column; align-items: center;
+  width: 100%;
+  padding: 20px 24px 40px;
+}
+
+/* Four stations on one line: a node each, joined to the one before it, with
+   the line filled as far as the step in hand. */
+.onboarding-progress { width: 100%; max-width: 680px; margin-bottom: 36px; }
+.onboarding-progress-count { display: none; }
+.onboarding-timeline {
   list-style: none; margin: 0; padding: 0;
-  display: flex; flex-wrap: wrap; gap: 8px 20px;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-.onboarding-step {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--text-faint);
+.onboarding-stage {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-align: center; color: var(--text-muted); font-size: 13px; line-height: 1.35;
 }
-.onboarding-step svg { flex: 0 0 auto; color: var(--success-text); }
-.onboarding-step.is-done { color: var(--text-muted); }
-.onboarding-step.is-current { color: var(--text); font-weight: 600; }
-.onboarding-step-number {
-  display: inline-grid; place-items: center; width: 20px; height: 20px;
-  border-radius: 50%; border: 1px solid var(--border-strong);
-  font-size: 11px; font-weight: 600;
+.onboarding-stage + .onboarding-stage::before {
+  content: "";
+  position: absolute;
+  top: 13px;
+  left: calc(-50% + 22px);
+  right: calc(50% + 22px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
 }
-.onboarding-step.is-current .onboarding-step-number {
-  border-color: var(--primary); background: var(--primary); color: var(--text-inverse);
+.onboarding-stage:is(.is-done, .is-current)::before { background: var(--success-text); }
+.onboarding-node {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--border-strong); background: var(--surface);
+  font-size: 12px; font-weight: 700; color: var(--text-muted);
 }
-.console-nav-item.is-disabled { color: var(--text-faint); cursor: default; }
-.console-nav-item.is-disabled:hover { background: none; }
+.onboarding-stage.is-done .onboarding-node { border-color: var(--success-text); background: var(--success-text); color: var(--surface); }
+.onboarding-stage.is-current .onboarding-node {
+  border-color: var(--primary); background: var(--primary); color: #ffffff;
+  box-shadow: 0 0 0 5px var(--primary-soft);
+}
+.onboarding-stage.is-current { color: var(--text); font-weight: 600; }
+
+.onboarding-head { text-align: center; max-width: 560px; margin-bottom: 24px; }
+.onboarding-head h1 { margin: 0; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: -0.02em; }
+.onboarding-head p { margin: 8px 0 0; color: var(--text-muted); font-size: 14.5px; line-height: 1.5; }
+
+.onboarding-main { width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.onboarding-main.is-narrow { max-width: 560px; }
+.onboarding-main.is-wide { max-width: 1040px; }
+.onboarding-main > .card { min-width: 0; box-shadow: var(--shadow-pop); }
+/* One card, one thing to do: its title, words and button read down the middle. */
+.onboarding-main.is-narrow > .card { padding: 28px; text-align: center; }
+.onboarding-main.is-narrow > .card .card-title { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; }
+.onboarding-main.is-narrow > .card dl { text-align: left; }
+.onboarding-main.is-narrow .setup-actions { justify-content: center; margin-top: 20px; }
+.onboarding-main.is-narrow .setup-steps { display: inline-grid; text-align: left; }
+.onboarding-main .new-campaign { max-width: none; }
+/* The caption step brings its own header; the sky is already behind it. */
+.onboarding-main .page-head::before { display: none; }
+
+.onboarding-skip {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px;
+  margin-top: 32px; color: var(--text-muted); font-size: 13px; text-align: center;
+}
+.onboarding-skip-button {
+  padding: 0; border: 0; background: none; font: inherit; font-weight: 600;
+  color: var(--primary-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+}
+.onboarding-skip-button:hover { color: var(--text); }
+.onboarding-skip-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 2px; }
+
+@media (max-width: 600px) {
+  .onboarding-top { padding: 14px 16px; }
+  .onboarding-body { padding: 8px 16px 32px; }
+  .onboarding-progress { margin-bottom: 24px; }
+  .onboarding-progress-count { display: block; margin: 0 0 10px; text-align: center; color: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  /* On a phone the line above names the step in hand; the stations are nodes. */
+  .onboarding-stage-label {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+  }
+  .onboarding-head h1 { font-size: 22px; }
+  .onboarding-main.is-narrow > .card { padding: 22px 18px; }
+}
 
 /* The campaign's own on/off switch, above its statistics. */
 .campaign-read-notice {

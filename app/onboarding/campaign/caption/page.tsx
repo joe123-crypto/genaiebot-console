@@ -25,7 +25,7 @@ export default async function OnboardingCampaignCaptionPage() {
     loadError = error.detail;
   }
   return (
-    <OnboardingFrame operator={operator} step="campaign" wide>
+    <OnboardingFrame operator={operator} step="campaign" width="wide">
       <OnboardingCaptionStep gate={gate} loadError={loadError} requirements={requirements} aiUnavailableReason={captionAIUnavailableReason()} />
     </OnboardingFrame>
   );
