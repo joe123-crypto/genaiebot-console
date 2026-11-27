@@ -6,10 +6,16 @@ export class AccountApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
-/** Account operations always use the live gateway API, never console-read. */
-export async function accountRequest(route = '', body?: Record<string, unknown>): Promise<unknown> {
+/**
+ * Account operations always use the live gateway API, never console-read.
+ *
+ * `explicit` is for the fleet rollout, which has no session: it names the bot
+ * and the workspace token itself. Every other caller leaves it out and gets the
+ * signed-in user's own bot.
+ */
+export async function accountRequest(route = '', body?: Record<string, unknown>, explicit?: BotTarget): Promise<unknown> {
   let target: BotTarget;
-  try { target = await botTarget(); }
+  try { target = explicit ?? await botTarget(); }
   catch (error) {
     if (error instanceof BotUnavailableError) throw new AccountApiError(error.status === 409 ? 409 : 503, error.detail);
     throw error;
@@ -67,3 +73,8 @@ export function checkLinkSession(value: unknown): LinkSession {
   return s;
 }
 export async function getAccounts() { return checkAccounts(await accountRequest()); }
+/** The ids of the WhatsApp accounts that are connected right now on this bot. */
+export async function connectedAccounts(target: BotTarget): Promise<string[]> {
+  const payload = checkAccounts(await accountRequest('', undefined, target));
+  return payload.accounts.filter((account) => account.connected === true).map((account) => account.id);
+}

@@ -74,7 +74,7 @@ export async function findService(name: string): Promise<string | null> {
  * Deliberately sourceless: a `serviceCreate` that names an image deploys
  * immediately -- measured, not assumed -- which would boot the bot before its
  * volume is mounted and before it holds any of its config. So the source is set
- * last, by `setServiceSource`, and that is the one deploy.
+ * last, by `setServiceSource`, and the one deploy is `deployService` after it.
  *
  * `GENAIE_WORKSPACE_ID` is set here all the same, so the service says whose it
  * is from its first instant, independently of its name. The rest of the
@@ -96,18 +96,25 @@ export async function createService(workspaceId: string): Promise<string> {
 }
 
 /**
- * Give the service its image, and with it its first deployment.
+ * Give the service its image: `BOT_IMAGE` unless the caller names one (the
+ * fleet's release target, or the image a failed rollout returns to).
+ *
+ * This does NOT deploy. Measured on 2026-11-26 against the live API, on a
+ * sourceless service and on a running one alike: the source changes, and no
+ * deployment appears until `deployService` asks for one. So a caller that
+ * wants the new image running always follows this with `deployService`, and
+ * that call is the one deploy -- it also hands back the deployment's id.
  *
  * The region is set here too, and it is not cosmetic: the volume is pinned to
  * one region, and a service left to deploy elsewhere could not mount it.
  */
-export async function setServiceSource(serviceId: string): Promise<void> {
+export async function setServiceSource(serviceId: string, image?: string): Promise<void> {
   const config = settings();
   const document = `mutation($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) {
     serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input)
   }`;
   const input: Record<string, unknown> = {
-    source: { image: config.image }, region: config.region, numReplicas: 1,
+    source: { image: image ?? config.image }, region: config.region, numReplicas: 1,
   };
   if (config.registry) input.registryCredentials = config.registry;
   await railwayRequest(config.token, document,
@@ -118,9 +125,9 @@ export async function setServiceSource(serviceId: string): Promise<void> {
 /**
  * The newest deployment this service has, or null when it has none yet.
  *
- * Setting the source starts a deployment but answers only `true`, so this is
- * how the run learns which deployment to watch. Null is not a failure: the next
- * poll looks again.
+ * Setting the source does not deploy (see `setServiceSource`), so for a run
+ * this usually finds nothing, and the next poll's `deployService` is what
+ * starts the bot. Null is not a failure: the next poll looks again.
  */
 export async function readLatestDeployment(serviceId: string): Promise<string | null> {
   const config = settings();
@@ -181,13 +188,21 @@ export async function createDomain(serviceId: string): Promise<{ id: string; dom
  * error here, it is something the caller checks for before anything is built.
  */
 export async function readTemplateVariables(): Promise<Record<string, string>> {
+  return readServiceVariables(settings().templateServiceId);
+}
+
+/**
+ * A service's variables, rendered. The template's, for a new bot; a bot's own,
+ * for a settings sync, which must keep that bot's `GATEWAY_AUTH_TOKEN` -- it
+ * was made for the bot and the console never kept a copy.
+ */
+export async function readServiceVariables(serviceId: string): Promise<Record<string, string>> {
   const config = settings();
   const document = `query($projectId: String!, $environmentId: String!, $serviceId: String!) {
     variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId)
   }`;
   return railwayRequest(config.token, document, {
-    projectId: config.projectId, environmentId: config.environmentId,
-    serviceId: config.templateServiceId,
+    projectId: config.projectId, environmentId: config.environmentId, serviceId,
   }, (data) => {
     const variables = field(data, "variables");
     if (!variables || typeof variables !== "object" || Array.isArray(variables)) return null;
@@ -299,4 +314,30 @@ export async function deleteVolume(volumeId: string): Promise<void> {
   const document = `mutation($volumeId: String!) { volumeDelete(volumeId: $volumeId) }`;
   await railwayRequest(config.token, document, { volumeId }, (data) =>
     field(data, "volumeDelete") === true ? true : null);
+}
+
+/**
+ * What a bot's service runs, as Railway reports it: the image it is set to and
+ * the deployment that is live. A rollout reads this before it changes
+ * anything, so that a failure can put back exactly what was there.
+ */
+export type ServiceInstance = { image: string | null; latestDeploymentId: string | null };
+
+export async function readServiceInstance(serviceId: string): Promise<ServiceInstance> {
+  const config = settings();
+  const document = `query($environmentId: String!, $serviceId: String!) {
+    serviceInstance(environmentId: $environmentId, serviceId: $serviceId) {
+      source { image } latestDeployment { id }
+    }
+  }`;
+  return railwayRequest(config.token, document, { environmentId: config.environmentId, serviceId }, (data) => {
+    const instance = field(data, "serviceInstance");
+    if (!instance || typeof instance !== "object") return null;
+    const image = field(field(instance, "source"), "image");
+    const latest = field(instance, "latestDeployment");
+    const latestId = latest === null || latest === undefined ? null : asString(field(latest, "id"));
+    if (image !== null && image !== undefined && !asString(image)) return null;
+    if (latest !== null && latest !== undefined && !latestId) return null;
+    return { image: (image as string | null | undefined) ?? null, latestDeploymentId: latestId };
+  });
 }

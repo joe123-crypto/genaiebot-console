@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PER_BOT, botVariables, unreadableShared } from "@/src/domains/bot-variables";
+import { PER_BOT, RELEASE_PROFILE, botVariables, unreadableShared } from "@/src/domains/bot-variables";
 
 /**
  * What a new bot ends up holding. The interesting half is what must be ABSENT:
@@ -24,6 +24,9 @@ const TEMPLATE: Record<string, string> = {
   APP_BASE_URL: "https://agent.example",
   RAILWAY_SERVICE_ID: "the-template-service",
   GENAIE_OVERNIGHT_STANDBY: "1",
+  GENAIE_CAMPAIGN_TRANSPORT: "rpc-once",
+  MALLOC_ARENA_MAX: "2",
+  GENAIE_CAMPAIGN_DELETION: "1",
   GENAIE_COLD_START: "0",
 };
 
@@ -80,7 +83,16 @@ describe("a new bot's variables", () => {
   it("carries the shared values across untouched", () => {
     expect(variables.GCP_SERVICE_ACCOUNT_B64).toBe("read-key");
     expect(variables.R2_SECRET_ACCESS_KEY).toBe("secret");
-    expect(variables.GENAIE_OVERNIGHT_STANDBY).toBe("1");
+    expect(variables.GENAIE_CAMPAIGN_DELETION).toBe("1");
+  });
+
+  it("leaves out the gateway's release-profile trials, so a bot runs the baseline", () => {
+    // genaebot's release job switches these on the gateway alone; absent, each
+    // is its baseline default. Copied, a trial would spread to every bot.
+    for (const name of ["GENAIE_OVERNIGHT_STANDBY", "GENAIE_CAMPAIGN_TRANSPORT", "MALLOC_ARENA_MAX"]) {
+      expect(variables[name], name).toBeUndefined();
+    }
+    for (const name of RELEASE_PROFILE) expect(name in variables, name).toBe(false);
   });
 });
 

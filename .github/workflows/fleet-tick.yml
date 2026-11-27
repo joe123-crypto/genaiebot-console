@@ -1,0 +1,58 @@
+name: Advance the bot fleet rollout
+
+# The clock of the fleet rollout (src/lib/fleet-rollout.ts). Each run asks the
+# deployed console to move the rollout on by at most one step: watch the bot in
+# flight, or start the next one that is behind and says it is quiet. Nothing is
+# deployed from here, and nothing here holds a Railway credential.
+#
+# Switched off until CONSOLE_URL (a repository variable) and FLEET_TICK_TOKEN
+# (a secret, the same value as the console's own) are both set.
+#
+# A run fails only on the tick that failed a bot and paused the fleet, so that
+# GitHub mails you once. While the fleet stays paused every run passes with a
+# warning naming why, until the next release or `workspace-admin.mjs fleet resume`.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: fleet-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: One step of the rollout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Advance the rollout
+        env:
+          CONSOLE_URL: ${{ vars.CONSOLE_URL }}
+          FLEET_TICK_TOKEN: ${{ secrets.FLEET_TICK_TOKEN }}
+        run: |
+          if [ -z "$CONSOLE_URL" ] || [ -z "$FLEET_TICK_TOKEN" ]; then
+            echo "::notice::CONSOLE_URL or FLEET_TICK_TOKEN is not set, so the rollout is switched off."
+            exit 0
+          fi
+          status=$(curl -sS --max-time 90 -o "$RUNNER_TEMP/tick.json" -w '%{http_code}' -X POST \
+            "${CONSOLE_URL%/}/api/internal/fleet/tick" -H "Authorization: Bearer $FLEET_TICK_TOKEN") || status=000
+          cat "$RUNNER_TEMP/tick.json" 2>/dev/null; echo
+          reason=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); p=d.get("paused") or {}; print(p.get("reason",""))' \
+            "$RUNNER_TEMP/tick.json" 2>/dev/null || true)
+          case "$status" in
+            200)
+              if [ -n "$reason" ]; then echo "::warning::The fleet is paused: $reason"; fi ;;
+            409)
+              echo "::error::A bot failed its release and the fleet paused: $reason"
+              exit 1 ;;
+            503|504|000)
+              # Passing trouble on the console's side; the next tick tries again.
+              echo "::warning::The console could not advance the rollout this time ($status)." ;;
+            *)
+              echo "::error::The console answered $status to the tick."
+              exit 1 ;;
+          esac

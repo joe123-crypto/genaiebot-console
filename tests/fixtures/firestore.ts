@@ -62,8 +62,33 @@ export function firestoreFake() {
 
   type Reference = ReturnType<typeof reference>;
 
+  /** A dotted field path read out of a stored document, as Firestore does. */
+  const fieldAt = (data: Doc, path: string): unknown =>
+    path.split(".").reduce<unknown>((value, key) =>
+      value && typeof value === "object" ? (value as Doc)[key] : undefined, data);
+
+  /** Equality queries on one top-level collection: all the code under test runs. */
+  function where(name: string, path: string, op: string, expected: unknown) {
+    if (op !== "==") throw new Error(`the fake supports == only, not ${op}`);
+    return {
+      async get() {
+        state.reads++;
+        if (state.failing) throw new Error("firestore down");
+        const docs = [...store.entries()]
+          .filter(([key, data]) => key.startsWith(`${name}/`) && !key.slice(name.length + 1).includes("/")
+            && fieldAt(data, path) === expected)
+          .map(([key, data]) => ({ id: key.slice(name.length + 1), data: () => ({ ...data }),
+                                   get: (field: string) => fieldAt(data, field) }));
+        return { docs, size: docs.length, empty: docs.length === 0 };
+      },
+    };
+  }
+
   const db = {
-    collection: (name: string) => ({ doc: (id: string) => reference(`${name}/${id}`) }),
+    collection: (name: string) => ({
+      doc: (id: string) => reference(`${name}/${id}`),
+      where: (path: string, op: string, expected: unknown) => where(name, path, op, expected),
+    }),
     async runTransaction<T>(body: (transaction: unknown) => Promise<T>): Promise<T> {
       if (state.failing) throw new Error("firestore down");
       const staged = new Map<string, Doc>();

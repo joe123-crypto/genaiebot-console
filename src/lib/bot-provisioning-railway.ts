@@ -36,6 +36,14 @@ import {
   writeVariables,
 } from "./railway-bot";
 import { readSettingsTemplate, seedWorkspaceSettings } from "./workspace-seed";
+import { readFleet, recordBotImage } from "./fleet-store";
+
+/** The fleet's release target, or undefined for `BOT_IMAGE`. A target that
+ *  cannot be read is not worth failing a run for: the bot starts on BOT_IMAGE
+ *  and the rollout moves it on. */
+async function fleetImage(): Promise<string | undefined> {
+  try { return (await readFleet())?.image; } catch { return undefined; }
+}
 import { deriveBotToken, type Workspace } from "./workspace";
 
 /**
@@ -222,8 +230,10 @@ async function reserve(workspace: Workspace, run: ProvisionRun, now: number): Pr
  *
  * The variables wait until here because two of them are the bot's own domain,
  * which did not exist until `reserving` finished. The image waits until after
- * them, because setting it is what deploys: a service created with an image
- * deploys at once, which would boot the bot with no volume and no config.
+ * them, and the deploy until after the image: a service CREATED with an image
+ * deploys at once, which would boot the bot with no volume and no config, but
+ * setting one on the existing service deploys nothing (measured 2026-11-26), so
+ * the bot boots exactly once, on the `deployService` below.
  */
 async function start(workspace: Workspace, run: ProvisionRun, now: number): Promise<ProvisionRun> {
   let current = run;
@@ -248,14 +258,19 @@ async function start(workspace: Workspace, run: ProvisionRun, now: number): Prom
     await recordRun(workspace, current);
     return current;
   }
-  // The image goes on last, because setting it is also the first deploy: the bot
-  // boots once, with its volume mounted and its whole config already in place.
+  // The image goes on last, with its volume mounted and its whole config
+  // already in place. It is the fleet's release target when there is one, so a
+  // bot created after a release starts on that release rather than on the
+  // older BOT_IMAGE and being rolled forward minutes later.
   if (!current.railway.sourceSetAt) {
-    await setServiceSource(serviceId);
+    const image = await fleetImage();
+    await setServiceSource(serviceId, image);
     current = withResources(current, { sourceSetAt: new Date(now).toISOString() }, now);
     await recordRun(workspace, current);
-    // That call answers only "yes", so the deployment it started has to be
-    // looked up. Not finding it yet is fine -- the next poll looks again.
+    if (image) await recordBotImage(workspace.id, image).catch(() => {});
+    // Setting the image deploys nothing, so this normally finds no deployment
+    // and the next poll asks for one below. Looked up all the same, so a
+    // deployment something else started is adopted rather than doubled.
     const started = await readLatestDeployment(serviceId);
     if (started) {
       current = withResources(current, { deploymentId: started, deploymentAttempt: current.attempt }, now);
