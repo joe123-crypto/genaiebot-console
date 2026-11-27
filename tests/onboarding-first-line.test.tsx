@@ -6,6 +6,8 @@ import type { WhatsAppAccount } from '@/src/lib/account-types';
 
 const { createLine } = vi.hoisted(() => ({ createLine: vi.fn() }));
 vi.mock('@/app/lines/actions', () => ({ createLineAction: createLine }));
+const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }));
 
 import { FirstLineLink } from '@/app/onboarding/_components/first-line-link';
 
@@ -53,7 +55,7 @@ beforeEach(() => {
     return new Response(JSON.stringify(data), { status: 200 });
   }));
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); createLine.mockReset(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); createLine.mockReset(); replace.mockReset(); });
 
 describe('the onboarding WhatsApp step', () => {
   it('makes the first line and shows its QR code without a click, then configures it once scanned', async () => {
@@ -67,7 +69,25 @@ describe('the onboarding WhatsApp step', () => {
     expect(createLine.mock.calls).toEqual([['default']]);
     expect(screen.getByText(/WhatsApp is connected/)).toBeTruthy();
     expect(screen.getByText('+263785632943')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Continue' }).getAttribute('href')).toBe('/onboarding/campaign');
+    expect(screen.queryByRole('link', { name: 'Continue' })).toBeNull();
+    expect(screen.getByText(/Taking you to the next step/)).toBeTruthy();
+    expect(replace).not.toHaveBeenCalled();
+    await advance(1500);
+    expect(replace).toHaveBeenCalledWith('/onboarding/campaign');
+  });
+
+  it('waits for the line to be configured before moving on', async () => {
+    let finish: (value: { ok: true }) => void = () => {};
+    createLine.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    step(); await settle();
+    scanned = true;
+    await advance(2000); await settle();
+    expect(screen.getByText(/Adding the line to your bot's configuration/)).toBeTruthy();
+    await advance(5000);
+    expect(replace).not.toHaveBeenCalled();
+    finish({ ok: true }); await settle();
+    await advance(1500);
+    expect(replace).toHaveBeenCalledWith('/onboarding/campaign');
   });
 
   it('relinks a real first line that lost its login instead of making another', async () => {
@@ -76,12 +96,14 @@ describe('the onboarding WhatsApp step', () => {
     expect(posts).toEqual([{ url: '/api/accounts/default/link', body: '{}' }]);
   });
 
-  it('goes straight to Continue when a line is already connected', async () => {
+  it('moves straight on when a line is already connected', async () => {
     accounts = [invented({ configured: true, linked: true, connected: true, running: true, number: '+263700000000' })];
     step(); await settle();
-    expect(screen.getByRole('link', { name: 'Continue' })).toBeTruthy();
+    expect(screen.getByText(/WhatsApp is connected/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Show QR code' })).toBeNull();
     expect(posts).toEqual([]);
+    await advance(1500);
+    expect(replace).toHaveBeenCalledWith('/onboarding/campaign');
   });
 
   it('holds the QR code\'s place while it is fetched, so nothing jumps when it arrives', async () => {
@@ -121,5 +143,7 @@ describe('the onboarding WhatsApp step', () => {
     expect(createLine).toHaveBeenCalledTimes(3);
     expect(screen.getByText(/could not be added to your bot's configuration yet/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Continue' })).toBeTruthy();
+    await advance(5000);
+    expect(replace).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { usePolling } from '@/app/_components/use-polling';
 import { createLineAction } from '@/app/lines/actions';
@@ -23,13 +24,17 @@ import { canCreateLine } from '@/src/lib/write-capabilities';
  *
  * Once the scan connects, the line gets its configuration document straight
  * away, as the Lines page does, so the campaign step after it has a line that
- * groups can be assigned to.
+ * groups can be assigned to. Then the step says WhatsApp is connected and goes
+ * on to the campaign step by itself. Only a line the bot could not take keeps
+ * a Continue button, so its reason stays on screen until it has been read.
  */
 
 type Config = { state: 'idle' | 'saving' | 'done' } | { state: 'failed'; detail: string };
 const CONFIG_ATTEMPTS = 3;
 const CONFIG_RETRY_MS = 3000;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Long enough to see that it worked before the next step replaces it. */
+const CONTINUE_AFTER_MS = 1500;
 
 export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
   /** The gateway's account controls (`ACCOUNT_WRITES_ENABLED`). */
@@ -38,6 +43,7 @@ export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
   configWrites: boolean;
   nextHref: string;
 }) {
+  const router = useRouter();
   const [accounts, setAccounts] = useState<WhatsAppAccount[] | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [session, setSession] = useState<LinkSession | null>(null);
@@ -132,6 +138,15 @@ export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
   const preparing = !session && !error && !readError && (accounts === null ? writesEnabled : busy || autoStart);
   const pairing = preparing || session?.state === 'waiting';
 
+  // A line scanned here waits for its configuration; one that was already
+  // connected when the step opened has nothing to wait for.
+  const proceed = Boolean(connected) && (config.state === 'done' || (config.state === 'idle' && !session));
+  useEffect(() => {
+    if (!proceed) return;
+    const timer = setTimeout(() => router.replace(nextHref), CONTINUE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [proceed, router, nextHref]);
+
   if (connected) {
     return (
       <section className="card card-pad">
@@ -141,18 +156,23 @@ export function FirstLineLink({ writesEnabled, configWrites, nextHref }: {
           You can add more numbers later on the WhatsApp lines page.
         </p>
         {config.state === 'saving' ? <p className="card-note" role="status">Adding the line to your bot&apos;s configuration…</p> : null}
+        {proceed ? (
+          <p className="card-note" role="status">
+            <Loader2 size={14} aria-hidden className="setup-spinner" /> Taking you to the next step…{' '}
+            <Link prefetch={false} className="link" href={nextHref}>Go now</Link>
+          </p>
+        ) : null}
         {config.state === 'failed' ? (
           <p className="card-note" role="alert">
             The line is linked, but it could not be added to your bot&apos;s configuration yet: {config.detail}{' '}
             <button type="button" className="link" onClick={() => void configure(connected.id)}>Try again</button>
           </p>
         ) : null}
-        <div className="setup-actions">
-          <Link prefetch={false} className="btn btn-primary" href={nextHref}
-            aria-disabled={config.state === 'saving'} onClick={(event) => { if (config.state === 'saving') event.preventDefault(); }}>
-            Continue
-          </Link>
-        </div>
+        {config.state === 'failed' ? (
+          <div className="setup-actions">
+            <Link prefetch={false} className="btn btn-primary" href={nextHref}>Continue</Link>
+          </div>
+        ) : null}
       </section>
     );
   }
