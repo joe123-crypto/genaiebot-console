@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { setThemeAction } from "@/app/settings/actions";
+import { Section } from "@/app/_components/ui";
 import { THEMES, isTheme, themeAttribute, type Theme } from "@/src/lib/theme";
 
 export const APPEARANCE_EXPLAINER =
-  "How the console looks in this browser. Dark is easier on the eyes at night; light is what every screen showed before there was a choice.";
+  "How the console looks in this browser. Dark is easier on the eyes at night.";
 export const APPEARANCE_SCOPE_NOTE =
-  "Only this browser changes. Other operators, and your other devices, keep their own choice.";
+  "Only this browser changes. Other operators and your other devices keep their own choice.";
 
 const UNSAVED = "The theme could not be saved. Try again.";
 
@@ -47,27 +48,33 @@ export function AppearanceForm({ theme }: { theme: Theme }) {
   }
 
   const label = THEMES.find((option) => option.value === shown)?.label ?? shown;
+  const footer = (
+    <>
+      {error ? <p className="caption-error" role="alert">{error}</p> : <p>{APPEARANCE_SCOPE_NOTE}</p>}
+      <p className="setting-status" role="status">{saved && !error ? `Saved. The console now shows ${label.toLowerCase()}.` : ""}</p>
+    </>
+  );
 
   return (
-    <section className="card card-pad" aria-labelledby="appearance-title">
-      <h2 className="card-title" id="appearance-title">Appearance</h2>
-      <p className="card-note">{APPEARANCE_EXPLAINER}</p>
-
-      <fieldset className="cap-settings-fields" disabled={pending}>
-        <div className="form-field">
-          <label className="modal-label" htmlFor="appearance-theme">Theme</label>
-          <select id="appearance-theme" className="modal-input" value={shown}
-            onChange={(event) => choose(event.target.value)}>
-            {THEMES.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </div>
+    <Section id="appearance" title="Appearance" description={APPEARANCE_EXPLAINER} busy={pending} footer={footer}>
+      {/* Real radios, so arrow keys move between the two and a screen reader
+          hears "Theme, Dark, 2 of 2". The picture is decoration. */}
+      <fieldset className="theme-choices" disabled={pending}>
+        <legend className="sr-only">Theme</legend>
+        {THEMES.map((option) => (
+          <label key={option.value} className={`theme-choice is-${option.value}`}>
+            <span className="theme-preview" aria-hidden="true">
+              <span className="theme-preview-nav"><i /><i /><i /></span>
+              <span className="theme-preview-main"><i /><i /><b /></span>
+            </span>
+            <span className="theme-choice-label">
+              <input type="radio" name="appearance-theme" value={option.value}
+                checked={shown === option.value} onChange={(event) => choose(event.target.value)} />
+              {option.label}
+            </span>
+          </label>
+        ))}
       </fieldset>
-
-      <p className="card-note">{APPEARANCE_SCOPE_NOTE}</p>
-      {error ? <p className="caption-error" role="alert">{error}</p> : null}
-      {saved && !error ? <p className="card-note" role="status">Saved. The console now shows {label.toLowerCase()}.</p> : null}
-    </section>
+    </Section>
   );
 }

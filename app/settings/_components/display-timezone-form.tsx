@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { setDisplayTimezoneAction } from "@/app/settings/actions";
+import { Section } from "@/app/_components/ui";
 import { BOT_TIMEZONE } from "@/src/config";
 import { DISPLAY_TIMEZONES } from "@/src/lib/timezone";
 
 export const TIMEZONE_EXPLAINER =
-  "Which clock the console is read on. Every time on every screen -- the campaign day, run times, when something was last seen -- is shown in the zone chosen here.";
+  "The clock every date and time in the console is read on.";
 export const TIMEZONE_SCOPE_NOTE =
-  `This changes what you see and nothing else. Campaigns keep going out when they already do, planned in ${BOT_TIMEZONE}, and the choice stays in this browser.`;
+  `Only what you see changes. Campaigns still go out on ${BOT_TIMEZONE} time, and the choice stays in this browser.`;
 
 export function DisplayTimezoneForm({ zone }: { zone: string }) {
   const [error, setError] = useState<string | null>(null);
@@ -26,26 +27,32 @@ export function DisplayTimezoneForm({ zone }: { zone: string }) {
     });
   }
 
-  return (
-    <section className="card card-pad" aria-labelledby="display-timezone-title">
-      <h2 className="card-title" id="display-timezone-title">Time zone</h2>
-      <p className="card-note">{TIMEZONE_EXPLAINER}</p>
+  const footer = (
+    <>
+      {error ? <p className="caption-error" role="alert">{error}</p> : <p>{TIMEZONE_SCOPE_NOTE}</p>}
+      <p className="setting-status" role="status">{saved && !error ? `Saved. Every screen now shows ${zone}.` : ""}</p>
+    </>
+  );
 
-      <fieldset className="cap-settings-fields" disabled={pending}>
-        <div className="form-field">
-          <label className="modal-label" htmlFor="display-timezone">Show times in</label>
-          <select id="display-timezone" className="modal-input" value={zone}
-            onChange={(event) => choose(event.target.value)}>
-            {DISPLAY_TIMEZONES.map((option) => (
-              <option key={option.zone} value={option.zone}>{option.label}</option>
-            ))}
-          </select>
+  return (
+    <Section id="display-timezone" title="Time zone" description={TIMEZONE_EXPLAINER}
+      busy={pending} footer={footer}>
+      <fieldset className="setting-fields" disabled={pending}>
+        <div className="setting-row">
+          <div className="setting-label">
+            <label htmlFor="display-timezone">Show times in</label>
+            <span className="setting-hint">Campaign days, run times, last seen</span>
+          </div>
+          <div className="setting-control">
+            <select id="display-timezone" className="modal-input" value={zone}
+              onChange={(event) => choose(event.target.value)}>
+              {DISPLAY_TIMEZONES.map((option) => (
+                <option key={option.zone} value={option.zone}>{option.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </fieldset>
-
-      <p className="card-note">{TIMEZONE_SCOPE_NOTE}</p>
-      {error ? <p className="caption-error" role="alert">{error}</p> : null}
-      {saved && !error ? <p className="card-note" role="status">Saved. Every screen now shows {zone}.</p> : null}
-    </section>
+    </Section>
   );
 }

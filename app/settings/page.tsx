@@ -18,7 +18,7 @@ import { displayTheme } from "@/src/lib/display-theme";
 
 export const dynamic = "force-dynamic";
 
-const SUBTITLE = "The clock the console is read on, light or dark, how many adverts each group gets a day, and deleting your account.";
+const SUBTITLE = "How the console looks to you, how many adverts each group gets, and your account.";
 
 export default async function SettingsPage() {
   const operator = await requireOperator();

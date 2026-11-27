@@ -2095,35 +2095,202 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .campaign-switch { display: inline-flex; align-items: center; gap: 6px; }
 .account-config { border-top: 1px solid var(--border); padding-top: 12px; }
 
-/* Settings: one column of cards at one width, so the clock, the caps and the
-   account end where each other end rather than where their own content runs
-   out. The width lives here rather than on any one card. */
-.settings-page { display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
+/* Settings: one column of Section cards at one width, so the clock, the caps
+   and the account end where each other end. Inside a card every control is a
+   .setting-row -- what it is on the left, the control on the right -- the
+   way a settings screen is scanned: down the names, across to the value. */
+.settings-page { display: flex; flex-direction: column; gap: 20px; max-width: 860px; }
 .settings-page > .card { min-width: 0; }
-/* A zone or a tier is a short choice; .modal-input is full width, which reads
-   as a text field. Narrowed as .cap-settings-bands narrows its numbers. */
-.settings-page .form-field > .modal-input { max-width: 320px; }
 
-/* The daily cap form. */
-.cap-settings-fields { border: 0; margin: 16px 0 0; padding: 0; min-width: 0; }
-.cap-settings-fields:disabled { opacity: 0.7; }
-.cap-settings-switch { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.cap-settings-switch + .card-note { margin-top: 6px; }
-.cap-settings .form-field { margin-top: 16px; }
-.cap-settings-bands { margin-top: 16px; }
-.cap-settings-bands caption { text-align: left; padding-bottom: 6px; }
-.cap-settings-bands .modal-input { max-width: 110px; }
-.cap-settings .modal-actions { margin-top: 16px; }
+.setting-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.setting-fields:disabled { opacity: 0.6; }
+/* The rows bring their own padding, so the body only keeps its sides. */
+.settings-page .section-body:has(> .setting-fields, > .setting-row) { padding-top: 4px; padding-bottom: 4px; }
+
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 32px;
+  padding: 16px 0;
+  min-width: 0;
+}
+.setting-row + .setting-row,
+.setting-callout + .setting-row { border-top: 1px solid var(--border); }
+.setting-row.is-toggle { cursor: pointer; }
+.setting-fields:disabled .setting-row.is-toggle { cursor: default; }
+/* The band grid needs the whole width, so its name sits above it. */
+.setting-row.is-stacked { grid-template-columns: minmax(0, 1fr); }
+
+.setting-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.setting-label > label,
+.setting-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.setting-hint { color: var(--text-muted); font-size: 12.5px; line-height: 1.5; max-width: 60ch; }
+.setting-control { display: flex; justify-content: flex-end; min-width: 0; }
+.setting-control > .modal-input { width: 260px; max-width: 100%; }
+
+/* A sentence that belongs to the row above it: why turns are off, or what
+   switching them off costs. Tinted, not loose text between two controls. */
+.setting-callout {
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.setting-callout.is-warning { background: var(--warning-soft); border-color: var(--warning-border); color: var(--warning-ink); }
+
+/* A switch, drawn on the real checkbox: it keeps its role, its label and its
+   keyboard behaviour; only the paint changes. */
+.setting-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  cursor: inherit;
+  transition: background-color 0.15s ease;
+}
+.setting-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform 0.15s ease;
+}
+.setting-switch:checked { background: var(--primary); }
+.setting-switch:checked::after { transform: translateX(16px); }
+.setting-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.setting-switch:disabled { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) {
+  .setting-switch, .setting-switch::after { transition: none; }
+}
+
+/* The status beside a footer's note: kept mounted for the live region,
+   taking no room while there is nothing to say. */
+.setting-status { color: var(--success-text); font-weight: 600; }
+.setting-status:empty { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); }
+.setting-foot-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 240px; }
+.setting-foot-text > p { margin: 0; }
+.setting-foot-text > .modal-error { margin: 0; }
+.setting-foot-actions { display: flex; gap: 8px; align-self: center; }
+.cap-settings .section-foot { align-items: center; padding-top: 12px; padding-bottom: 12px; }
+
+/* Appearance: two pictures of the console, one per theme. The pictures use
+   fixed colours, not tokens -- each shows its own theme whichever is on. */
+.theme-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 220px));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.theme-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.theme-choice:hover { border-color: var(--text-faint); }
+.theme-choice:has(input:checked) { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.theme-choice:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.theme-choices:disabled .theme-choice { cursor: default; }
+
+.theme-preview {
+  display: grid;
+  grid-template-columns: 30% 1fr;
+  height: 92px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid rgb(0 0 0 / 0.08);
+}
+.theme-preview i, .theme-preview b { display: block; border-radius: 3px; }
+.theme-preview-nav { display: flex; flex-direction: column; gap: 6px; padding: 10px 8px; }
+.theme-preview-nav i { height: 6px; }
+.theme-preview-nav i:first-child { width: 70%; margin-bottom: 4px; }
+.theme-preview-main { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.theme-preview-main i { height: 6px; width: 55%; }
+.theme-preview-main i + i { width: 80%; height: 4px; }
+.theme-preview-main b { flex: 1; margin-top: 2px; border-radius: 5px; }
+
+.theme-choice.is-light .theme-preview { background: #f4f1ec; }
+.theme-choice.is-light .theme-preview-nav { background: #ffffff; border-right: 1px solid #e9e3da; }
+.theme-choice.is-light .theme-preview-nav i { background: #e9e3da; }
+.theme-choice.is-light .theme-preview-nav i:nth-child(2) { background: #2a66f0; }
+.theme-choice.is-light .theme-preview-main i { background: #d8cfc2; }
+.theme-choice.is-light .theme-preview-main b { background: #ffffff; border: 1px solid #e9e3da; }
+
+.theme-choice.is-dark .theme-preview { background: #0e1320; border-color: rgb(255 255 255 / 0.06); }
+.theme-choice.is-dark .theme-preview-nav { background: #111726; border-right: 1px solid #222b3f; }
+.theme-choice.is-dark .theme-preview-nav i { background: #273149; }
+.theme-choice.is-dark .theme-preview-nav i:nth-child(2) { background: #2a66f0; }
+.theme-choice.is-dark .theme-preview-main i { background: #334061; }
+.theme-choice.is-dark .theme-preview-main b { background: #151b2b; border: 1px solid #222b3f; }
+
+.theme-choice-label { display: flex; align-items: center; gap: 8px; padding: 0 4px; font-size: 13px; font-weight: 600; }
+.theme-choice-label input { margin: 0; accent-color: var(--primary); }
+
+/* The cap bands: a small grid, not a data table -- three tiers, two numbers
+   each, read as "busy: 6 – 10 a day". */
+.cap-bands { display: grid; gap: 6px; min-width: 0; max-width: 520px; }
+.cap-bands-head,
+.cap-bands-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) 96px 14px 96px 44px;
+  align-items: center;
+  gap: 10px;
+}
+.cap-bands-head { padding: 0 12px; color: var(--text-faint); font-size: 11.5px; font-weight: 600; }
+.cap-bands-row {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.cap-bands-row .modal-input { width: 100%; padding-top: 6px; padding-bottom: 6px; text-align: center; font-variant-numeric: tabular-nums; }
+.cap-bands-dash { color: var(--text-faint); text-align: center; }
+.cap-bands-unit { color: var(--text-muted); font-size: 12.5px; }
+.cap-tier { font-size: 13px; font-weight: 600; text-transform: capitalize; }
+#cap-default-tier { text-transform: capitalize; }
 
 /* Deleting the account: the one card here that destroys something, so it is
-   set apart from the two above it rather than reading as a third setting. */
+   set apart from the cards above it rather than reading as another setting. */
 .settings-danger { border-color: var(--danger-border); }
 .settings-danger .card-title { color: var(--danger-text); }
-.settings-danger ul { margin: 10px 0 0; padding-left: 20px; font-size: 12.5px; color: var(--text-muted); }
-.settings-danger li + li { margin-top: 4px; }
-.settings-danger ul + .card-note { display: block; margin-top: 10px; }
-.settings-danger .modal-actions { margin-top: 16px; justify-content: flex-start; }
+.settings-danger .section-body { padding-top: 4px; padding-bottom: 4px; }
+/* The button level with the heading it acts on, not adrift halfway down the list. */
+.settings-danger .setting-control { align-self: start; }
+.settings-danger-list { margin: 6px 0 2px; padding-left: 18px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
 .delete-account-confirm { margin-top: 14px; }
+
+@media (max-width: 640px) {
+  .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .setting-row.is-toggle { grid-template-columns: minmax(0, 1fr) auto; }
+  .setting-control { justify-content: flex-start; }
+  .setting-control > .modal-input { width: 100%; }
+  .theme-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .cap-bands-head, .cap-bands-row { grid-template-columns: minmax(48px, 1fr) 64px 10px 64px; gap: 8px; }
+  .cap-bands-head > :last-child, .cap-bands-unit { display: none; }
+}
 
 /* A campaign's click counts: the total first, the per-group breakdown on demand. */
 .campaign-clicks-status { margin: 0 0 10px; }
