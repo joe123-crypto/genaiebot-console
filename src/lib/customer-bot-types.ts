@@ -5,12 +5,38 @@ export const CUSTOMER_BOT_LABELS = { instructions: "Reply instructions" };
 export type CustomerBotField = typeof CUSTOMER_BOT_FIELDS[number];
 export type CustomerBotText = Record<CustomerBotField, string>;
 export type CustomerBotSource = { id: string; label: string; description: string };
+/** Who the bot replies to on WhatsApp. "ref": only customers who have sent a campaign ref code. */
+export const CUSTOMER_BOT_REPLY_MODES = ["everyone", "ref", "off"] as const;
+export type CustomerBotReplyMode = typeof CUSTOMER_BOT_REPLY_MODES[number];
+export type CustomerBotReplies = { mode: CustomerBotReplyMode; updatedAt: string | null; updatedBy: string | null };
 export type CustomerBotVersion = CustomerBotText & {
   sources: CustomerBotSource[];
   revision: string;
   publishedAt: string | null;
   publishedBy: string | null;
+  /** Absent: the bot is too old to choose. null: the bot could not read its setting. */
+  replies?: CustomerBotReplies | null;
 };
+
+export function isCustomerBotReplyMode(value: unknown): value is CustomerBotReplyMode {
+  return CUSTOMER_BOT_REPLY_MODES.includes(value as CustomerBotReplyMode);
+}
+
+export function isCustomerBotReplies(value: unknown): value is CustomerBotReplies {
+  if (!value || typeof value !== "object") return false;
+  const data = value as CustomerBotReplies;
+  // A bot that has never saved one reports the default with no author.
+  return isCustomerBotReplyMode(data.mode) && (data.updatedAt === null
+    ? data.updatedBy === null
+    : typeof data.updatedAt === "string" && Number.isFinite(Date.parse(data.updatedAt)) &&
+      typeof data.updatedBy === "string" && Boolean(data.updatedBy));
+}
+
+/** The reply setting a bot reported, kept apart from the instructions it came with. */
+export function customerBotReplies(value: unknown): CustomerBotReplies | null | undefined {
+  if (!value || typeof value !== "object" || !("replies" in value)) return undefined;
+  return isCustomerBotReplies(value.replies) ? value.replies : null;
+}
 
 export function customerBotText(value: CustomerBotText): CustomerBotText {
   const clean = (text: string) => text.replace(/\r\n?/g, "\n").trim();

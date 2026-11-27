@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Database } from "lucide-react";
 import { PageHead, Section } from "@/app/_components/ui";
 import { checkCustomerBotAction, publishCustomerBotAction } from "../actions";
+import { ReplyModeCard, replyModePill } from "./reply-mode-card";
 import {
   CUSTOMER_BOT_FIELDS, CUSTOMER_BOT_LABELS, customerBotProblem, customerBotText, isCustomerBotText,
   isCustomerBotVersion, sameCustomerBotText, type CustomerBotText, type CustomerBotVersion,
@@ -26,6 +27,8 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
 }) {
   const zone = useDisplayTimezone();
   const [live, setLive] = useState(initial);
+  // Its own state: publishing instructions never moves the reply setting.
+  const [replies, setReplies] = useState(initial.replies);
   const [draft, setDraft] = useState(() => freshDraft(initial));
   const [ready, setReady] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -172,9 +175,12 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
   return (
     <div className="customer-bot page-stack" aria-busy={pending || !ready}>
       <PageHead title="Customer Bot"
-        status={!ready ? null : dirty
-          ? <span className="pill pill-warning pill-dot">Unpublished changes</span>
-          : <span className="pill pill-success pill-dot">Live</span>}
+        status={!ready ? null : <>
+          {dirty
+            ? <span className="pill pill-warning pill-dot">Unpublished changes</span>
+            : <span className="pill pill-success pill-dot">Live</span>}
+          {replyModePill(replies)}
+        </>}
         subtitle={<>How Genaie replies to customers on WhatsApp · {published}</>}
         actions={actions} />
 
@@ -218,6 +224,7 @@ export function CustomerBotEditor({ initial, writable, draftKey }: {
         </div>
 
         <aside className="page-stack">
+          <ReplyModeCard replies={replies} writable={writable} onSaved={setReplies} />
           <Section id="customer-sources" title="Connected data sources"
             description="Looked up for every factual question, so answers stay current without a briefing."
             footer={<Link prefetch={false} className="link" href="/campaigns">Offers are edited in Campaigns</Link>}>

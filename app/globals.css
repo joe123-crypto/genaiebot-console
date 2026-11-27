@@ -1385,6 +1385,27 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .source-list strong { display: block; font-size: 13px; font-weight: 600; }
 .source-list .card-note { display: block; margin-top: 1px; overflow-wrap: anywhere; }
 
+/* Who the bot replies to: three radios, each with its sentence. One column,
+   for the same 320px rail. The whole row is the target, not just the dot. */
+.reply-mode { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.reply-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.reply-mode-option:has(input:checked) { border-color: var(--primary-border); background: var(--primary-soft); }
+.reply-mode-option:has(input:focus-visible) { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.reply-mode-option input { flex: none; margin: 2px 0 0; accent-color: var(--primary); }
+.reply-mode-option strong { display: block; font-size: 13px; font-weight: 600; }
+.reply-mode-option .card-note { display: block; margin-top: 1px; overflow-wrap: anywhere; }
+.reply-mode:disabled .reply-mode-option { cursor: default; }
+.reply-mode:disabled .reply-mode-option:not(:has(input:checked)) { color: var(--text-muted); }
+
 /* Thumbnails, two to a row in the 320px rail and as many as fit once the
    rail falls in under the main column. auto-fill, not auto-fit: a campaign
    with one picture keeps a tile the size of every other tile instead of
