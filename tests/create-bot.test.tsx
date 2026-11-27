@@ -2,6 +2,10 @@
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
+
 import { CreateBot } from "@/app/setup/create-bot";
 
 /**
@@ -19,14 +23,16 @@ function answer(body: unknown, ok = true) {
 }
 const running = (stage: string) => ({ status: "running", stage, startedAt: "2026-11-24T09:00:00.000Z" });
 
-function setup(enabled = true) {
-  return render(createElement(CreateBot, { workspace: WORKSPACE, enabled }));
+const WIZARD_NEXT = { href: "/onboarding/whatsapp", label: "Continue" };
+function setup(enabled = true, wizard = false) {
+  return render(createElement(CreateBot, { workspace: WORKSPACE, enabled, ...(wizard ? { next: WIZARD_NEXT, autoContinue: true } : {}) }));
 }
 /** The component reads before it draws; let that first poll settle. */
 async function settled() { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); }
 
 beforeEach(() => {
   fetchMock.mockReset();
+  replace.mockReset();
   fetchMock.mockResolvedValue(answer({ status: "idle" }));
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -92,6 +98,31 @@ describe("creating a bot", () => {
     expect(screen.getByRole("heading", { name: "Your bot is ready" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /link your whatsapp number/i }).getAttribute("href")).toBe("/lines");
     expect(screen.queryByText(/simulated/i)).toBeNull();
+  });
+
+  it("stays on /setup's ready screen until the user goes on", async () => {
+    fetchMock.mockResolvedValue(answer({ status: "ready", readyAt: "2026-11-24T09:01:00.000Z" }));
+    setup();
+    await settled();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("opens the wizard's next step by itself once the bot is ready", async () => {
+    fetchMock.mockResolvedValue(answer({ status: "ready", readyAt: "2026-11-24T09:01:00.000Z" }));
+    setup(true, true);
+    await settled();
+    expect(replace).toHaveBeenCalledWith("/onboarding/whatsapp");
+    expect(screen.getByRole("status").textContent).toContain("Taking you to the next step");
+    expect(screen.queryByRole("link", { name: "Continue" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Go now" }).getAttribute("href")).toBe("/onboarding/whatsapp");
+  });
+
+  it("does not move on from a simulated run, which made no bot", async () => {
+    fetchMock.mockResolvedValue(answer({ status: "ready", readyAt: "2026-11-24T09:01:00.000Z", simulated: true }));
+    setup(true, true);
+    await settled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByText(/this run was simulated/i)).toBeTruthy();
   });
 
   it("never lets a simulated run pass for a bot that exists", async () => {

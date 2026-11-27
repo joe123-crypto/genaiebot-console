@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, Circle, Loader2 } from "lucide-react";
 import { authFetch } from "@/src/lib/auth-browser";
 import { usePolling } from "@/app/_components/use-polling";
@@ -69,14 +70,18 @@ function Steps({ state }: { state: ProvisionState }) {
   );
 }
 
-export function CreateBot({ workspace, enabled, next = { href: "/lines", label: "Link your WhatsApp number" } }: {
+export function CreateBot({ workspace, enabled, next = { href: "/lines", label: "Link your WhatsApp number" }, autoContinue = false }: {
   workspace: { id: string; name: string };
   /** Whether this console can create a bot at all. Unset, there is only the
    *  workspace ID to hand to whoever is setting one up. */
   enabled: boolean;
   /** Where a finished run hands over to: the Lines page, or the wizard's next step. */
   next?: { href: string; label: string };
+  /** Go on to `next` by itself once the bot is ready (the wizard), rather
+   *  than waiting for a click on the screen that says it is. */
+  autoContinue?: boolean;
 }) {
+  const router = useRouter();
   const [state, setState] = useState<ProvisionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -89,7 +94,8 @@ export function CreateBot({ workspace, enabled, next = { href: "/lines", label: 
    * A finished run leaves this page able to redirect to the console, so it is
    * deliberately not refreshed here: being thrown off the screen that just said
    * what to do next is no way to be told to go and link WhatsApp. The link does
-   * it, and a reload sends them on as usual.
+   * it, and a reload sends them on as usual -- or, in the wizard, the step
+   * after this one opens by itself (below).
    */
   const settle = useCallback((next: ProvisionState) => {
     setState(next);
@@ -100,6 +106,11 @@ export function CreateBot({ workspace, enabled, next = { href: "/lines", label: 
     try { settle(await request("GET")); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Your bot's setup could not be read."); }
   }, [settle]);
+
+  // A ready bot is a connected one, so the wizard's next step can open at once.
+  // A simulated run made nothing, so it stays put and says so.
+  const proceed = autoContinue && state?.status === "ready" && !state.simulated;
+  useEffect(() => { if (proceed) router.replace(next.href); }, [proceed, router, next.href]);
 
   // Read before drawing anything: a reload part-way through a run, or a second
   // tab, joins it where it is rather than offering to start another.
@@ -140,7 +151,12 @@ export function CreateBot({ workspace, enabled, next = { href: "/lines", label: 
         {state?.status === "ready" ? (
           <>
             <h2 className="card-title">Your bot is ready</h2>
-            {state.simulated ? (
+            {proceed ? (
+              <p className="card-note" role="status">
+                <Loader2 size={14} aria-hidden className="setup-spinner" /> Taking you to the next step…{" "}
+                <Link prefetch={false} className="link" href={next.href}>Go now</Link>
+              </p>
+            ) : state.simulated ? (
               <p className="card-note">
                 This run was simulated: no bot was created, because this console has no provisioner
                 configured. Connect one with <code>scripts/workspace-admin.mjs connect-bot</code> to
@@ -152,9 +168,11 @@ export function CreateBot({ workspace, enabled, next = { href: "/lines", label: 
                 that holds the account, the same way WhatsApp links any other device.
               </p>
             )}
-            <div className="setup-actions">
-              <Link prefetch={false} className="btn btn-primary" href={next.href}>{next.label}</Link>
-            </div>
+            {proceed ? null : (
+              <div className="setup-actions">
+                <Link prefetch={false} className="btn btn-primary" href={next.href}>{next.label}</Link>
+              </div>
+            )}
           </>
         ) : state?.status === "failed" ? (
           <>

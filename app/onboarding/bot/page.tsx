@@ -11,7 +11,7 @@ export default async function OnboardingBotPage() {
     <OnboardingFrame operator={operator} step="bot" title="Create your bot"
       subtitle="Your bot is what posts your campaigns and answers on WhatsApp. It takes a few minutes to set up.">
       <CreateBot workspace={{ id: workspace.id, name: workspace.name }} enabled={BOT_PROVISIONING !== "none"}
-        next={{ href: "/onboarding/whatsapp", label: "Continue" }} />
+        next={{ href: "/onboarding/whatsapp", label: "Continue" }} autoContinue />
     </OnboardingFrame>
   );
 }
