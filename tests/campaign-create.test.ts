@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CAMPAIGN_IMAGE_NAME_MAX, campaignCreateError, campaignDraftError, campaignImageFilename, campaignSlug, uploadError, type NewCampaign } from "@/src/domains/campaign-create";
+import { CAMPAIGN_IMAGE_NAME_MAX, CAMPAIGN_REQUIRES_NONE, campaignCreateError, campaignDraftError, campaignImageFilename, campaignRequirements, campaignSlug, uploadError, type NewCampaign } from "@/src/domains/campaign-create";
 import { canCreateCampaign } from "@/src/lib/write-capabilities";
 import { daySlots, clashes } from "@/src/domains/schedule";
 import { campaign } from "./fixtures/campaign-detail";
@@ -14,6 +14,24 @@ describe("campaign creation", () => {
     ["outside group weekdays", { schedule: { time: "10:10", timezone: "Africa/Harare", weekdays: [0] }, groups: [{ jid: "1@g.us", weekdays: [1] }] }] ])("rejects %s", (_, patch) => {
       expect(campaignCreateError({ ...validCampaign(), ...patch })).toBeTruthy();
     });
+  it("takes a campaign with no pictures or groups when the bot says it can, and still caps pictures at 20", () => {
+    const bare = { ...validCampaign(), images: [], groups: [] };
+    expect(campaignCreateError(bare)).toBe("Choose between 1 and 20 pictures.");
+    expect(campaignCreateError({ ...bare, images: validCampaign().images })).toBe("Select at least one active group, each only once.");
+    expect(campaignCreateError(bare, undefined, CAMPAIGN_REQUIRES_NONE)).toBeUndefined();
+    expect(campaignCreateError(bare, undefined, { pictures: false, groups: true })).toBe("Select at least one active group, each only once.");
+    const image = validCampaign().images[0];
+    const many = Array.from({ length: 21 }, (_, n) => ({ ...image, filename: `p${n}.png`, key: image.key.replace(/[a-f0-9]{64}/, String(n).padStart(64, "0")) }));
+    expect(campaignCreateError({ ...bare, images: many }, undefined, CAMPAIGN_REQUIRES_NONE)).toBe("Choose at most 20 pictures.");
+    expect(campaignCreateError({ ...bare, groups: [{ jid: "1@g.us" }, { jid: "1@g.us" }] }, undefined, CAMPAIGN_REQUIRES_NONE))
+      .toBe("Select each group only once.");
+  });
+  it("reads a bot that says nothing about optional pictures or groups as needing both", () => {
+    expect(campaignRequirements(undefined)).toEqual({ pictures: true, groups: true });
+    expect(campaignRequirements({ campaignCreation: {} })).toEqual({ pictures: true, groups: true });
+    expect(campaignRequirements({ campaignCreation: { picturesOptional: true } })).toEqual({ pictures: false, groups: true });
+    expect(campaignRequirements({ campaignCreation: { picturesOptional: true, groupsOptional: true } })).toEqual({ pictures: false, groups: false });
+  });
   it("has no ceiling on how many groups a campaign posts to", () => {
     // The bot used to refuse more than 100, and more than its two-hour job
     // reached at full spacing. It now gives a bigger campaign a longer run.

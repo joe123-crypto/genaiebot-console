@@ -1,0 +1,103 @@
+// @vitest-environment jsdom
+import { createElement } from 'react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WhatsAppAccount } from '@/src/lib/account-types';
+
+const { createLine } = vi.hoisted(() => ({ createLine: vi.fn() }));
+vi.mock('@/app/lines/actions', () => ({ createLineAction: createLine }));
+
+import { FirstLineLink } from '@/app/onboarding/_components/first-line-link';
+
+/** The wizard's WhatsApp step, against the same account API as the Lines page. */
+
+const WRITES = {
+  enabled: true, affectsProduction: true, delete: ['groups'],
+  fields: { lines: ['number'], settings: ['contact_account'], groups: [], campaigns: [] },
+  lineCreation: { create: true },
+};
+const invented = (overrides: Partial<WhatsAppAccount> = {}): WhatsAppAccount => ({
+  id: 'default', number: null, enabled: true, linked: false, running: false, connected: false,
+  repliesEnabled: true, configured: false, startBlockedReason: null, hasError: false,
+  pairingSessionId: null, ...overrides,
+});
+const SESSION = '12345678-1234-1234-1234-123456789abc';
+let accounts: WhatsAppAccount[];
+let posts: Array<{ url: string; body: string }>;
+let scanned: boolean;
+
+async function settle() { await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); }); }
+async function advance(ms: number) { await act(async () => { vi.advanceTimersByTime(ms); }); }
+const step = (props: Record<string, unknown> = {}) =>
+  render(createElement(FirstLineLink, { writesEnabled: true, configWrites: true, nextHref: '/onboarding/campaign', ...props }));
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  accounts = [invented()]; posts = []; scanned = false;
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit = {}) => {
+    const url = String(input);
+    if (init.method === 'POST') {
+      posts.push({ url, body: String(init.body ?? '') });
+      accounts = [{ ...invented(), configured: true, pairingSessionId: SESSION }];
+      return new Response(JSON.stringify({ id: SESSION, accountId: 'default', state: 'waiting', qrDataUrl: 'data:image/png;base64,YQ==', expiresAt: '2026-11-26T00:02:00Z' }), { status: 200 });
+    }
+    if (url.includes('/link-sessions/')) {
+      if (scanned) accounts = accounts.map((a) => ({ ...a, linked: true, connected: true, number: '+263785632943', pairingSessionId: null }));
+      return new Response(JSON.stringify({ id: SESSION, accountId: 'default', state: scanned ? 'connected' : 'waiting', qrDataUrl: scanned ? null : 'data:image/png;base64,YQ==', expiresAt: '2026-11-26T00:02:00Z' }), { status: 200 });
+    }
+    const data = url === '/api/account-membership' ? { lines: [], writes: WRITES } : { observedAt: '2026-11-26T00:00:00Z', accounts };
+    return new Response(JSON.stringify(data), { status: 200 });
+  }));
+});
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); createLine.mockReset(); });
+
+describe('the onboarding WhatsApp step', () => {
+  it('makes the first line, shows its QR code, and configures it once scanned', async () => {
+    createLine.mockResolvedValue({ ok: true });
+    step(); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR code' })); await settle();
+    expect(posts).toEqual([{ url: '/api/accounts', body: '{"id":"default"}' }]);
+    expect(screen.getByAltText('WhatsApp pairing QR code')).toBeTruthy();
+    scanned = true;
+    await advance(2000); await settle();
+    expect(createLine.mock.calls).toEqual([['default']]);
+    expect(screen.getByText(/WhatsApp is connected/)).toBeTruthy();
+    expect(screen.getByText('+263785632943')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Continue' }).getAttribute('href')).toBe('/onboarding/campaign');
+  });
+
+  it('relinks a real first line that lost its login instead of making another', async () => {
+    accounts = [invented({ configured: true })];
+    step(); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR code' })); await settle();
+    expect(posts).toEqual([{ url: '/api/accounts/default/link', body: '{}' }]);
+  });
+
+  it('goes straight to Continue when a line is already connected', async () => {
+    accounts = [invented({ configured: true, linked: true, connected: true, running: true, number: '+263700000000' })];
+    step(); await settle();
+    expect(screen.getByRole('link', { name: 'Continue' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show QR code' })).toBeNull();
+  });
+
+  it('offers nothing to press where this console cannot link numbers', async () => {
+    step({ writesEnabled: false }); await settle();
+    expect((screen.getByRole('button', { name: 'Show QR code' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/cannot link WhatsApp numbers/)).toBeTruthy();
+  });
+
+  it('keeps the line and says why when the bot cannot configure it', async () => {
+    createLine.mockResolvedValue({ ok: false, detail: 'WhatsApp reports no number for this line yet.' });
+    step(); await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Show QR code' })); await settle();
+    scanned = true;
+    await advance(2000); await settle();
+    await advance(3000); await settle();
+    await advance(3000); await settle();
+    expect(createLine).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(/could not be added to your bot's configuration yet/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Continue' })).toBeTruthy();
+  });
+});

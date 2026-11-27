@@ -65,6 +65,16 @@ describe("new campaign form", () => {
     expect(sessionStorage.getItem(CAMPAIGN_DRAFT_KEY)).toBeNull();
     expect(mock.push).not.toHaveBeenCalled();
   });
+  it("goes on with just a name and a time when the bot needs no pictures or groups", async () => {
+    render(<NewCampaignForm {...props} requirements={{ pictures: false, groups: false }} />);
+    expect(screen.getByText(/Optional\. Without a picture, each post is the caption as a text message\./)).toBeTruthy();
+    expect(screen.getByText(/Optional\. You can add groups later/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sale" } });
+    fireEvent.change(screen.getByLabelText("Posting time"), { target: { value: "10:05" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(mock.push).toHaveBeenCalledWith("/campaigns/new/caption"));
+    expect(stashed().draft).toMatchObject({ name: "Sale", images: [], groups: [] });
+  });
   it("keeps the draft on failed refresh and still prepares the details", () => {
     const view = render(<NewCampaignForm {...props} />); fill();
     view.rerender(<NewCampaignForm groups={[]} gate={{ allowed: false, reason: "Unavailable" }} loadError="Busy gateway" />);

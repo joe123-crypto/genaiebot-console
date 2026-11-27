@@ -125,6 +125,7 @@ function CampaignDetailContent({ slug, detail, writable, captionUnavailableReaso
 
     {campaign ? <CampaignImages images={campaign.images} assets={campaign.assets}
       adAssets={detail.adAssets ?? undefined} assetDir={campaignAssetDir(campaign.script)}
+      textOnly={writes?.campaignCreation?.picturesOptional === true}
       writable={writable} writeUnavailableReason={campaign.source === "console" ? "Pictures can be uploaded when creating a campaign. Editing the saved picture set is not connected yet." : imageUnavailableReason} /> : <UnavailableSection title="Pictures" />}
 
     {preview ? <CaptionVariants slug={slug} captions={preview.captions} writable={writable}

@@ -23,6 +23,10 @@ function ref(path: string) {
       const data = store.get(path);
       return { exists: data !== undefined, data: () => data, get: (field: string) => data?.[field] };
     },
+    async update(fields: Doc) {
+      if (!store.has(path)) throw new Error("no document");
+      store.set(path, { ...store.get(path), ...fields });
+    },
   };
 }
 const db = {
@@ -36,6 +40,9 @@ const db = {
         if (store.has(target.path) || staged.has(target.path)) throw new Error("already exists");
         staged.set(target.path, data);
       },
+      update: (target: ReturnType<typeof ref>, data: Doc) => {
+        staged.set(target.path, { ...store.get(target.path), ...staged.get(target.path), ...data });
+      },
     };
     const result = await fn(tx);
     for (const [path, data] of staged) store.set(path, data);
@@ -47,8 +54,8 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn((to: string) => { throw new 
 
 import { getOperator } from "@/src/lib/auth";
 import {
-  NoBotError, WorkspaceUnavailableError, botTarget, deriveBotToken, forgetCachedWorkspaces,
-  getWorkspace, requireBot,
+  NoBotError, WorkspaceUnavailableError, botTarget, deriveBotToken, finishOnboarding, forgetCachedWorkspaces,
+  getWorkspace, holdOnboardingOpen, requireBot, requireWorkspace,
 } from "@/src/lib/workspace";
 
 const SECRET = "s".repeat(40);
@@ -97,7 +104,7 @@ describe("getWorkspace", () => {
     store.set("workspaces/wk-alice1", { name: "Alice's", ownerUid: ALICE.uid, bot: { baseUrl: "https://alice-bot.example" } });
     as(ALICE);
     expect(await getWorkspace()).toEqual({ id: "wk-alice1", name: "Alice's", ownerUid: ALICE.uid,
-                                           bot: { baseUrl: "https://alice-bot.example" } });
+                                           bot: { baseUrl: "https://alice-bot.example" }, onboarding: "done" });
     expect([...store.keys()].filter((key) => key.startsWith("workspaces/"))).toEqual(["workspaces/wk-alice1"]);
   });
 
@@ -159,7 +166,7 @@ describe("botTarget and requireBot", () => {
     as(ALICE);
     await expect(botTarget()).rejects.toBeInstanceOf(NoBotError);
     await expect(botTarget()).rejects.toMatchObject({ status: 409 });
-    await expect(requireBot()).rejects.toThrow("REDIRECT /setup");
+    await expect(requireBot()).rejects.toThrow("REDIRECT /onboarding");
   });
 
   it("sends each user to their own bot with their own token", async () => {
@@ -185,5 +192,56 @@ describe("botTarget and requireBot", () => {
     as(null);
     await expect(botTarget()).rejects.toMatchObject({ status: 401 });
     await expect(requireBot()).rejects.toThrow("REDIRECT /login");
+  });
+});
+
+describe("onboarding", () => {
+  const alice = (fields: Doc) => {
+    store.set(`consoleUsers/${ALICE.uid}`, { workspaceId: "wk-alice1" });
+    store.set("workspaces/wk-alice1", { ownerUid: ALICE.uid, bot: null, ...fields });
+    as(ALICE);
+  };
+
+  it("starts a new workspace in onboarding, and sends every page to the wizard", async () => {
+    as(ALICE);
+    const workspace = await getWorkspace();
+    expect(workspace!.onboarding).toBe("pending");
+    expect(store.get(`workspaces/${workspace!.id}`)).toMatchObject({ onboarding: { status: "pending" } });
+    await expect(requireWorkspace()).rejects.toThrow("REDIRECT /onboarding");
+    await expect(requireBot()).rejects.toThrow("REDIRECT /onboarding");
+  });
+
+  it("leaves a workspace set up before onboarding existed alone, and gives one without a bot the wizard", async () => {
+    alice({ bot: { baseUrl: "https://alice-bot.example" } });
+    expect((await getWorkspace())!.onboarding).toBe("done");
+    forgetCachedWorkspaces();
+    alice({});
+    expect((await getWorkspace())!.onboarding).toBe("pending");
+  });
+
+  it("lets a workspace that skipped open every page, and sends pages that need a bot home", async () => {
+    alice({ onboarding: { status: "skipped" } });
+    await expect(requireWorkspace()).resolves.toMatchObject({ id: "wk-alice1", bot: null, onboarding: "skipped" });
+    await expect(requireBot()).rejects.toThrow(/^REDIRECT \/$/);
+  });
+
+  it("ends onboarding once, for good: a finished one is never reopened", async () => {
+    alice({ onboarding: { status: "pending" } });
+    await finishOnboarding("skipped");
+    expect(store.get("workspaces/wk-alice1")).toMatchObject({ onboarding: { status: "skipped" } });
+    // Read again at once: the cache must not still say pending.
+    expect((await getWorkspace())!.onboarding).toBe("skipped");
+    await finishOnboarding("done");
+    expect(store.get("workspaces/wk-alice1")).toMatchObject({ onboarding: { status: "skipped" } });
+  });
+
+  it("writes down an unstored pending before the bot is made, and nothing when a status is stored", async () => {
+    alice({});
+    await holdOnboardingOpen((await getWorkspace())!);
+    expect(store.get("workspaces/wk-alice1")).toMatchObject({ onboarding: { status: "pending" } });
+    forgetCachedWorkspaces();
+    alice({ onboarding: { status: "skipped" } });
+    await holdOnboardingOpen((await getWorkspace())!);
+    expect(store.get("workspaces/wk-alice1")).toMatchObject({ onboarding: { status: "skipped" } });
   });
 });

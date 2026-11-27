@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/bot/provision/route";
 import { TEST_WORKSPACE } from "./auth-fixture";
-import { getWorkspace } from "@/src/lib/workspace";
+import { getWorkspace, holdOnboardingOpen } from "@/src/lib/workspace";
 import type { ProvisionState } from "@/src/domains/bot-provisioning";
 
 /**
@@ -32,6 +32,14 @@ beforeEach(() => { vi.mocked(getWorkspace).mockResolvedValue(BOTLESS); });
 afterEach(() => { vi.clearAllMocks(); state.enabled = true; });
 
 describe("creating a bot over HTTP", () => {
+  it("keeps a pre-onboarding workspace's wizard open before starting its bot, and only on a valid start", async () => {
+    expect((await post('{"workspace":"someone-else"}')).status).toBe(400);
+    expect(holdOnboardingOpen).not.toHaveBeenCalled();
+    expect((await post()).status).toBe(200);
+    expect(holdOnboardingOpen).toHaveBeenCalledWith(BOTLESS);
+    expect(vi.mocked(holdOnboardingOpen).mock.invocationCallOrder[0]).toBeLessThan(state.start.mock.invocationCallOrder[0]);
+  });
+
   it("says so plainly when this console cannot create one, and starts nothing", async () => {
     state.enabled = false;
     expect((await GET()).status).toBe(503);

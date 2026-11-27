@@ -60,9 +60,12 @@ function ThumbnailImage({ src }: { src: string }) {
  * instead, and is required so that a screen cannot leave it out.
  */
 export function CampaignImages({
-  images, assets = NO_ASSETS, adAssets, assetDir, writable, writeUnavailableReason,
+  images, assets = NO_ASSETS, adAssets, assetDir, writable, writeUnavailableReason, textOnly = false,
 }: {
   images: string[];
+  /** The bot posts a picture-less campaign's caption as text
+   *  (`campaignCreation.picturesOptional`), rather than refusing to send it. */
+  textOnly?: boolean;
   assets?: CampaignAsset[];
   adAssets?: AdAssets;
   assetDir: string | null;
@@ -114,6 +117,8 @@ export function CampaignImages({
             );
           })}
         </div>
+      ) : textOnly ? (
+        <p className="card-note">No pictures: each post is the caption as a text message.</p>
       ) : (
         <p className="card-note">
           This campaign declares no picture. A send would stop before posting, because the bot

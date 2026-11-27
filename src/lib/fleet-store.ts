@@ -13,7 +13,7 @@ import {
 } from "@/src/domains/bot-release";
 import { deletionFenced, parseRun } from "@/src/domains/provision-run";
 import { firestoreAdmin } from "./firebase-admin";
-import { botOrigin, type Workspace } from "./workspace";
+import { botOrigin, onboardingOf, type Workspace } from "./workspace";
 
 /**
  * Where the fleet rollout keeps its state, and who may move it.
@@ -125,7 +125,7 @@ export async function listFleetBots(): Promise<FleetBot[]> {
     if (!serviceId || !baseUrl || typeof data.ownerUid !== "string") continue;
     bots.push({
       workspace: {
-        id: document.id, ownerUid: data.ownerUid, bot: { baseUrl },
+        id: document.id, ownerUid: data.ownerUid, bot: { baseUrl }, onboarding: onboardingOf(data.onboarding, true),
         name: typeof data.name === "string" && data.name.trim() ? data.name : "Workspace",
       },
       serviceId,

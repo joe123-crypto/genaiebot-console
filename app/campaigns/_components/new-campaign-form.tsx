@@ -5,8 +5,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 import { Days } from "@/app/_components/weekdays";
-import { ALL_WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, campaignImageFilename, campaignSlug, campaignDraftError,
-  type CampaignDraft, type CampaignImageUpload } from "@/src/domains/campaign-create";
+import { ALL_WEEKDAYS, CAMPAIGN_IMAGE_ACCEPT, CAMPAIGN_IMAGE_BYTES, CAMPAIGN_REQUIRES_ALL, campaignImageFilename, campaignSlug, campaignDraftError,
+  type CampaignDraft, type CampaignImageUpload, type CampaignRequirements } from "@/src/domains/campaign-create";
 import { CAMPAIGN_DRAFT_KEY, parseCampaignDraft } from "@/src/lib/campaign-draft";
 import { draftFiles, keepDraftFiles } from "@/src/lib/campaign-files";
 import { worstCaseRunSeconds } from "@/src/lib/format";
@@ -15,7 +15,14 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type GroupChoice = Pick<Group, "jid" | "name" | "account" | "status">;
 type Picture = { id: string; file: File; preview: string; uploaded?: CampaignImageUpload };
-export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix = "ads/" }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean; keyPrefix?: string }) {
+export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix = "ads/",
+  nextHref = "/campaigns/new/caption", cancelHref = "/campaigns", requirements = CAMPAIGN_REQUIRES_ALL }: {
+  groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean; keyPrefix?: string;
+  /** Whether this bot needs pictures and groups (`campaignRequirements`). */
+  requirements?: CampaignRequirements;
+  /** The caption step, and where Cancel goes: the wizard runs the same form under its own URLs. */
+  nextHref?: string; cancelHref?: string;
+}) {
   const [lastGroups, setLastGroups] = useState(incomingGroups);
   if (!loadError && lastGroups !== incomingGroups) setLastGroups(incomingGroups);
   const [pickedGroups, setPickedGroups] = useState<GroupChoice[]>([]);
@@ -117,7 +124,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
         ...(Object.keys(configuredTracking).length ? { tracking: configuredTracking } : {}),
         ...(comment.trim() ? { comment: comment.trim() } : {}), ...(weeklyComment.trim() ? { weeklyComment: weeklyComment.trim() } : {}),
         ...(alertTo.trim() ? { failureAlertTo: alertTo.trim() } : {}) };
-      const invalid = campaignDraftError(draft);
+      const invalid = campaignDraftError(draft, undefined, requirements);
       if (invalid) { setError(invalid); return; }
       // Nothing is sent yet: the pictures upload when the campaign is created.
       const groupNames = Object.fromEntries(draft.groups.flatMap(({ jid }) => {
@@ -127,7 +134,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
       await keepDraftFiles(new Map(pictures.map((picture, index) => [images[index].key, picture.file])));
       try { sessionStorage.setItem(CAMPAIGN_DRAFT_KEY, JSON.stringify({ version: 1, draft: structuredClone(draft), groupNames })); }
       catch { setError("Browser storage is unavailable, so these details cannot be carried to the captions step."); return; }
-      router.push("/campaigns/new/caption");
+      router.push(nextHref);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "The pictures could not be prepared. Your form is kept; try again.");
     }
@@ -144,7 +151,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
         <p className="card-note">Starts switched off. When enabled, it posts at the next scheduled time.</p>
       </section>
       <section className="card card-pad"><h2 className="card-title">Pictures</h2>
-        <p className="card-note">JPEG or PNG, up to 6 MiB each. Multiple pictures rotate one per scheduled run in this order.</p>
+        <p className="card-note">{requirements.pictures ? null : "Optional. Without a picture, each post is the caption as a text message. "}JPEG or PNG, up to 6 MiB each. Multiple pictures rotate one per scheduled run in this order.</p>
         <label className="modal-label" htmlFor="campaign-pictures">Add pictures</label><input id="campaign-pictures" type="file" accept={CAMPAIGN_IMAGE_ACCEPT} multiple onChange={(event) => { pick(event.target.files); event.target.value = ""; }} />
         <div className="campaign-create-pictures">{pictures.map((picture, index) => <figure key={picture.id}>
           {/* Local object URLs are previews of files that have not been uploaded. */}
@@ -161,7 +168,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
         <div><label className="modal-label" htmlFor="campaign-cadence">Repeat</label><select className="modal-input" id="campaign-cadence" value={cadence} onChange={(event) => setCadence(event.target.value)}><option value="daily">Every day</option><option value="weekdays">Selected weekdays</option></select></div></div>
         {cadence === "weekdays" ? <Days label="Campaign weekdays" value={days} onChange={setDays} /> : null}
       </section>
-      <section className="card card-pad"><h2 className="card-title">Groups</h2><p className="card-note">Each group uses its existing sending line. {Object.keys(selected).length} selected.
+      <section className="card card-pad"><h2 className="card-title">Groups</h2><p className="card-note">{requirements.groups ? null : "Optional. You can add groups later from the campaign's page. "}Each group uses its existing sending line. {Object.keys(selected).length} selected.
         {sending ? ` Each run takes up to about ${Math.round(worstCaseRunSeconds(sending) / 60)} min; the bot gives it as long as its groups need.` : ""}</p>
         {paginated ? <><button type="button" className="btn" onClick={() => setPickerOpen(true)}>Add groups</button>
           {pickerOpen ? <PaginatedPicker kind="groups" exclude={Object.keys(selected)} close={() => setPickerOpen(false)} choose={rows => {
@@ -198,7 +205,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
       </details>
     </fieldset>
     {error ? <div className="modal-error" role="alert">{error}</div> : null}
-    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Preparing…" : "Next"}</button></div>
+    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push(cancelHref)}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Preparing…" : "Next"}</button></div>
     <p className="card-note">Captions come next. The campaign is created once at least one caption is written.</p>
     {progress ? <p role="status">{progress}</p> : null}
   </form>;

@@ -9,7 +9,7 @@ import { PageHead } from "@/app/_components/ui";
 import { CaptionWorkspace } from "@/app/campaigns/_components/caption-editor";
 import { CaptionText } from "@/app/campaigns/_components/caption-variants";
 import { createCampaignAction } from "@/app/campaigns/new/actions";
-import { campaignCreateError, type CampaignDraft, type NewCampaign } from "@/src/domains/campaign-create";
+import { CAMPAIGN_REQUIRES_ALL, campaignCreateError, type CampaignDraft, type CampaignRequirements, type NewCampaign } from "@/src/domains/campaign-create";
 import { CAMPAIGN_CAPTIONS_KEY, CAMPAIGN_DRAFT_KEY, parseCampaignCaptions, parseCampaignDraft } from "@/src/lib/campaign-draft";
 import { draftFiles, forgetDraftFiles } from "@/src/lib/campaign-files";
 import { picturesForAI } from "@/src/lib/caption-pictures";
@@ -18,10 +18,17 @@ import type { Tracking } from "@/src/lib/types";
 import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type Variant = { id: number; text: string };
-const DETAILS = "/campaigns/new";
-
-export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
+export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason, detailsHref: DETAILS = "/campaigns/new",
+  cancelHref = "/campaigns", onCreated, requirements = CAMPAIGN_REQUIRES_ALL }: {
   gate: WriteGate; loadError?: string; aiUnavailableReason?: string;
+  /** Whether this bot needs pictures and groups (`campaignRequirements`). */
+  requirements?: CampaignRequirements;
+  /** The details step before this one, and where Cancel goes. */
+  detailsHref?: string; cancelHref?: string;
+  /** Instead of opening the new campaign: the wizard ends itself here. Called
+   *  once the campaign is saved, `pending` when its schedule is still to follow
+   *  -- the warning about that stays on this screen either way. */
+  onCreated?: (slug: string, pending: boolean) => void | Promise<void>;
 }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -108,7 +115,7 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
     const request: NewCampaign = recovery ?? { ...draft!, captions: variants.map((item) => item.text) };
     let sent = false;
     try {
-      const invalid = campaignCreateError(request);
+      const invalid = campaignCreateError(request, undefined, requirements);
       if (invalid && !recovery) { setError(invalid); return; }
       if (!recovery) {
         // The pictures were only ever held locally; they go up with the campaign.
@@ -142,9 +149,11 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
       void forgetDraftFiles();
       if (result.scheduling === "pending") {
         setSaved({ slug: result.slug, warning: result.warning || "Campaign saved. Scheduling is pending; the bot will retry automatically." });
+        if (onCreated) await onCreated(result.slug, true);
       } else {
         setSaved({ slug: result.slug, warning: "Campaign saved." });
-        router.push(`/campaigns/${result.slug}`); router.refresh();
+        if (onCreated) await onCreated(result.slug, false);
+        else { router.push(`/campaigns/${result.slug}`); router.refresh(); }
       }
     } catch (failure) {
       // An upload that never reached the create API cannot have created anything.
@@ -164,7 +173,7 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason }: {
     <PageHead back={{ href: DETAILS, label: "Back to campaign details" }}
       title="Captions" subtitle={`${draft.name} · Write at least one caption to create this campaign.`}
       actions={<div className="caption-actions">
-        <button type="button" className="btn" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button>
+        <button type="button" className="btn" disabled={busy} onClick={() => router.push(cancelHref)}>Cancel</button>
         <button type="button" className="btn btn-primary" onClick={create}
           title={!gate.allowed ? gate.reason : editing ? "Save or cancel this caption first." : !variants.length ? "Write a caption to create this campaign." : undefined}
           disabled={busy || Boolean(saved) || !gate.allowed || Boolean(editing) || !variants.length}>

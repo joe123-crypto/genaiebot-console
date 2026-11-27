@@ -3,7 +3,7 @@
 import { requireOperator, auditActor } from "@/src/lib/auth";
 import { revalidatePath } from "next/cache";
 import { WRITES_ENABLED } from "@/src/config";
-import { campaignCreateError, type NewCampaign, type CreateCampaignOutcome } from "@/src/domains/campaign-create";
+import { CAMPAIGN_REQUIRES_NONE, campaignCreateError, campaignRequirements, type NewCampaign, type CreateCampaignOutcome } from "@/src/domains/campaign-create";
 import { createCampaign, getCapabilities, WriteRefusedError, WritesDisabledError } from "@/src/lib/bot-client";
 import { canCreateInWorkspace } from "@/src/lib/write-capabilities";
 import { keyPrefixOf } from "@/src/domains/campaign-create";
@@ -13,7 +13,8 @@ import { failedWrite } from "@/src/lib/write-outcome";
 export async function createCampaignAction(input: NewCampaign): Promise<CreateCampaignOutcome> {
   const operator = await requireOperator();
   if (!WRITES_ENABLED) return { ok: false, detail: "The console is in read-only mode.", outcome: "not-created" };
-  const error = campaignCreateError(input);
+  // The shape first; what this bot needs a campaign to have is checked below.
+  const error = campaignCreateError(input, undefined, CAMPAIGN_REQUIRES_NONE);
   if (error) return { ok: false, detail: error, outcome: "not-created" };
   let submitted = false;
   try {
@@ -22,8 +23,9 @@ export async function createCampaignAction(input: NewCampaign): Promise<CreateCa
     const writes = await getCapabilities();
     const gate = canCreateInWorkspace(WRITES_ENABLED, writes, workspace.id);
     if (!gate.allowed) return { ok: false, detail: gate.reason, outcome: "not-created" };
-    // The exact prefix this bot accepts; the shape check above allowed either.
-    const prefixed = campaignCreateError(input, keyPrefixOf(writes));
+    // The exact prefix this bot accepts, and whether it takes a campaign with
+    // no pictures or groups; the shape check above allowed either.
+    const prefixed = campaignCreateError(input, keyPrefixOf(writes), campaignRequirements(writes));
     if (prefixed) return { ok: false, detail: prefixed, outcome: "not-created" };
     // The bot validates active membership inside its creation transaction.
     // Replays must reach its receipt even if a group changed after the save.

@@ -5,6 +5,7 @@ import { CampaignCaptionStep } from "@/app/campaigns/_components/campaign-captio
 import { WRITES_ENABLED } from "@/src/config";
 import { getCapabilities, BotUnavailableError } from "@/src/lib/bot-client";
 import { canCreateInWorkspace } from "@/src/lib/write-capabilities";
+import { campaignRequirements } from "@/src/domains/campaign-create";
 import { captionAIUnavailableReason } from "@/src/lib/caption-ai";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -14,7 +15,7 @@ export default async function NewCampaignCaptionPage() {
   try {
     const writes = await getCapabilities();
     const gate = canCreateInWorkspace(WRITES_ENABLED, writes, workspace.id);
-    return <Shell live><CampaignCaptionStep gate={gate} aiUnavailableReason={captionAIUnavailableReason()} /></Shell>;
+    return <Shell live><CampaignCaptionStep gate={gate} requirements={campaignRequirements(writes)} aiUnavailableReason={captionAIUnavailableReason()} /></Shell>;
   } catch (error) {
     if (!(error instanceof BotUnavailableError)) throw error;
     return <Shell live><CampaignCaptionStep aiUnavailableReason={captionAIUnavailableReason()}

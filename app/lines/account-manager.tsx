@@ -1,5 +1,5 @@
 'use client';
-import { authFetch } from "@/src/lib/auth-browser";
+import { AccountRequestError, message, request } from './account-request';
 
 import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react';
 import { Link2, Pause, Play, Plus, RefreshCw, Unplug, X } from 'lucide-react';
@@ -23,18 +23,6 @@ type LineChange =
   | { kind: 'contact'; id: string; number: string }
   | { kind: 'no-contact'; id: string };
 
-class AccountRequestError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
-}
-
-async function request<T>(url: string, body?: Record<string, unknown>): Promise<T> {
-  const response = await authFetch(url, { cache: 'no-store', signal: AbortSignal.timeout(65_000),
-    ...(body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
-  const value = await response.json();
-  if (!response.ok) throw new AccountRequestError(response.status, value.error || 'Account operation failed. Refresh status before retrying.');
-  return value as T;
-}
-const message = (error: unknown) => error instanceof Error ? error.message : 'Account controls are unavailable.';
 const configPending = (error: unknown) => error instanceof AccountRequestError &&
   [409, 503].includes(error.status) && /gateway configuration is still being applied/i.test(error.message);
 
