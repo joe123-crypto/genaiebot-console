@@ -121,8 +121,8 @@ export function CaptionWorkspace({ name, variantLabel, text, disabled, autoFocus
         </div>
       </section>
       <div className="section-foot caption-surface-foot">
-        <span className="caption-template-help" id="caption-template-help">Keep placeholders such as <code>{"{bot_number}"}</code> and <code>{"{ref_link}"}</code>.
-          Each group&rsquo;s reference and WhatsApp link are filled in when sent.</span>
+        <span className="caption-template-help" id="caption-template-help">Keep placeholders such as <code>{"{bot_number}"}</code>, <code>{"{ref_link}"}</code> and <code>{"{direct_ref_link}"}</code>.
+          Each group&rsquo;s reference and WhatsApp links are filled in when sent.</span>
         {undo !== null || footer ? <span className="caption-surface-foot-actions">
           {undo !== null ? <button type="button" className="btn btn-sm caption-undo" disabled={disabled} onClick={() => { onTracking?.(undo.tracking); change(undo.text); }}><RotateCcw size={14} aria-hidden /> Undo AI edit</button> : null}
           {footer}

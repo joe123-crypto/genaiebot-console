@@ -30,3 +30,20 @@ it("keeps distinct links that share the selected URL as a prefix", () => {
   expect(proposeTrackedLink(caption, "+26370000003", "sale", "Sale", {}, selected).caption)
     .toBe(`Chat ({ref_link}). Other: ${other} Query: ${query} Again: *{ref_link}*`);
 });
+
+describe("direct ref links", () => {
+  it("appends a no-data line with the direct placeholder", () => {
+    const result = proposeTrackedLink("Offer", "+26370000003", "sale", "Sale", {}, undefined, "direct");
+    expect(result.caption).toBe("Offer\n\n📲 No data? Chat on WhatsApp: {direct_ref_link}");
+    expect(result.tracking).toEqual({ prefix: "sale", label: "Sale", number: "+26370000003" });
+  });
+  it("replaces a chosen pasted link and keeps a tracked link beside it", () => {
+    const caption = "Tap {ref_link}\nOrder: https://wa.me/263783496308.";
+    const [pasted] = whatsappLinks(caption);
+    expect(proposeTrackedLink(caption, "+263783496308", "sale", "Sale", {}, pasted, "direct").caption)
+      .toBe("Tap {ref_link}\nOrder: {direct_ref_link}.");
+  });
+  it("does not duplicate an existing direct placeholder", () => {
+    expect(proposeTrackedLink("Chat {direct_ref_link}", "+26370000003", "sale", "Sale", {}, undefined, "direct").caption).toBe("Chat {direct_ref_link}");
+  });
+});
