@@ -19,7 +19,7 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type Variant = { id: number; text: string };
 export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason, detailsHref: DETAILS = "/campaigns/new",
-  cancelHref = "/campaigns", onCreated, requirements = CAMPAIGN_REQUIRES_ALL }: {
+  cancelHref = "/campaigns", onCreated, requirements = CAMPAIGN_REQUIRES_ALL, createAction = createCampaignAction }: {
   gate: WriteGate; loadError?: string; aiUnavailableReason?: string;
   /** Whether this bot needs pictures and groups (`campaignRequirements`). */
   requirements?: CampaignRequirements;
@@ -29,6 +29,8 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason, deta
    *  once the campaign is saved, `pending` when its schedule is still to follow
    *  -- the warning about that stays on this screen either way. */
   onCreated?: (slug: string, pending: boolean) => void | Promise<void>;
+  /** What saves the campaign: the wizard's own action also ends onboarding. */
+  createAction?: typeof createCampaignAction;
 }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -136,7 +138,7 @@ export function CampaignCaptionStep({ gate, loadError, aiUnavailableReason, deta
       }
       setProgress("Saving campaign and schedule…");
       sent = true;
-      const result = await createCampaignAction(request);
+      const result = await createAction(request);
       if (!result.ok) {
         // Once any attempt is uncertain, even a later preflight refusal cannot
         // prove that the earlier attempt did not land. Keep recovering it.

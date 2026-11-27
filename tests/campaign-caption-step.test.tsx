@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ create: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn(), files: vi.fn(), forget: vi.fn(), shrink: vi.fn(), accounts: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), onboardingCreate: vi.fn(), push: vi.fn(), refresh: vi.fn(), reply: vi.fn(), files: vi.fn(), forget: vi.fn(), shrink: vi.fn(), accounts: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }) }));
 vi.mock("@/app/campaigns/new/actions", () => ({ createCampaignAction: mocks.create }));
+vi.mock("@/app/onboarding/actions", () => ({ createOnboardingCampaignAction: mocks.onboardingCreate }));
 vi.mock("@/app/campaigns/caption-ai-actions", () => ({ suggestCaptionAction: mocks.reply, captionLinkAccountsAction: mocks.accounts }));
 vi.mock("@/src/lib/campaign-files", () => ({ draftFiles: mocks.files, forgetDraftFiles: mocks.forget, keepDraftFiles: vi.fn() }));
 vi.mock("@/src/lib/caption-pictures", () => ({ picturesForAI: mocks.shrink }));
 import { CampaignCaptionStep } from "@/app/campaigns/_components/campaign-caption-step";
+import { OnboardingCaptionStep } from "@/app/onboarding/_components/onboarding-caption-step";
 import { CAMPAIGN_CAPTIONS_KEY, CAMPAIGN_DRAFT_KEY } from "@/src/lib/campaign-draft";
 
 const sha = "a".repeat(64);
@@ -147,6 +149,28 @@ describe("campaign caption step", () => {
       await create();
       await waitFor(() => expect(onCreated).toHaveBeenLastCalledWith("sale", scheduling === "pending"));
       expect(mocks.push).not.toHaveBeenCalled();
+    }
+  });
+  it("ends the wizard with a full load of the dashboard, through the action that also ends onboarding", async () => {
+    const replace = vi.fn();
+    const location = window.location;
+    const here = new URL("http://localhost/onboarding/campaign/caption");
+    Object.defineProperty(window, "location", { value: { href: here.href, origin: here.origin, pathname: here.pathname, search: "", hash: "", host: here.host, protocol: here.protocol, replace }, writable: true, configurable: true });
+    try {
+      for (const scheduling of ["ready", "pending"] as const) {
+        cleanup(); stash(); replace.mockClear(); mocks.push.mockClear();
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ url: "https://r2.example/put", headers: {} }) }).mockResolvedValue({ ok: true }));
+        mocks.onboardingCreate.mockResolvedValue({ ok: true, slug: "sale", scheduling, warning: "Scheduling will retry" });
+        render(<OnboardingCaptionStep {...props} />);
+        write("Our latest sale"); await keep();
+        await create();
+        await waitFor(() => expect(replace).toHaveBeenCalledWith("/"));
+        expect(mocks.create).not.toHaveBeenCalled();
+        expect(mocks.push).not.toHaveBeenCalled();
+      }
+      expect(mocks.onboardingCreate).toHaveBeenCalledTimes(2);
+    } finally {
+      Object.defineProperty(window, "location", { value: location, writable: true, configurable: true });
     }
   });
   it("creates a campaign with no pictures or groups, uploading nothing, when the bot takes one", async () => {
