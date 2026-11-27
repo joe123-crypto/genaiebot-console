@@ -2,13 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { setThemeAction } from "@/app/settings/actions";
-import { Section } from "@/app/_components/ui";
 import { THEMES, isTheme, themeAttribute, type Theme } from "@/src/lib/theme";
 
-export const APPEARANCE_EXPLAINER =
-  "How the console looks in this browser. Dark is easier on the eyes at night.";
-export const APPEARANCE_SCOPE_NOTE =
-  "Only this browser changes. Other operators and your other devices keep their own choice.";
+export const APPEARANCE_EXPLAINER = "Dark is easier on the eyes at night.";
 
 const UNSAVED = "The theme could not be saved. Try again.";
 
@@ -48,18 +44,17 @@ export function AppearanceForm({ theme }: { theme: Theme }) {
   }
 
   const label = THEMES.find((option) => option.value === shown)?.label ?? shown;
-  const footer = (
-    <>
-      {error ? <p className="caption-error" role="alert">{error}</p> : <p>{APPEARANCE_SCOPE_NOTE}</p>}
-      <p className="setting-status" role="status">{saved && !error ? `Saved. The console now shows ${label.toLowerCase()}.` : ""}</p>
-    </>
-  );
-
   return (
-    <Section id="appearance" title="Appearance" description={APPEARANCE_EXPLAINER} busy={pending} footer={footer}>
+    <div className="setting-row is-theme" aria-busy={pending || undefined}>
+      <div className="setting-label">
+        <span className="setting-name" aria-hidden="true">Theme</span>
+        <span className="setting-hint">{APPEARANCE_EXPLAINER}</span>
+        {error ? <span className="caption-error" role="alert">{error}</span> : null}
+        <span className="setting-status" role="status">{saved && !error ? `Saved. The console now shows ${label.toLowerCase()}.` : ""}</span>
+      </div>
       {/* Real radios, so arrow keys move between the two and a screen reader
           hears "Theme, Dark, 2 of 2". The picture is decoration. */}
-      <fieldset className="theme-choices" disabled={pending}>
+      <fieldset className="setting-control theme-choices" disabled={pending}>
         <legend className="sr-only">Theme</legend>
         {THEMES.map((option) => (
           <label key={option.value} className={`theme-choice is-${option.value}`}>
@@ -75,6 +70,6 @@ export function AppearanceForm({ theme }: { theme: Theme }) {
           </label>
         ))}
       </fieldset>
-    </Section>
+    </div>
   );
 }

@@ -2095,17 +2095,35 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .campaign-switch { display: inline-flex; align-items: center; gap: 6px; }
 .account-config { border-top: 1px solid var(--border); padding-top: 12px; }
 
-/* Settings: one column of Section cards at one width, so the clock, the caps
-   and the account end where each other end. Inside a card every control is a
-   .setting-row -- what it is on the left, the control on the right -- the
-   way a settings screen is scanned: down the names, across to the value. */
-.settings-page { display: flex; flex-direction: column; gap: 20px; max-width: 860px; }
-.settings-page > .card { min-width: 0; }
+/* Settings: bands, each with what it is about on the left -- held in place
+   while its cards scroll past -- and nothing but rows of controls on the
+   right. The eye runs down the names on the left and the values on the far
+   right, the way a settings screen is scanned. Below 1100px the sidebar
+   leaves too little room, so the explanation sits above its cards instead. */
+.settings-page { display: flex; flex-direction: column; max-width: 1080px; }
+.settings-group {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px 48px;
+  padding: 28px 0;
+}
+.settings-group:first-child { padding-top: 8px; }
+.settings-group + .settings-group { border-top: 1px solid var(--border); }
+.settings-group-head { position: sticky; top: 24px; align-self: start; min-width: 0; }
+.settings-group-title { margin: 0; font-size: 15px; font-weight: 650; color: var(--text); }
+.settings-group-description { margin: 6px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.settings-group-description strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.settings-group-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.settings-group-body > .card { min-width: 0; }
+@media (max-width: 1100px) {
+  .settings-group { grid-template-columns: minmax(0, 1fr); }
+  .settings-group-head { position: static; max-width: 60ch; }
+}
 
 .setting-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
 .setting-fields:disabled { opacity: 0.6; }
 /* The rows bring their own padding, so the body only keeps its sides. */
-.settings-page .section-body:has(> .setting-fields, > .setting-row) { padding-top: 4px; padding-bottom: 4px; }
+.settings-card > .section-body { padding-top: 4px; padding-bottom: 4px; }
 
 .setting-row {
   display: grid;
@@ -2116,6 +2134,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   min-width: 0;
 }
 .setting-row + .setting-row,
+.setting-row + .cap-detail > .setting-row:first-child,
 .setting-callout + .setting-row { border-top: 1px solid var(--border); }
 .setting-row.is-toggle { cursor: pointer; }
 .setting-fields:disabled .setting-row.is-toggle { cursor: default; }
@@ -2123,8 +2142,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .setting-row.is-stacked { grid-template-columns: minmax(0, 1fr); }
 
 .setting-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.setting-label > label,
-.setting-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.setting-name { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text); }
 .setting-hint { color: var(--text-muted); font-size: 12.5px; line-height: 1.5; max-width: 60ch; }
 .setting-control { display: flex; justify-content: flex-end; min-width: 0; }
 .setting-control > .modal-input { width: 260px; max-width: 100%; }
@@ -2175,7 +2193,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .setting-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .setting-switch:disabled { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
-  .setting-switch, .setting-switch::after { transition: none; }
+  .setting-switch, .setting-switch::after, .cap-tier-bar > span, .cap-detail { transition: none; }
 }
 
 /* The status beside a footer's note: kept mounted for the live region,
@@ -2192,13 +2210,14 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
    fixed colours, not tokens -- each shows its own theme whichever is on. */
 .theme-choices {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 220px));
-  gap: 14px;
+  grid-template-columns: repeat(2, 150px);
+  gap: 12px;
   margin: 0;
   padding: 0;
   border: 0;
   min-width: 0;
 }
+.setting-row.is-theme { align-items: start; }
 .theme-choice {
   display: flex;
   flex-direction: column;
@@ -2218,7 +2237,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .theme-preview {
   display: grid;
   grid-template-columns: 30% 1fr;
-  height: 92px;
+  height: 76px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid rgb(0 0 0 / 0.08);
@@ -2249,33 +2268,68 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .theme-choice-label { display: flex; align-items: center; gap: 8px; padding: 0 4px; font-size: 13px; font-weight: 600; }
 .theme-choice-label input { margin: 0; accent-color: var(--primary); }
 
-/* The cap bands: a small grid, not a data table -- three tiers, two numbers
-   each, read as "busy: 6 – 10 a day". */
-.cap-bands { display: grid; gap: 6px; min-width: 0; max-width: 520px; }
-.cap-bands-head,
-.cap-bands-row {
-  display: grid;
-  grid-template-columns: minmax(72px, 1fr) 96px 14px 96px 44px;
-  align-items: center;
-  gap: 10px;
-}
-.cap-bands-head { padding: 0 12px; color: var(--text-faint); font-size: 11.5px; font-weight: 600; }
-.cap-bands-row {
-  padding: 8px 12px;
+/* The cap tiers: one tile each, side by side, so the three ranges are
+   compared across rather than read down a table. The bar under each shares
+   one scale, so busy looks busier than quiet before a number is read. */
+.cap-detail { min-width: 0; transition: opacity 0.15s ease; }
+.cap-detail.is-off { opacity: 0.55; }
+.cap-tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; min-width: 0; }
+.cap-tier-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--surface-muted);
+  min-width: 0;
 }
-.cap-bands-row .modal-input { width: 100%; padding-top: 6px; padding-bottom: 6px; text-align: center; font-variant-numeric: tabular-nums; }
-.cap-bands-dash { color: var(--text-faint); text-align: center; }
-.cap-bands-unit { color: var(--text-muted); font-size: 12.5px; }
-.cap-tier { font-size: 13px; font-weight: 600; text-transform: capitalize; }
+.cap-tier-card.is-default { border-color: var(--primary-border); }
+.cap-tier-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+.cap-tier { font-size: 13.5px; font-weight: 650; text-transform: capitalize; }
+.cap-tier-badge {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-border);
+  color: var(--primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+.cap-tier-range { display: grid; grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr); align-items: end; gap: 8px; }
+.cap-tier-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--text-faint); font-size: 11.5px; font-weight: 600; }
+.cap-tier-field .modal-input { width: 100%; padding-top: 6px; padding-bottom: 6px; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; }
+.cap-tier-dash { padding-bottom: 8px; color: var(--text-faint); text-align: center; }
+.cap-tier-bar { position: relative; height: 4px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
+.cap-tier-bar > span { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-pill); background: var(--primary); transition: left 0.15s ease, width 0.15s ease; }
 #cap-default-tier { text-transform: capitalize; }
+
+/* Unsaved: the footer holds to the bottom of the window, so Save is in reach
+   from the tiers at the top of a long card. */
+.cap-settings > .section-foot:has(.is-dirty) {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--surface);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: 0 -6px 16px rgb(0 0 0 / 0.08);
+}
+.setting-unsaved { color: var(--text); font-weight: 600; }
+.setting-unsaved::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  vertical-align: 1px;
+}
 
 /* Deleting the account: the one card here that destroys something, so it is
    set apart from the cards above it rather than reading as another setting. */
 .settings-danger { border-color: var(--danger-border); }
-.settings-danger .card-title { color: var(--danger-text); }
+.settings-danger .setting-name { color: var(--danger-text); }
 .settings-danger .section-body { padding-top: 4px; padding-bottom: 4px; }
 /* The button level with the heading it acts on, not adrift halfway down the list. */
 .settings-danger .setting-control { align-self: start; }
@@ -2283,13 +2337,14 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .delete-account-confirm { margin-top: 14px; }
 
 @media (max-width: 640px) {
-  .setting-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .settings-group { padding: 22px 0; }
+  .setting-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .setting-row.is-toggle { grid-template-columns: minmax(0, 1fr) auto; }
   .setting-control { justify-content: flex-start; }
   .setting-control > .modal-input { width: 100%; }
-  .theme-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .cap-bands-head, .cap-bands-row { grid-template-columns: minmax(48px, 1fr) 64px 10px 64px; gap: 8px; }
-  .cap-bands-head > :last-child, .cap-bands-unit { display: none; }
+  .theme-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cap-tiers { grid-template-columns: minmax(0, 1fr); }
+  .settings-danger .setting-control .btn { width: 100%; }
 }
 
 /* A campaign's click counts: the total first, the per-group breakdown on demand. */

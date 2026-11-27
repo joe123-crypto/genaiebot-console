@@ -11,8 +11,6 @@ import {
 import type { WriteGate } from "@/src/lib/write-capabilities";
 import type { CapSettings } from "@/src/lib/types";
 
-export const CAPS_EXPLAINER =
-  "How many adverts each group gets a day. A group's tier sets the range; when more campaigns target it than it allows, they take turns.";
 export const ROTATION_OFF_NOTE =
   "With turns off, the same campaigns are held back every day — and they stop posting to that group until this is switched back on.";
 export const NEXT_RUN_NOTE = "Changes apply from each campaign's next run.";
@@ -75,18 +73,26 @@ export function CapSettingsForm({ settings, gate, rotationGate }: {
   }
 
   const tiers = Object.keys(settings.bands);
+  const dirty = changes.length > 0 || problems.length > 0;
+  // The bars under each tier share one scale -- the largest "at most" -- so
+  // busy reads as busier than quiet at a glance, not only in its numbers.
+  const number = (value: string) => Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0);
+  const scale = Math.max(1, ...tiers.map((tier) => number(draft.bands[tier][1])));
   const bandInput = (tier: string, end: 0 | 1) => (
     <input className="modal-input" inputMode="numeric" type="number" min={0} max={MAX_DAILY_CAP} step={1}
       aria-label={`${tier} ${end === 0 ? "at least" : "at most"}`}
       value={draft.bands[tier][end]}
       onChange={(event) => setBand(tier, end, event.target.value)} />
   );
+
   const footer = (
     <>
-      <div className="setting-foot-text">
+      <div className={dirty ? "setting-foot-text is-dirty" : "setting-foot-text"}>
         {problems.length > 0 ? (
           <ul className="modal-error" role="alert">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
-        ) : !gate.allowed ? <p>{gate.reason}</p> : saved ? null : <p>{NEXT_RUN_NOTE}</p>}
+        ) : !gate.allowed ? <p>{gate.reason}</p>
+          : dirty ? <p className="setting-unsaved">Unsaved changes</p>
+          : saved ? null : <p>{NEXT_RUN_NOTE}</p>}
         <p className="setting-status" role="status">{saved ? `Saved. ${NEXT_RUN_NOTE}` : ""}</p>
       </div>
       <div className="section-foot-end setting-foot-actions">
@@ -101,81 +107,88 @@ export function CapSettingsForm({ settings, gate, rotationGate }: {
   );
 
   return (
-    <Section id="cap-settings" className="cap-settings" title="Daily caps" description={CAPS_EXPLAINER}
-      busy={pending} footer={footer}>
+    <Section className="settings-card cap-settings" busy={pending} footer={footer}>
       <fieldset className="setting-fields" disabled={!editable}>
         <label className="setting-row is-toggle">
           <span className="setting-label">
             <span className="setting-name">Cap how many adverts each group gets a day</span>
-            <span className="setting-hint">Each group's tier sets its range, below.</span>
+            <span className="setting-hint">{draft.enabled
+              ? "Each group posts within its tier's range below."
+              : "With caps off, every campaign that targets a group posts there every day."}</span>
           </span>
           <span className="setting-control">
             <input type="checkbox" className="setting-switch" checked={draft.enabled}
               onChange={(event) => update({ enabled: event.target.checked })} />
           </span>
         </label>
-        {draft.enabled ? (
-          <>
-            {/* Only while caps are on: with them off nothing is ever held back,
-                so there are no turns to take and the control would be inert. */}
-            <label className="setting-row is-toggle">
-              <span className="setting-label">
-                <span className="setting-name">Let a capped group&apos;s campaigns take turns</span>
-                <span className="setting-hint">So a full group still sees every campaign over a few days.</span>
-              </span>
-              <span className="setting-control">
-                <input type="checkbox" className="setting-switch" checked={draft.rotation} disabled={!rotationEditable}
-                  onChange={(event) => update({ rotation: event.target.checked })} />
-              </span>
-            </label>
-            {/* Only when this one field is the thing standing in the way. A
-                form that is read-only altogether has already said so once, and
-                saying it again beside one checkbox suggests a second cause. */}
-            {gate.allowed && rotationGate && !rotationGate.allowed ? (
-              <p className="setting-callout">{rotationGate.reason}</p>
-            ) : null}
-            {!draft.rotation ? <p className="setting-callout is-warning">{ROTATION_OFF_NOTE}</p> : null}
-          </>
-        ) : (
-          <p className="setting-callout">With caps off, every campaign that targets a group posts there every day.</p>
-        )}
 
-        <div className="setting-row">
-          <div className="setting-label">
-            <label className="setting-name" htmlFor="cap-default-tier">Tier for groups without one</label>
-            <span className="setting-hint">Picks the band below for a group you haven&apos;t tiered.</span>
-          </div>
-          <div className="setting-control">
-            <select id="cap-default-tier" className="modal-input" value={draft.defaultActivity}
-              onChange={(event) => update({ defaultActivity: event.target.value })}>
-              {tiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div className="setting-row is-stacked">
-          <div className="setting-label">
-            <span className="setting-name" id="cap-bands-title">Adverts a day, for each tier</span>
-            <span className="setting-hint">Replies to a group&apos;s adverts move its allowance between these two numbers.</span>
-          </div>
-          <div className="cap-bands" role="table" aria-labelledby="cap-bands-title">
-            <div className="cap-bands-head" role="row">
-              <span role="columnheader">Tier</span>
-              <span role="columnheader">At least</span>
-              <span aria-hidden="true" />
-              <span role="columnheader">At most</span>
-              <span aria-hidden="true" />
+        <div className={draft.enabled ? "cap-detail" : "cap-detail is-off"}>
+          <div className="setting-row is-stacked">
+            <div className="setting-label">
+              <span className="setting-name" id="cap-bands-title">Adverts a day, for each tier</span>
+              <span className="setting-hint">Replies to a group&apos;s adverts move its allowance within its range.</span>
             </div>
-            {tiers.map((tier) => (
-              <div className="cap-bands-row" role="row" key={tier}>
-                <span role="rowheader"><span className="cap-tier">{tier}</span></span>
-                <span role="cell">{bandInput(tier, 0)}</span>
-                <span className="cap-bands-dash" aria-hidden="true">–</span>
-                <span role="cell">{bandInput(tier, 1)}</span>
-                <span className="cap-bands-unit" aria-hidden="true">a day</span>
-              </div>
-            ))}
+            <div className="cap-tiers" role="list" aria-labelledby="cap-bands-title">
+              {tiers.map((tier) => {
+                const low = Math.min(number(draft.bands[tier][0]), scale);
+                const high = Math.min(Math.max(number(draft.bands[tier][1]), low), scale);
+                const isDefault = draft.defaultActivity === tier;
+                return (
+                  <div role="listitem" key={tier} className={isDefault ? "cap-tier-card is-default" : "cap-tier-card"}>
+                    <div className="cap-tier-head">
+                      <span className="cap-tier">{tier}</span>
+                      {isDefault ? <span className="cap-tier-badge">Default</span> : null}
+                    </div>
+                    <div className="cap-tier-range">
+                      <span className="cap-tier-field"><span aria-hidden="true">At least</span>{bandInput(tier, 0)}</span>
+                      <span className="cap-tier-dash" aria-hidden="true">–</span>
+                      <span className="cap-tier-field"><span aria-hidden="true">At most</span>{bandInput(tier, 1)}</span>
+                    </div>
+                    <span className="cap-tier-bar" aria-hidden="true">
+                      <span style={{ left: `${(low / scale) * 100}%`, width: `${Math.max(((high - low) / scale) * 100, 2)}%` }} />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+
+          <div className="setting-row">
+            <div className="setting-label">
+              <label className="setting-name" htmlFor="cap-default-tier">Tier for groups without one</label>
+              <span className="setting-hint">Which range a group you haven&apos;t tiered falls in.</span>
+            </div>
+            <div className="setting-control">
+              <select id="cap-default-tier" className="modal-input" value={draft.defaultActivity}
+                onChange={(event) => update({ defaultActivity: event.target.value })}>
+                {tiers.map((tier) => <option key={tier} value={tier}>{tier}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Only while caps are on: with them off nothing is ever held back,
+              so there are no turns to take and the control would be inert. */}
+          {draft.enabled ? (
+            <>
+              <label className="setting-row is-toggle">
+                <span className="setting-label">
+                  <span className="setting-name">Let a capped group&apos;s campaigns take turns</span>
+                  <span className="setting-hint">So a full group still sees every campaign over a few days.</span>
+                </span>
+                <span className="setting-control">
+                  <input type="checkbox" className="setting-switch" checked={draft.rotation} disabled={!rotationEditable}
+                    onChange={(event) => update({ rotation: event.target.checked })} />
+                </span>
+              </label>
+              {/* Only when this one field is the thing standing in the way. A
+                  form that is read-only altogether has already said so once, and
+                  saying it again beside one checkbox suggests a second cause. */}
+              {gate.allowed && rotationGate && !rotationGate.allowed ? (
+                <p className="setting-callout">{rotationGate.reason}</p>
+              ) : null}
+              {!draft.rotation ? <p className="setting-callout is-warning">{ROTATION_OFF_NOTE}</p> : null}
+            </>
+          ) : null}
         </div>
       </fieldset>
 

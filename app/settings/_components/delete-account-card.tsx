@@ -53,10 +53,10 @@ export function DeleteAccountCard({ email, bot }: { email: string; bot: BotRemov
   }
 
   return (
-    <Section id="delete-account" className="settings-danger" title="Danger zone">
+    <Section className="settings-card settings-danger">
       <div className="setting-row">
         <div className="setting-label">
-          <span className="setting-name">Delete account</span>
+          <h3 className="setting-name" id="delete-account-title">Delete account</h3>
           <span className="setting-hint">{DELETE_ACCOUNT_EXPLAINER}</span>
           <ul className="settings-danger-list">
             <li>Your groups, campaigns, schedule, lines and cap settings</li>
