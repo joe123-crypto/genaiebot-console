@@ -23,7 +23,7 @@ vi.mock("@/src/lib/campaign-upload", async (original) => ({
   imageUploadConfigured: () => true, signCampaignUpload: vi.fn(async () => { throw new Error("signed an upload"); }),
 }));
 
-import { NoBotError, botTarget, getWorkspace, requireBot } from "@/src/lib/workspace";
+import { NoBotError, botTarget, getWorkspace, requireBot, requireWorkspace, type Workspace } from "@/src/lib/workspace";
 import { BotUnavailableError } from "@/src/lib/bot-errors";
 import { signCampaignUpload } from "@/src/lib/campaign-upload";
 
@@ -31,12 +31,28 @@ const pages = import.meta.glob("../app/**/page.tsx");
 const actions = import.meta.glob(["../app/**/actions.ts", "../app/**/caption-ai-actions.ts"]);
 const apis = import.meta.glob("../app/api/**/route.ts");
 const fetchSpy = vi.fn(() => { throw new Error("reached the network"); });
-const NEW_USER = { id: "w-newuser1", name: "New user's workspace", ownerUid: "test-operator", bot: null };
+const NEW_USER: Workspace = { id: "w-newuser1", name: "New user's workspace", ownerUid: "test-operator", bot: null, onboarding: "pending" };
+const SKIPPED: Workspace = { ...NEW_USER, onboarding: "skipped" };
+let current: Workspace;
+
+/** The two guards as the real module runs them, over whichever workspace this test has. */
+function as(workspace: Workspace) {
+  current = workspace;
+  vi.mocked(getWorkspace).mockImplementation(async () => current);
+  vi.mocked(requireWorkspace).mockImplementation(async () => {
+    if (current.onboarding === "pending") throw new Error("REDIRECT /onboarding");
+    return current;
+  });
+  vi.mocked(requireBot).mockImplementation(async () => {
+    if (current.onboarding === "pending") throw new Error("REDIRECT /onboarding");
+    if (!current.bot) throw new Error("REDIRECT /");
+    return current;
+  });
+}
 
 beforeEach(() => {
   fetchSpy.mockClear(); vi.stubGlobal("fetch", fetchSpy);
-  vi.mocked(getWorkspace).mockResolvedValue(NEW_USER);
-  vi.mocked(requireBot).mockImplementation(async () => { throw new Error("REDIRECT /setup"); });
+  as(NEW_USER);
   vi.mocked(botTarget).mockRejectedValue(new NoBotError());
   vi.stubEnv("OPENROUTER_API_KEY", "server-key");
 });
@@ -51,14 +67,48 @@ const request = (method: string) => new Request("http://localhost:3000/api/x", {
   ...(method === "GET" ? {} : { body: JSON.stringify({ slug: "demo", id: "default", image: {} }) }),
 });
 
-describe("a workspace without a bot reaches no bot", () => {
+const props = () => ({ params: Promise.resolve({ slug: "demo", variant: "1" }), searchParams: Promise.resolve({}) });
+type Page = { default: (...args: unknown[]) => unknown };
+/** The pages in the nav: with no bot they show their own empty state. */
+const NAV_PAGES = ["../app/page.tsx", "../app/groups/page.tsx", "../app/campaigns/page.tsx",
+  "../app/customer-bot/page.tsx", "../app/lines/page.tsx", "../app/settings/page.tsx", "../app/setup/page.tsx"];
+
+describe("a new workspace is in onboarding", () => {
   for (const [path, load] of Object.entries(pages)) {
-    if (path.includes("/login/") || path.includes("/setup/") || path.includes("/schedule/")) continue;
-    it(`page ${path} sends it to /setup first`, async () => {
-      const module = await load() as { default: (...args: unknown[]) => unknown };
-      await expect(module.default({ params: Promise.resolve({ slug: "demo", variant: "1" }), searchParams: Promise.resolve({}) }))
-        .rejects.toThrow("REDIRECT /setup");
+    if (path.includes("/login/") || path.includes("/schedule/") || path.includes("/onboarding/")) continue;
+    it(`page ${path} sends it to the wizard first`, async () => {
+      await expect((await load() as Page).default(props())).rejects.toThrow("REDIRECT /onboarding");
     });
+  }
+
+  it("starts the wizard on the bot step, which renders without calling a bot", async () => {
+    const { default: Onboarding } = await import("@/app/onboarding/page");
+    await expect(Onboarding()).rejects.toThrow("REDIRECT /onboarding/bot");
+    const { default: BotStep } = await import("@/app/onboarding/bot/page");
+    await expect(BotStep()).resolves.toBeTruthy();
+  });
+
+  it.each(["whatsapp/page.tsx", "campaign/page.tsx", "campaign/caption/page.tsx"])(
+    "holds back the %s step until there is a bot", async (step) => {
+      const { default: Step } = await pages[`../app/onboarding/${step}`]() as Page;
+      await expect(Step()).rejects.toThrow("REDIRECT /onboarding/bot");
+    });
+});
+
+describe("a workspace that skipped onboarding, with no bot, reaches no bot", () => {
+  beforeEach(() => as(SKIPPED));
+
+  for (const [path, load] of Object.entries(pages)) {
+    if (path.includes("/login/") || path.includes("/schedule/")) continue;
+    if (NAV_PAGES.includes(path)) {
+      it(`page ${path} renders its own empty state`, async () => {
+        await expect((await load() as Page).default(props())).resolves.toBeTruthy();
+      });
+    } else {
+      it(`page ${path} sends it home`, async () => {
+        await expect((await load() as Page).default(props())).rejects.toThrow(/^REDIRECT \/$/);
+      });
+    }
   }
   for (const [path, load] of Object.entries(actions)) {
     it(`actions in ${path} make no bot or paid call`, async () => {
@@ -104,14 +154,9 @@ describe("paid and storage calls need a connected bot", () => {
 });
 
 describe("the setup page", () => {
-  it("renders for a workspace without a bot, without calling one", async () => {
-    const { default: SetupPage } = await import("@/app/setup/page");
-    await expect(SetupPage()).resolves.toBeTruthy();
-  });
-
   it("sends a workspace that has a bot back home", async () => {
-    vi.mocked(getWorkspace).mockResolvedValue({ ...NEW_USER, bot: { baseUrl: "https://bot.example" } });
+    as({ ...SKIPPED, bot: { baseUrl: "https://bot.example" } });
     const { default: SetupPage } = await import("@/app/setup/page");
-    await expect(SetupPage()).rejects.toThrow("REDIRECT /");
+    await expect(SetupPage()).rejects.toThrow(/^REDIRECT \/$/);
   });
 });

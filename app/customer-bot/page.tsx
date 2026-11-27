@@ -2,7 +2,8 @@ import { requireOperator } from "@/src/lib/auth";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
 import { ACCOUNT_WRITES_ENABLED } from "@/src/config";
-import { draftScope, requireBot } from "@/src/lib/workspace";
+import { draftScope, hasBot, requireWorkspace } from "@/src/lib/workspace";
+import { NoBotYet } from "@/app/_components/no-bot-yet";
 import { customerBotRequest } from "@/src/lib/customer-bot-client";
 import { CustomerBotEditor } from "./_components/customer-bot-editor";
 
@@ -10,7 +11,9 @@ export const dynamic = "force-dynamic";
 
 export default async function CustomerBotPage() {
   await requireOperator();
-  const workspace = await requireBot();
+  const workspace = await requireWorkspace();
+  if (!hasBot(workspace)) return <Shell><PageHead title="Customer Bot" subtitle="How Genaie replies to customers on WhatsApp." />
+    <NoBotYet title="No bot to reply yet">The Customer Bot is your bot&apos;s replies to customers. Create your bot to set them up.</NoBotYet></Shell>;
   const result = await customerBotRequest();
   // Drafts are keyed to this workspace's bot, so one can never publish to another.
   const target = draftScope(workspace);

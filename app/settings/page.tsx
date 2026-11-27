@@ -1,5 +1,6 @@
 import { requireOperator } from "@/src/lib/auth";
-import { requireBot } from "@/src/lib/workspace";
+import { hasBot, requireWorkspace } from "@/src/lib/workspace";
+import { NoBotYet } from "@/app/_components/no-bot-yet";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { BotError, Empty, PageHead } from "@/app/_components/ui";
 import { CapSettingsForm } from "@/app/settings/_components/cap-settings-form";
@@ -21,10 +22,25 @@ const SUBTITLE = "The clock the console is read on, light or dark, how many adve
 
 export default async function SettingsPage() {
   const operator = await requireOperator();
-  const workspace = await requireBot();
+  const workspace = await requireWorkspace();
   const botRemoval = await botRemovalOf(workspace);
   const zone = await displayTimezone();
   const theme = await displayTheme();
+  // Without a bot there are no caps to set, but the console's own settings and
+  // deleting the account are still this user's to use.
+  if (!hasBot(workspace)) {
+    return (
+      <Shell>
+        <PageHead title="Settings" subtitle={SUBTITLE} />
+        <div className="settings-page">
+          <DisplayTimezoneForm zone={zone} />
+          <AppearanceForm theme={theme} />
+          <NoBotYet title="No bot yet">How many adverts each group gets a day is a setting of your bot. Create it to set these.</NoBotYet>
+          <DeleteAccountCard email={operator.email} bot={botRemoval} />
+        </div>
+      </Shell>
+    );
+  }
   const loaded = await getLiveView<ConfigurationPayload>("settings").then((overview) => ({ ok: true as const, overview }), (error: unknown) => {
     if (!(error instanceof BotUnavailableError)) throw error;
     return { ok: false as const, detail: error.detail };

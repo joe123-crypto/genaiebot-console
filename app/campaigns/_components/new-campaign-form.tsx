@@ -15,7 +15,12 @@ import type { WriteGate } from "@/src/lib/write-capabilities";
 
 type GroupChoice = Pick<Group, "jid" | "name" | "account" | "status">;
 type Picture = { id: string; file: File; preview: string; uploaded?: CampaignImageUpload };
-export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix = "ads/" }: { groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean; keyPrefix?: string }) {
+export function NewCampaignForm({ groups: incomingGroups, gate, loadError, paginated = false, keyPrefix = "ads/",
+  nextHref = "/campaigns/new/caption", cancelHref = "/campaigns" }: {
+  groups: GroupChoice[]; gate: WriteGate; loadError?: string; paginated?: boolean; keyPrefix?: string;
+  /** The caption step, and where Cancel goes: the wizard runs the same form under its own URLs. */
+  nextHref?: string; cancelHref?: string;
+}) {
   const [lastGroups, setLastGroups] = useState(incomingGroups);
   if (!loadError && lastGroups !== incomingGroups) setLastGroups(incomingGroups);
   const [pickedGroups, setPickedGroups] = useState<GroupChoice[]>([]);
@@ -127,7 +132,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
       await keepDraftFiles(new Map(pictures.map((picture, index) => [images[index].key, picture.file])));
       try { sessionStorage.setItem(CAMPAIGN_DRAFT_KEY, JSON.stringify({ version: 1, draft: structuredClone(draft), groupNames })); }
       catch { setError("Browser storage is unavailable, so these details cannot be carried to the captions step."); return; }
-      router.push("/campaigns/new/caption");
+      router.push(nextHref);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "The pictures could not be prepared. Your form is kept; try again.");
     }
@@ -198,7 +203,7 @@ export function NewCampaignForm({ groups: incomingGroups, gate, loadError, pagin
       </details>
     </fieldset>
     {error ? <div className="modal-error" role="alert">{error}</div> : null}
-    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push("/campaigns")}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Preparing…" : "Next"}</button></div>
+    <div className="campaign-create-submit"><button className="btn" type="button" disabled={busy} onClick={() => router.push(cancelHref)}>Cancel</button><button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Preparing…" : "Next"}</button></div>
     <p className="card-note">Captions come next. The campaign is created once at least one caption is written.</p>
     {progress ? <p role="status">{progress}</p> : null}
   </form>;

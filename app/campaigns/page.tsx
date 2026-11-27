@@ -1,5 +1,6 @@
 import { requireOperator } from "@/src/lib/auth";
-import { requireBot } from "@/src/lib/workspace";
+import { hasBot, requireWorkspace } from "@/src/lib/workspace";
+import { NoBotYet } from "@/app/_components/no-bot-yet";
 import Link from "next/link";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
@@ -12,7 +13,10 @@ import type { CampaignRow, LivePage } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
 export default async function CampaignsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireOperator();
-  await requireBot();
+  const workspace = await requireWorkspace();
+  if (!hasBot(workspace)) return <Shell campaignsLayout><PageHead title="Campaigns" />
+    <NoBotYet title="No campaigns yet">Your bot posts your campaigns to your WhatsApp groups. Create it first, then make a
+      campaign here.</NoBotYet></Shell>;
   const filter = parseCampaignFilter(await searchParams);
   let initial: LivePage<CampaignRow> | null = null;
   let initialError: string | undefined;

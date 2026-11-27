@@ -69,11 +69,13 @@ function Steps({ state }: { state: ProvisionState }) {
   );
 }
 
-export function CreateBot({ workspace, enabled }: {
+export function CreateBot({ workspace, enabled, next = { href: "/lines", label: "Link your WhatsApp number" } }: {
   workspace: { id: string; name: string };
   /** Whether this console can create a bot at all. Unset, there is only the
    *  workspace ID to hand to whoever is setting one up. */
   enabled: boolean;
+  /** Where a finished run hands over to: the Lines page, or the wizard's next step. */
+  next?: { href: string; label: string };
 }) {
   const [state, setState] = useState<ProvisionState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +153,7 @@ export function CreateBot({ workspace, enabled }: {
               </p>
             )}
             <div className="setup-actions">
-              <Link className="btn btn-primary" href="/lines">Link your WhatsApp number</Link>
+              <Link prefetch={false} className="btn btn-primary" href={next.href}>{next.label}</Link>
             </div>
           </>
         ) : state?.status === "failed" ? (

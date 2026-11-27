@@ -1922,6 +1922,32 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .setup-spinner { animation: setup-spin 1s linear infinite; }
 @keyframes setup-spin { to { transform: rotate(360deg); } }
 .setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+
+/* ---------------------------------------------------------- onboarding ----- */
+/* Where the first-run wizard stands: sign up, then the three steps after it. */
+.onboarding-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; margin: 0 0 18px;
+}
+.onboarding-steps {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 8px 20px;
+}
+.onboarding-step {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-faint);
+}
+.onboarding-step svg { flex: 0 0 auto; color: var(--success-text); }
+.onboarding-step.is-done { color: var(--text-muted); }
+.onboarding-step.is-current { color: var(--text); font-weight: 600; }
+.onboarding-step-number {
+  display: inline-grid; place-items: center; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px solid var(--border-strong);
+  font-size: 11px; font-weight: 600;
+}
+.onboarding-step.is-current .onboarding-step-number {
+  border-color: var(--primary); background: var(--primary); color: var(--text-inverse);
+}
 .console-nav-item.is-disabled { color: var(--text-faint); cursor: default; }
 .console-nav-item.is-disabled:hover { background: none; }
 

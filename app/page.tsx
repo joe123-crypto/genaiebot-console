@@ -1,5 +1,6 @@
 import { requireOperator } from "@/src/lib/auth";
-import { requireBot } from "@/src/lib/workspace";
+import { hasBot, requireWorkspace } from "@/src/lib/workspace";
+import { NoBotYet } from "@/app/_components/no-bot-yet";
 import { Shell } from "@/app/_components/shell-wrapper";
 import { PageHead } from "@/app/_components/ui";
 import { LiveScheduleView } from "@/app/schedule/_components/live-schedule";
@@ -11,7 +12,10 @@ import type { LiveSchedule } from "@/src/lib/live-types";
 export const dynamic = "force-dynamic";
 export default async function ScheduleHomePage() {
   await requireOperator();
-  await requireBot();
+  const workspace = await requireWorkspace();
+  if (!hasBot(workspace)) return <Shell homeLayout><PageHead subtitle="The campaign day: what posts where, and when." />
+    <NoBotYet title="Nothing scheduled yet">Your schedule appears here once you have a bot, a linked WhatsApp number and a campaign.
+      Start with the bot.</NoBotYet></Shell>;
   let initial: LiveSchedule | null = null;
   let initialError: string | undefined;
   try { initial = await getLiveView("schedule"); }

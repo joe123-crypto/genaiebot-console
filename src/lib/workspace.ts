@@ -20,7 +20,8 @@ import { firestoreAdmin } from "./firebase-admin";
  * else:
  *
  *   consoleUsers/{uid}  { email, workspaceId, createdAt }
- *   workspaces/{id}     { name, ownerUid, createdAt, bot: { baseUrl } | null }
+ *   workspaces/{id}     { name, ownerUid, createdAt, bot: { baseUrl } | null,
+ *                         onboarding: { status, at } }
  *
  * The Firebase project, and its sign-in uids, are shared with other apps:
  * agent_genaie keeps its own profiles in a root `users/{uid}`. That is why the
@@ -35,11 +36,20 @@ import { firestoreAdmin } from "./firebase-admin";
  * user's bot.
  */
 
+/**
+ * Whether the first-run wizard (`/onboarding`) is still in the way. `pending`
+ * sends every console page there; `skipped` and `done` are both final, and
+ * nothing ever sets a workspace back to `pending` after either.
+ */
+export type OnboardingStatus = "pending" | "skipped" | "done";
+const ONBOARDING_STATUSES: readonly OnboardingStatus[] = ["pending", "skipped", "done"];
+
 export type Workspace = {
   id: string;
   name: string;
   ownerUid: string;
   bot: { baseUrl: string } | null;
+  onboarding: OnboardingStatus;
 };
 export type BotTarget = { baseUrl: string; token: string; workspaceId: string };
 
@@ -110,7 +120,19 @@ function parseWorkspace(id: string, data: DocumentData | undefined): Workspace {
     id, ownerUid: data.ownerUid,
     name: typeof data.name === "string" && data.name.trim() ? data.name : "Workspace",
     bot: bot ? { baseUrl: bot } : null,
+    onboarding: onboardingOf(data.onboarding, Boolean(bot)),
   };
+}
+
+/**
+ * A workspace made before onboarding existed has no status. One that already
+ * has a bot was set up the old way and is left alone; one without is where a
+ * new user would be, so it gets the wizard rather than an empty console.
+ */
+export function onboardingOf(value: unknown, hasBotAlready: boolean): OnboardingStatus {
+  const status = value && typeof value === "object" ? (value as { status?: unknown }).status : undefined;
+  if (ONBOARDING_STATUSES.includes(status as OnboardingStatus)) return status as OnboardingStatus;
+  return hasBotAlready ? "done" : "pending";
 }
 
 /**
@@ -129,6 +151,7 @@ export async function ensureWorkspace(operator: Operator): Promise<string> {
     transaction.create(db.collection("workspaces").doc(id), {
       name: `${operator.name}'s workspace`.slice(0, 120), ownerUid: operator.uid,
       createdAt: FieldValue.serverTimestamp(), bot: null,
+      onboarding: { status: "pending", at: FieldValue.serverTimestamp() },
     });
     transaction.create(userRef, { email: operator.email, workspaceId: id, createdAt: FieldValue.serverTimestamp() });
     return id;
@@ -182,15 +205,63 @@ export async function botTarget(): Promise<BotTarget> {
   return { baseUrl: workspace.bot.baseUrl, token: deriveBotToken(workspace.id), workspaceId: workspace.id };
 }
 
+/** Whether this workspace has a bot to call. The local development adapter is its own bot. */
+export function hasBot(workspace: Pick<Workspace, "bot">): boolean {
+  return Boolean(workspace.bot) || BOT_SOURCE === "local";
+}
+
 /**
- * For pages that read the bot: a workspace with no bot goes to /setup instead
- * of rendering a page of errors. The local development adapter is its own bot.
+ * For the console's own pages: a workspace still in onboarding goes to the
+ * wizard. Anything after that -- skipped or done, with or without a bot -- is
+ * the page's to render, which is how a user who skipped sets things up from
+ * each page in its usual place.
  */
-export async function requireBot(): Promise<Workspace> {
+export async function requireWorkspace(): Promise<Workspace> {
   const workspace = await getWorkspace();
   if (!workspace) redirect("/login");
-  if (!workspace.bot && BOT_SOURCE !== "local") redirect("/setup");
+  if (workspace.onboarding === "pending") redirect("/onboarding");
   return workspace;
+}
+
+/**
+ * For pages that only make sense with a bot behind them (a campaign, the new
+ * campaign form): without one there is nothing to show, so they go home, where
+ * the page says what to do first.
+ */
+export async function requireBot(): Promise<Workspace> {
+  const workspace = await requireWorkspace();
+  if (!hasBot(workspace)) redirect("/");
+  return workspace;
+}
+
+/**
+ * Record how onboarding ended for the signed-in user's own workspace. Only
+ * ever forward: `pending` is never written back once it has ended.
+ */
+export async function finishOnboarding(status: Exclude<OnboardingStatus, "pending">): Promise<void> {
+  const operator = await getOperator();
+  const workspace = operator ? await loadWorkspace(operator) : null;
+  if (!operator || !workspace) throw new WorkspaceUnavailableError("Sign in to continue.");
+  if (workspace.onboarding !== "pending") return;
+  await firestoreAdmin().collection("workspaces").doc(workspace.id)
+    .update({ onboarding: { status, at: FieldValue.serverTimestamp() } });
+  cached.delete(operator.uid);
+}
+
+/**
+ * A workspace made before onboarding existed reads as `pending` only while it
+ * has no bot. Before its bot is created, write that down, or the wizard would
+ * end itself the moment the bot arrived. Does nothing when a status is stored.
+ */
+export async function holdOnboardingOpen(workspace: Workspace): Promise<void> {
+  if (workspace.onboarding !== "pending" || workspace.bot) return;
+  const db = firestoreAdmin();
+  const ref = db.collection("workspaces").doc(workspace.id);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists || snapshot.get("onboarding") !== undefined) return;
+    transaction.update(ref, { onboarding: { status: "pending", at: FieldValue.serverTimestamp() } });
+  });
 }
 
 /** A stable, non-secret label for browser drafts tied to one workspace's bot. */

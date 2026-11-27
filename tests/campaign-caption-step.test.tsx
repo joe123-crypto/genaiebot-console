@@ -135,6 +135,20 @@ describe("campaign caption step", () => {
     expect(screen.getByRole("link", { name: "Open saved campaign" }).getAttribute("href")).toBe("/campaigns/sale");
     expect(createButton().disabled).toBe(true);
   });
+  it("hands a saved campaign to the wizard instead of opening it, pending schedule or not", async () => {
+    const onCreated = vi.fn();
+    for (const scheduling of ["ready", "pending"] as const) {
+      cleanup(); stash(); mocks.push.mockClear();
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ url: "https://r2.example/put", headers: {} }) }).mockResolvedValue({ ok: true }));
+      mocks.create.mockResolvedValue({ ok: true, slug: "sale", scheduling, warning: "Scheduling will retry" });
+      render(<CampaignCaptionStep {...props} detailsHref="/onboarding/campaign" cancelHref="/onboarding/campaign" onCreated={onCreated} />);
+      expect(screen.getByRole("link", { name: "Back to campaign details" }).getAttribute("href")).toBe("/onboarding/campaign");
+      write("Our latest sale"); await keep();
+      await create();
+      await waitFor(() => expect(onCreated).toHaveBeenLastCalledWith("sale", scheduling === "pending"));
+      expect(mocks.push).not.toHaveBeenCalled();
+    }
+  });
   it("lets a read-only operator write captions but not create", async () => {
     stash();
     render(<CampaignCaptionStep gate={{ allowed: false, reason: "The console is in read-only mode." }} />);

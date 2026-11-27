@@ -2,7 +2,7 @@ import { apiOperator } from "@/src/lib/auth";
 import { BotConnectError } from "@/src/lib/bot-connect";
 import { BotUnavailableError } from "@/src/lib/bot-errors";
 import { provisioningEnabled, readProvisionState, startProvisioning } from "@/src/lib/bot-provisioning";
-import { getWorkspace } from "@/src/lib/workspace";
+import { getWorkspace, holdOnboardingOpen } from "@/src/lib/workspace";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -83,6 +83,8 @@ export async function POST(request: Request) {
     }
     const workspace = await target();
     if (workspace instanceof Response) return workspace;
+    // A workspace from before onboarding keeps its wizard once the bot exists.
+    await holdOnboardingOpen(workspace);
     return json(await startProvisioning(workspace));
   } catch (error) { return failure(error); }
 }
