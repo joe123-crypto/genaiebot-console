@@ -28,7 +28,7 @@ export default async function OnboardingCampaignPage() {
     loadError = error.detail;
   }
   return (
-    <OnboardingFrame operator={operator} step="campaign" title="Create your first campaign" wide
+    <OnboardingFrame operator={operator} step="campaign" title="Create your first campaign" width="wide"
       subtitle="An advert your bot posts to your WhatsApp groups on a schedule.">
       <NewCampaignForm groups={[]} paginated gate={gate} keyPrefix={keyPrefix} loadError={loadError} requirements={requirements}
         nextHref="/onboarding/campaign/caption" cancelHref="/onboarding/campaign" />
