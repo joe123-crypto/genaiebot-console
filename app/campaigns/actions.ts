@@ -8,6 +8,7 @@ import {
   BotUnavailableError,
   WriteRefusedError,
   WritesDisabledError,
+  getCampaignPayload,
   getCampaignPreview,
   getCampaignState,
   getOverview,
@@ -98,12 +99,19 @@ export async function saveCaptionsAction(
       const gate = canWrite(WRITES_ENABLED, await getCapabilities(), "campaigns", "captions", "tracking");
       if (!gate.allowed) return { ok: false, detail: gate.reason };
     }
-    const current = await getCampaignPreview(slug, undefined, { fresh: true, captionsOnly: true });
-    if (trackingChange && (current.tracking === undefined || !sameTracking(current.tracking, trackingChange.expectedTracking))) {
-      return { ok: false, detail: "Campaign tracking changed since you started editing. Reset to the latest settings before saving.", latestCaptions: current.captions, latestTracking: current.tracking };
+    // The bot's captions read does not carry the campaign's tracking (it
+    // reports none, or `{}`), so the baseline is checked against the campaign
+    // record -- the same source the editor took it from when it loaded.
+    const [current, record] = await Promise.all([
+      getCampaignPreview(slug, undefined, { fresh: true, captionsOnly: true }),
+      trackingChange ? getCampaignPayload(slug, undefined, { fresh: true }).then(({ campaign }) => campaign) : null,
+    ]);
+    const latestTracking = record ? record.tracking ?? {} : undefined;
+    if (trackingChange && (latestTracking === undefined || !sameTracking(latestTracking, trackingChange.expectedTracking))) {
+      return { ok: false, detail: "Campaign tracking changed since you started editing. Reset to the latest settings before saving.", latestCaptions: current.captions, latestTracking };
     }
     if (JSON.stringify(current.captions) !== JSON.stringify(expectedCaptions)) {
-      return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving.", latestCaptions: current.captions, ...(trackingChange ? { latestTracking: current.tracking } : {}) };
+      return { ok: false, detail: "Captions changed since you started editing. Reset to the latest captions before saving.", latestCaptions: current.captions, ...(trackingChange ? { latestTracking } : {}) };
     }
     if (trackingChange) await updateCampaign(slug, { captions, tracking: trackingChange.tracking }, { by: auditActor(operator) });
     else await updateCampaignCaptions(slug, captions, { by: auditActor(operator) });

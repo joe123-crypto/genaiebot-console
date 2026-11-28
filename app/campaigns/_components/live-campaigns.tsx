@@ -22,7 +22,10 @@ export function LiveCampaigns({ initial, initialError, filter: initialFilter, wr
     {/* Only once a payload has arrived: with no `writes` yet the gate reports an older bot,
         which would be a wrong reason to show beside a plain connection failure. */}
     {writable && data.page && !deleteGate.allowed ? <div className="banner" role="status">Deleting campaigns is unavailable. {deleteGate.reason}</div> : null}
-    {(data.page?.deletions ?? []).map(deletion => <div className="banner" role="status" key={deletion.slug}>{deletion.name} deleted. {deletion.cleanup === "complete" ? "Cleanup complete." : "Cleanup is pending; the bot retries automatically."} {deletion.detail}</div>)}
+    {/* The bot keeps a deletion's record for good, so a finished one would be
+        a banner forever. Only cleanup still being retried needs saying. */}
+    {(data.page?.deletions ?? []).filter(deletion => deletion.cleanup === "pending").map(deletion =>
+      <div className="banner" role="status" key={deletion.slug}>{deletion.name} deleted. Cleanup is pending; the bot retries automatically. {deletion.detail}</div>)}
     </div>
     <CampaignsTable scrollRef={scrollRoot} endRef={end} campaigns={data.rows} initialFilter={initialFilter} writesEnabled={writable}
       switchGate={canWrite(writable, writes, "campaigns", "enabled")} deleteGate={deleteGate}

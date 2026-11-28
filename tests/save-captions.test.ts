@@ -3,17 +3,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const update = vi.fn();
 const preview = vi.fn();
+const campaignPayload = vi.fn();
 const updateFields = vi.fn();
 const capabilities = vi.fn();
 const revalidate = vi.fn();
 async function load(writes = true) {
-  vi.resetModules(); update.mockReset(); updateFields.mockReset(); capabilities.mockReset(); preview.mockReset(); revalidate.mockReset();
+  vi.resetModules(); update.mockReset(); updateFields.mockReset(); capabilities.mockReset(); preview.mockReset(); campaignPayload.mockReset(); revalidate.mockReset();
   capabilities.mockResolvedValue({ enabled: true, affectsProduction: true, fields: { campaigns: ["captions", "tracking"] }, delete: [] });
   preview.mockResolvedValue({ captions: ["Original"] });
+  campaignPayload.mockResolvedValue({ date: "2026-11-28", campaign: { slug: "sale", tracking: {} } });
   vi.doMock("@/src/config", () => ({ WRITES_ENABLED: writes }));
   vi.doMock("next/cache", () => ({ revalidatePath: revalidate }));
   vi.doMock("@/src/lib/bot-client", () => ({
-    updateCampaignCaptions: update, getCampaignPreview: preview, updateCampaign: updateFields, getCapabilities: capabilities,
+    updateCampaignCaptions: update, getCampaignPreview: preview, getCampaignPayload: campaignPayload, updateCampaign: updateFields, getCapabilities: capabilities,
     BotUnavailableError: class extends Error { detail = "write unavailable"; },
     WritesDisabledError: class extends Error { detail = "writes off"; },
   }));
@@ -78,11 +80,26 @@ it("writes captions and tracking together after checking the tracking baseline",
   expect(update).not.toHaveBeenCalled();
 });
 
+it("checks the tracking baseline against the campaign record, not the captions read that never carries it", async () => {
+  const save = await load();
+  const tracking = { prefix: "sale", number: "+26370000001" };
+  const next = { ...tracking, link_line: "📲 No data? Chat on WhatsApp: {direct_ref_link}" };
+  // What the bot really sends: the captions read reports empty tracking.
+  preview.mockResolvedValue({ captions: ["Original"], tracking: {} });
+  campaignPayload.mockResolvedValue({ date: "2026-11-28", campaign: { slug: "sale", tracking } });
+  expect(await save("sale", ["Original {direct_ref_link}"], ["Original"], { tracking: next, expectedTracking: tracking })).toEqual({ ok: true });
+  expect(campaignPayload).toHaveBeenCalledWith("sale", undefined, { fresh: true });
+  expect(updateFields).toHaveBeenCalledWith("sale", { captions: ["Original {direct_ref_link}"], tracking: next }, { by: TEST_ACTOR });
+});
+
 it("rejects concurrent tracking changes, invalid settings and unsupported bots without writing", async () => {
   const save = await load();
   const tracking = { prefix: "sale", number: "+26370000001" };
-  preview.mockResolvedValue({ captions: ["Original"], tracking });
-  expect(await save("sale", ["Edited"], ["Original"], { tracking, expectedTracking: {} })).toMatchObject({ ok: false, latestTracking: tracking });
+  campaignPayload.mockResolvedValue({ date: "2026-11-28", campaign: { slug: "sale", tracking } });
+  expect(await save("sale", ["Edited"], ["Original"], { tracking: { ...tracking, number: "+26370000002" }, expectedTracking: {} })).toMatchObject({ ok: false, latestTracking: tracking });
+  campaignPayload.mockResolvedValue({ date: "2026-11-28", campaign: null });
+  expect(await save("sale", ["Edited"], ["Original"], { tracking, expectedTracking: {} })).toMatchObject({ ok: false, detail: expect.stringContaining("tracking changed") });
+  campaignPayload.mockResolvedValue({ date: "2026-11-28", campaign: { slug: "sale", tracking: {} } });
   expect(await save("sale", ["Edited"], ["Original"], { tracking: { ...tracking, number: "123" }, expectedTracking: {} })).toMatchObject({ ok: false, detail: expect.stringContaining("international") });
   capabilities.mockResolvedValue({ enabled: true, affectsProduction: true, fields: { campaigns: ["captions"] }, delete: [] });
   expect(await save("sale", ["Edited"], ["Original"], { tracking, expectedTracking: tracking })).toMatchObject({ ok: false, detail: expect.stringContaining("does not accept") });
