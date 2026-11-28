@@ -334,8 +334,8 @@ a { color: inherit; text-decoration: none; }
   overflow: auto;
   overflow-wrap: anywhere;
 }
-.home-disclosure, .home-disclosure-panel { display: contents; }
-.home-disclosure > .home-disclosure-toggle { display: none; }
+.disclosure, .disclosure-panel { display: contents; }
+.disclosure > .disclosure-toggle { display: none; }
 
 /* --------------------------------------------------------- attention card -- */
 
@@ -1789,20 +1789,6 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .modal-error ul { margin: 6px 0 0; padding-left: 18px; }
 
 @media (max-width: 900px) {
-  .console-app { grid-template-columns: 1fr; }
-  .console-sidebar {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .console-nav { flex-direction: row; flex-wrap: wrap; }
-  .console-account { border-top: none; margin-left: auto; }
-  .attention-card { order: 99; width: 100%; }
-  .console-content { --content-pad-x: 16px; --content-pad-top: 20px; padding: 20px 16px 40px; }
   .group-details {
     position: sticky;
     left: 14px;
@@ -1811,25 +1797,32 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   }
 }
 
+/* Too narrow, or too short, for a column of navigation down the side: every
+   page puts the brand and a Menu button in a bar across the top instead, and
+   the nav, the operator and Sign out wait inside that button's panel. */
 @media (max-width: 1100px), (max-height: 740px) {
-  :is(.console-app-home, .console-app-campaigns) {
+  .console-app {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
-  :is(.console-app-home, .console-app-campaigns) > .console-sidebar {
+  .console-app > .console-sidebar {
     position: relative;
     z-index: 51;
     height: auto;
-    flex-flow: row nowrap;
+    flex-flow: row wrap;
     align-items: center;
     justify-content: space-between;
     padding: 8px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  :is(.console-app-home, .console-app-campaigns) .console-brand { padding: 0; }
-  :is(.console-app-home, .console-app-campaigns) .console-brand-mark { height: 30px; }
-  :is(.console-app-home, .console-app-campaigns) > .console-content { --content-pad-x: 16px; --content-pad-top: 12px; padding: 12px 16px; }
+  .console-brand { padding: 0; }
+  .console-brand-mark { height: 30px; }
+  /* The brand and the Menu button hold the two ends of the bar, so an attention
+     card takes a row of its own underneath rather than squeezing between them. */
+  .console-sidebar > .attention-card { order: 3; flex: 1 0 100%; }
+  .console-app > .console-content { --content-pad-x: 16px; --content-pad-top: 12px; padding: 12px 16px 40px; }
+  :is(.console-app-home, .console-app-campaigns) > .console-content { padding-block-end: 20px; }
   :is(.console-app-home, .console-app-campaigns) .page-head { margin-bottom: 10px; }
   .console-app-home > .console-content > .banner {
     max-block-size: min(5rem, 12dvh);
@@ -1837,14 +1830,14 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
     padding-block: 8px;
   }
 
-  .home-disclosure { display: block; position: relative; }
-  .home-disclosure > .home-disclosure-toggle { display: inline-flex; }
-  .home-disclosure-panel { display: none; }
-  .home-disclosure[data-open] > .home-disclosure-panel {
+  .disclosure { display: block; position: relative; }
+  .disclosure > .disclosure-toggle { display: inline-flex; }
+  .disclosure-panel { display: none; }
+  .disclosure[data-open] > .disclosure-panel {
     position: absolute;
     top: calc(100% + 6px);
     display: block;
-    max-block-size: min(28rem, 60dvh, var(--home-panel-space, 100dvh));
+    max-block-size: min(28rem, 60dvh, var(--disclosure-space, 100dvh));
     overflow: auto;
     overscroll-behavior: contain;
     padding: 10px;
@@ -1853,14 +1846,14 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
     background: var(--surface);
     box-shadow: var(--shadow-pop);
   }
-  .home-disclosure-panel:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-  .home-menu > .home-disclosure-panel { inset-inline-end: 0; width: min(22rem, calc(100vw - 32px)); }
-  .home-menu .console-nav { flex-flow: column nowrap; }
-  .home-menu .console-account { margin: 10px 0 0; border-top: 1px solid var(--border); }
+  .disclosure-panel:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  .console-menu > .disclosure-panel { inset-inline-end: 0; width: min(22rem, calc(100vw - 32px)); }
+  .console-menu .console-nav { flex-flow: column nowrap; }
+  .console-menu .console-account { margin: 10px 0 0; border-top: 1px solid var(--border); }
 
   .home-summary { margin-bottom: 12px; }
   .home-summary[data-open] { z-index: 50; }
-  .home-summary > .home-disclosure-panel { inset-inline-start: 0; width: min(36rem, 100%); }
+  .home-summary > .disclosure-panel { inset-inline-start: 0; width: min(36rem, 100%); }
   .home-summary .schedule-summary { flex-direction: column; gap: 10px; margin: 0; }
   .home-summary .schedule-summary > .banner { flex: none; order: 1; }
   .home-summary .schedule-counts { flex: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
@@ -2699,3 +2692,59 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .console-sign-out .btn { width: 100%; }
 .console-sign-out p { color: var(--danger-ink); font-size: 12px; overflow-wrap: anywhere; }
 .console-account-name, .console-account-meta { overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------- phones ----- */
+/* A phone scrolls the page, not a pane inside it. The fixed-height shells
+   above trap the timeline and the tables in small scrollers, clip banners to a
+   fraction of the viewport, and fight the browser's own collapsing chrome, so
+   here every pane grows to its content and the document carries the scroll.
+   Only sideways overflow stays with the pane: the timeline canvas and the wide
+   tables are wider than a phone and must not drag the page with them.
+   Keep this width in step with MOBILE_LAYOUT_QUERY in use-mobile-layout.tsx:
+   the live lists read it to decide what their "load more" observer watches. */
+@media (max-width: 760px) {
+  /* Plain blocks rather than a grid: a sticky grid item is clamped to its own
+     grid area, which is exactly its own height here, so the bar would never
+     actually pin. In normal flow it pins against the page, in every engine. */
+  .console-app, .console-app-home, .console-app-campaigns {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  /* Navigation stays one tap away however far down the page you are. */
+  .console-app > .console-sidebar {
+    position: sticky;
+    top: 0;
+    height: auto;
+  }
+  :is(.console-app-home, .console-app-campaigns) > .console-content {
+    display: block;
+    padding-block-end: 40px;
+  }
+
+  /* Home: the day timeline. */
+  .day-timeline, .timeline-body, .timeline-scroll { flex: none; }
+  .timeline-scroll { overscroll-behavior-x: contain; overscroll-behavior-y: auto; }
+  .console-app-home > .console-content > .banner, .timeline-feedback {
+    max-block-size: none;
+    overflow: visible;
+  }
+
+  /* Campaigns: the list. */
+  .campaigns-viewport, .campaigns-viewport > .campaigns-table { flex: none; overflow: visible; }
+  .campaigns-viewport .table-wrap { flex: none; overscroll-behavior-x: contain; overscroll-behavior-y: auto; }
+  .campaigns-notices { max-block-size: none; overflow: visible; }
+
+  /* Groups: the inventories. */
+  .console-app-groups > .console-content > .live-groups,
+  .live-groups > .groups-results { flex: none; }
+  .groups-results > .groups-table-wrap { flex: none; overscroll-behavior-x: contain; overscroll-behavior-y: auto; }
+  .live-groups > .banner,
+  .groups-results > [role="alert"],
+  .groups-results > .groups-table-notice,
+  .groups-results .filter-summary > p:not([role]) {
+    max-height: none;
+    overflow: visible;
+  }
+}

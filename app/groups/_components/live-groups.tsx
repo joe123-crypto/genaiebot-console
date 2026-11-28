@@ -10,6 +10,7 @@ import type { DiscoveredGroup, Group, GroupMetrics } from "@/src/lib/types";
 import type { LiveMetrics, LivePage } from "@/src/lib/live-types";
 import { SyncNotice, useLivePage } from "@/app/_components/live-page";
 import { liveFetch, LoadMore, useDebounced, useLivePoll, useVisibleIds } from "@/app/_components/use-live";
+import { useMobileLayout } from "@/app/_components/use-mobile-layout";
 
 export function LiveGroups({ initial, initialError, filter: initialFilter, writable }: {
   initial: LivePage<Group> | null; initialError?: string; filter: GroupFilter; writable: boolean;
@@ -21,7 +22,11 @@ export function LiveGroups({ initial, initialError, filter: initialFilter, writa
   const [filter, setFilter] = useState(initialFilter);
   const q = useDebounced(filter.q, 300);
   const query = groupFilterQuery({ ...filter, q }).toString();
-  const groups = useLivePage("groups", initial, query, row => row.jid, groupsScroll, initialError, groupsScroll);
+  /* The table is laid out at full height on a phone and the page scrolls, so a
+     refresh there anchors against the window. The unassigned panel is an
+     overlay with its own height at every width, so it keeps its scroller. */
+  const groupsScroller = useMobileLayout() ? undefined : groupsScroll;
+  const groups = useLivePage("groups", initial, query, row => row.jid, groupsScroll, initialError, groupsScroller);
   const discovery = useLivePage<DiscoveredGroup>("discoveries", null, "", row => row.jid, discoveryScroll, undefined, discoveryScroll);
   const ids = useVisibleIds(root, [...groups.rows, ...discovery.rows].map(row => row.jid).join(","));
   const [metrics, setMetrics] = useState<Record<string, GroupMetrics>>({});

@@ -3,8 +3,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-/** The panel is inline in the desktop layout and opens on demand in compact Home. */
-export function HomeDisclosure({ className, label, children }: {
+/** The panel is inline in the desktop layout and opens on demand once the
+ *  layout is compact: the console menu on every page, the summary on Home. */
+export function Disclosure({ className, label, children }: {
   className: string; label: string; children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -19,7 +20,7 @@ export function HomeDisclosure({ className, label, children }: {
 
     const measure = () => {
       const available = window.innerHeight - element.getBoundingClientRect().top - 12;
-      element.style.setProperty("--home-panel-space", `${Math.max(0, available)}px`);
+      element.style.setProperty("--disclosure-space", `${Math.max(0, available)}px`);
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
@@ -29,11 +30,11 @@ export function HomeDisclosure({ className, label, children }: {
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
-      element.style.removeProperty("--home-panel-space");
+      element.style.removeProperty("--disclosure-space");
     };
   }, [open]);
 
-  return <div className={`home-disclosure ${className}`} data-open={open || undefined}
+  return <div className={`disclosure ${className}`} data-open={open || undefined}
     onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
     }}
@@ -43,9 +44,9 @@ export function HomeDisclosure({ className, label, children }: {
       setOpen(false);
       trigger.current.focus({ preventScroll: true });
     }}>
-    <button className="btn home-disclosure-toggle" type="button" ref={trigger}
+    <button className="btn disclosure-toggle" type="button" ref={trigger}
       aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>{label}</button>
-    <div className="home-disclosure-panel" id={panelId} ref={panel}
+    <div className="disclosure-panel" id={panelId} ref={panel}
       tabIndex={open ? 0 : undefined} role={open ? "group" : undefined} aria-label={open ? label : undefined}>
       {children}
     </div>
