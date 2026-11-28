@@ -7,7 +7,7 @@ import type { DaySlot } from "@/src/domains/schedule";
 import { campaignTitle, clockLabel, plural, worstCaseRunSeconds } from "@/src/lib/format";
 import { botMinutes, displayClock, displayTimelineClock, zoneShiftMinutes } from "@/src/lib/timezone";
 import { useDisplayTimezone } from "@/app/_components/timezone-context";
-import { HomeDisclosure } from "@/app/_components/home-disclosure";
+import { Disclosure } from "@/app/_components/disclosure";
 import { CalendarCheck, CalendarOff, CheckCircle2, ClipboardPaste, Copy, Pause, Play, Trash2, X } from "lucide-react";
 import { notifyLiveChange } from "@/app/_components/use-live";
 import { saveScheduleAction, saveScheduleEntriesAction } from "@/app/schedule/actions";
@@ -356,7 +356,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
   }
 
   return <>
-    <HomeDisclosure className="home-summary" label={`Summary · ${plural(found.length, "warning")}`}>
+    <Disclosure className="home-summary" label={`Summary · ${plural(found.length, "warning")}`}>
       <div className="schedule-summary">
         {overlapWarnings.length > 0
           ? <div className="banner schedule-overlap" ref={warningCard}>
@@ -380,7 +380,7 @@ export function EntryTimeline({ slots: serverSlots, nowMinutes, timezone, date, 
               <span><strong>No overlaps.</strong> Every run finishes before the next one on its line starts.</span></div>}
         {summary}
       </div>
-    </HomeDisclosure>
+    </Disclosure>
     <section className="card day-timeline" ref={timelineCard} aria-labelledby="day-timeline-title">
       <div className="card-head"><h2 className="card-title" id="day-timeline-title">Day timeline</h2>
         <div className="timeline-actions">{draft && <button type="button" className="btn" onClick={reset} disabled={locked}>Reset</button>}

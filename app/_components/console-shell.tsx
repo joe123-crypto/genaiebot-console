@@ -6,13 +6,14 @@ import { PRODUCT_NAME } from "@/src/config";
 import type { Attention } from "@/src/domains/console";
 import { ConsoleNav, type NavCounts } from "@/app/_components/console-nav";
 import { AutoRefresh } from "@/app/_components/auto-refresh";
-import { HomeDisclosure } from "@/app/_components/home-disclosure";
+import { Disclosure } from "@/app/_components/disclosure";
 import { SignOut } from "./sign-out";
 
 /**
  * The console frame: a fixed sidebar carrying the brand, an attention card that
  * only appears when the bot needs something, the section nav, and the operator;
- * everything else renders to the right.
+ * everything else renders to the right. Narrow or short, the sidebar becomes a
+ * bar across the top and the nav waits behind its Menu button.
  */
 export function ConsoleShell({
   children,
@@ -89,7 +90,9 @@ export function ConsoleShell({
           </div>
         ) : null}
 
-        {homeLayout || campaignsLayout || groupsLayout ? <HomeDisclosure className="home-menu" label="Menu">{navigation}</HomeDisclosure> : navigation}
+        {/* Every page collapses to the same bar once the layout is compact; wider
+            than that the disclosure is display: contents and this is the sidebar. */}
+        <Disclosure className="console-menu" label="Menu">{navigation}</Disclosure>
       </aside>
 
       <section className="console-content">{children}</section>
