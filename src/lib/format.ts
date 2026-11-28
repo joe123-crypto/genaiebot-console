@@ -48,6 +48,13 @@ export function campaignLabel(campaign: { slug: string; name: string; source: "g
   return campaign.source === "console" ? campaign.name : campaignTitle(campaign.slug);
 }
 
+/** The one letter an avatar shows. A Google account always has a name, but
+ *  `operatorFromToken` falls back to the address when the token carries none,
+ *  and a name that is only spaces must still leave something to draw. */
+export function avatarInitial(name: string) {
+  return name.trim().charAt(0).toUpperCase() || "?";
+}
+
 export function plural(count: number, one: string, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
 }

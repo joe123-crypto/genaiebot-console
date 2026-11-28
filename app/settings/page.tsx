@@ -4,12 +4,10 @@ import { NoBotYet } from "@/app/_components/no-bot-yet";
 import { Shell } from "@/app/_components/shell-wrapper";
 import type { ReactNode } from "react";
 import { BotError, Empty, PageHead, Section } from "@/app/_components/ui";
-import { SettingsGroup } from "@/app/settings/_components/settings-group";
+import { SettingsGroup } from "@/app/_components/settings-group";
 import { CapSettingsForm } from "@/app/settings/_components/cap-settings-form";
 import { DisplayTimezoneForm } from "@/app/settings/_components/display-timezone-form";
 import { AppearanceForm } from "@/app/settings/_components/appearance-form";
-import { DeleteAccountCard } from "@/app/settings/_components/delete-account-card";
-import { botRemovalOf } from "@/src/lib/bot-teardown";
 import { getLiveView } from "@/src/lib/live-client";
 import type { ConfigurationPayload } from "@/src/lib/bot-client";
 import { BotUnavailableError } from "@/src/lib/bot-client";
@@ -20,16 +18,16 @@ import { displayTheme } from "@/src/lib/display-theme";
 
 export const dynamic = "force-dynamic";
 
-const SUBTITLE = "How the console looks to you, how many adverts each group gets, and your account.";
+const SUBTITLE = "How the console looks to you, and how many adverts each group gets.";
 
 const DISPLAY_NOTE = `What you see in this browser. Campaigns still go out on ${BOT_TIMEZONE} time, and your other devices keep their own choice.`;
 const CAPS_NOTE = "How many adverts each group gets a day. A group's tier sets its range, and when more campaigns target it than it allows, they take turns.";
-const ACCOUNT_NOTE = (email: string) => <>Signed in as <strong>{email}</strong>.</>;
 
 export default async function SettingsPage() {
-  const operator = await requireOperator();
+  // Kept first, and bare: every page must deny an unauthenticated request
+  // before it reads anything (tests/auth-coverage).
+  await requireOperator();
   const workspace = await requireWorkspace();
-  const botRemoval = await botRemovalOf(workspace);
   const zone = await displayTimezone();
   const theme = await displayTheme();
 
@@ -46,15 +44,12 @@ export default async function SettingsPage() {
           </Section>
         </SettingsGroup>
         <SettingsGroup id="caps" title="Daily caps" description={CAPS_NOTE}>{caps}</SettingsGroup>
-        <SettingsGroup id="account" title="Account" description={ACCOUNT_NOTE(operator.email)}>
-          <DeleteAccountCard email={operator.email} bot={botRemoval} />
-        </SettingsGroup>
       </div>
     </Shell>
   );
 
-  // Without a bot there are no caps to set, but the console's own settings and
-  // deleting the account are still this user's to use.
+  // Without a bot there are no caps to set, but the console's own settings
+  // are still this user's to use.
   if (!hasBot(workspace)) {
     return page(<NoBotYet title="No bot yet">How many adverts each group gets a day is a setting of your bot. Create it to set these.</NoBotYet>, false);
   }

@@ -5,7 +5,7 @@ import { PageHead } from "@/app/_components/ui";
 import { hasBot, requireWorkspace } from "@/src/lib/workspace";
 import { BOT_PROVISIONING } from "@/src/config";
 import { CreateBot } from "./create-bot";
-import { DeleteAccountCard } from "@/app/settings/_components/delete-account-card";
+import { DeleteAccountCard } from "@/app/_components/delete-account-card";
 import { botRemovalOf } from "@/src/lib/bot-teardown";
 
 export const dynamic = "force-dynamic";

@@ -104,7 +104,8 @@ describe("getWorkspace", () => {
     store.set("workspaces/wk-alice1", { name: "Alice's", ownerUid: ALICE.uid, bot: { baseUrl: "https://alice-bot.example" } });
     as(ALICE);
     expect(await getWorkspace()).toEqual({ id: "wk-alice1", name: "Alice's", ownerUid: ALICE.uid,
-                                           bot: { baseUrl: "https://alice-bot.example" }, onboarding: "done" });
+                                           bot: { baseUrl: "https://alice-bot.example" }, onboarding: "done",
+                                           createdAt: null });
     expect([...store.keys()].filter((key) => key.startsWith("workspaces/"))).toEqual(["workspaces/wk-alice1"]);
   });
 

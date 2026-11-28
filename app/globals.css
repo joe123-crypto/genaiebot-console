@@ -281,14 +281,40 @@ a { color: inherit; text-decoration: none; }
   color: var(--text-inverse);
 }
 
+/* The operator chip. It is the way to /account, so the avatar and the two
+   lines of identity are one target; the live-updates line underneath is a
+   status region and stays outside the link, where a screen reader would
+   otherwise read it out as part of the link's name. */
 .console-account {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
   padding: 10px 8px 2px;
   border-top: 1px solid var(--border);
   margin-top: auto;
 }
+
+.console-account-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 -6px;
+  padding: 6px;
+  border-radius: 10px;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+.console-account-link:hover { background: var(--surface-muted); }
+.console-account-link:hover .console-account-meta { color: var(--text-muted); }
+.console-account-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Not the nav item's filled blue: a solid chip at the foot of the sidebar
+   would out-shout the lit section above it. A tint and a ring instead. */
+.console-account-link[aria-current="page"] {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+}
+.console-account-link[aria-current="page"] .console-account-name { color: var(--primary-ink); }
+.console-account-identity { display: flex; flex-direction: column; min-width: 0; }
 
 .console-avatar {
   display: grid;
@@ -304,7 +330,7 @@ a { color: inherit; text-decoration: none; }
 
 .console-account-name { font-weight: 600; font-size: 13px; }
 .console-account-meta { color: var(--text-faint); font-size: 12px; }
-.console-refresh { display: block; color: var(--text-faint); font-size: 11px; margin-top: 4px; }
+.console-refresh { display: block; color: var(--text-faint); font-size: 11px; margin: 2px 6px 4px; }
 
 .console-content {
   min-width: 0;
@@ -1849,7 +1875,8 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .disclosure-panel:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
   .console-menu > .disclosure-panel { inset-inline-end: 0; width: min(22rem, calc(100vw - 32px)); }
   .console-menu .console-nav { flex-flow: column nowrap; }
-  .console-menu .console-account { margin: 10px 0 0; border-top: 1px solid var(--border); }
+  .console-menu .console-account { margin: 10px 0 0; padding: 10px 2px 2px; border-top: 1px solid var(--border); }
+  .console-menu .console-account-link { margin-inline: 0; }
 
   .home-summary { margin-bottom: 12px; }
   .home-summary[data-open] { z-index: 50; }
@@ -2088,7 +2115,7 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .campaign-switch { display: inline-flex; align-items: center; gap: 6px; }
 .account-config { border-top: 1px solid var(--border); padding-top: 12px; }
 
-/* Settings: bands, each with what it is about on the left -- held in place
+/* Settings and Account: bands, each with what it is about on the left -- held in place
    while its cards scroll past -- and nothing but rows of controls on the
    right. The eye runs down the names on the left and the values on the far
    right, the way a settings screen is scanned. Below 1100px the sidebar
@@ -2338,6 +2365,86 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
   .theme-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cap-tiers { grid-template-columns: minmax(0, 1fr); }
   .settings-danger .setting-control .btn { width: 100%; }
+}
+
+/* -------------------------------------------------------- account page ---- */
+
+/* Who you are and where that puts you, said once at full size above the bands
+   that then say it row by row. The .account-toolbar/-button/-stats rules
+   further up this file belong to the WhatsApp lines manager and share nothing
+   with these; everything here is prefixed .account-hero or .account-fact. */
+.account-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 4px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+/* The same monogram as the sidebar chip and the wizard's header, at the size
+   a page's own heading can carry. */
+.account-hero-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  color: var(--text-inverse);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.account-hero-who { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.account-hero-name { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+.account-hero-email { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.account-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* The values read down the right-hand edge, the way the Settings controls do. */
+.account-fact-value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 13.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.account-fact-value time { font-variant-numeric: tabular-nums; }
+
+/* An id or an address: the thing itself, not prose about it. Darker than
+   .cell-mono, which is deliberately faint because a table says it twice --
+   here it is the only copy there is. */
+.account-fact-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.setting-hint .account-fact-ref { font-size: 11.5px; color: var(--text-muted); }
+
+.account-sign-out { flex-wrap: wrap; gap: 8px; }
+.account-sign-out p { margin: 0; color: var(--danger-ink); font-size: 12px; overflow-wrap: anywhere; }
+
+/* Stacks with .setting-row, which it sits above: a vertical hero over
+   still-two-column rows would read as two different pages. */
+@media (max-width: 640px) {
+  .account-hero { flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; }
+  .account-fact-value { justify-content: flex-start; text-align: left; }
 }
 
 /* A campaign's click counts: the total first, the per-group breakdown on demand. */
@@ -2691,7 +2798,11 @@ table.data .group-selection-cell { width: 1%; text-align: center; }
 .console-sign-out { padding: 0 16px 16px; }
 .console-sign-out .btn { width: 100%; }
 .console-sign-out p { color: var(--danger-ink); font-size: 12px; overflow-wrap: anywhere; }
-.console-account-name, .console-account-meta { overflow-wrap: anywhere; }
+.console-account-name, .console-account-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ------------------------------------------------------------- phones ----- */
 /* A phone scrolls the page, not a pane inside it. The fixed-height shells
