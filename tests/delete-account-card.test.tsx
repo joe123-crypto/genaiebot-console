@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ mutate: vi.fn(), announce: vi.fn(), replace: vi.fn() }));
 vi.mock("@/src/lib/auth-browser", () => ({ authMutation: mocks.mutate, announceSignOut: mocks.announce }));
 
-import { DeleteAccountCard } from "@/app/settings/_components/delete-account-card";
+import { DeleteAccountCard } from "@/app/_components/delete-account-card";
 
 const EMAIL = "operator@example.com";
 const open = () => fireEvent.click(screen.getByRole("button", { name: "Delete account" }));

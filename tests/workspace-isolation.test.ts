@@ -71,7 +71,8 @@ const props = () => ({ params: Promise.resolve({ slug: "demo", variant: "1" }), 
 type Page = { default: (...args: unknown[]) => unknown };
 /** The pages in the nav: with no bot they show their own empty state. */
 const NAV_PAGES = ["../app/page.tsx", "../app/groups/page.tsx", "../app/campaigns/page.tsx",
-  "../app/customer-bot/page.tsx", "../app/lines/page.tsx", "../app/settings/page.tsx", "../app/setup/page.tsx"];
+  "../app/customer-bot/page.tsx", "../app/lines/page.tsx", "../app/settings/page.tsx", "../app/setup/page.tsx",
+  "../app/account/page.tsx"];
 
 describe("a new workspace is in onboarding", () => {
   for (const [path, load] of Object.entries(pages)) {

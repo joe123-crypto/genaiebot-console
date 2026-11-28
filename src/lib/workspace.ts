@@ -50,6 +50,11 @@ export type Workspace = {
   ownerUid: string;
   bot: { baseUrl: string } | null;
   onboarding: OnboardingStatus;
+  /** When the workspace was made, which is when its owner signed up: the two
+   *  are written in one transaction. Null on a workspace registered before
+   *  this was recorded, and absent on a Workspace built from anything but the
+   *  registry -- a fleet row has no such date to give. */
+  createdAt?: string | null;
 };
 export type BotTarget = { baseUrl: string; token: string; workspaceId: string };
 
@@ -111,6 +116,22 @@ export function canAccess(workspace: Pick<Workspace, "ownerUid">, uid: string): 
   return workspace.ownerUid === uid;
 }
 
+/**
+ * A registry date as an ISO string. Every one is written with
+ * `FieldValue.serverTimestamp()`, so it comes back as a Firestore Timestamp;
+ * a document older than the field it is read from simply has none, and a date
+ * nobody recorded is never guessed at.
+ */
+export function registryDate(value: unknown): string | null {
+  try {
+    const at = value instanceof Date ? value
+      : value && typeof value === "object" && typeof (value as { toDate?: unknown }).toDate === "function"
+        ? (value as { toDate: () => Date }).toDate()
+        : null;
+    return at && Number.isFinite(at.getTime()) ? at.toISOString() : null;
+  } catch { return null; }
+}
+
 function parseWorkspace(id: string, data: DocumentData | undefined): Workspace {
   if (!data || typeof data.ownerUid !== "string") throw new WorkspaceUnavailableError();
   const bot = data.bot && typeof data.bot === "object" ? botOrigin(data.bot.baseUrl) : null;
@@ -121,6 +142,7 @@ function parseWorkspace(id: string, data: DocumentData | undefined): Workspace {
     name: typeof data.name === "string" && data.name.trim() ? data.name : "Workspace",
     bot: bot ? { baseUrl: bot } : null,
     onboarding: onboardingOf(data.onboarding, Boolean(bot)),
+    createdAt: registryDate(data.createdAt),
   };
 }
 

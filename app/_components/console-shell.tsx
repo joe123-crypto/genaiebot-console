@@ -8,6 +8,7 @@ import { ConsoleNav, type NavCounts } from "@/app/_components/console-nav";
 import { AutoRefresh } from "@/app/_components/auto-refresh";
 import { Disclosure } from "@/app/_components/disclosure";
 import { SignOut } from "./sign-out";
+import { AccountLink } from "./account-link";
 
 /**
  * The console frame: a fixed sidebar carrying the brand, an attention card that
@@ -32,17 +33,11 @@ export function ConsoleShell({
   campaignsLayout?: boolean;
   groupsLayout?: boolean;
 }) {
-  const initial = operator.name.trim().charAt(0).toUpperCase() || "?";
   const navigation = <>
     <ConsoleNav counts={counts} />
     <div className="console-account">
-      <span className="console-avatar" aria-hidden>{initial}</span>
-      <span>
-        <span className="console-account-name">{operator.name}</span>
-        <br />
-        <span className="console-account-meta">{operator.meta}</span>
-        <AutoRefresh />
-      </span>
+      <AccountLink name={operator.name} meta={operator.meta} />
+      <AutoRefresh />
     </div>
     <SignOut />
   </>;
